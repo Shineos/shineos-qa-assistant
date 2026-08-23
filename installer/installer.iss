@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.45"
+#define MyAppVersion "1.0.46"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -72,6 +72,7 @@ Source: "..\tools\mcpo\requirements.txt"; DestDir: "{app}\tools\mcpo"; Flags: ig
 Source: "..\scripts\start_openwebui.bat";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\configure_model.ps1";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\setup_knowledge.ps1";  DestDir: "{app}";       Flags: ignoreversion
+Source: "..\scripts\patch_openwebui_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion
 ; WebView2 ラッパーアプリ（URL入力不要・閉じたらサービス停止）
@@ -94,6 +95,7 @@ Type: filesandordirs; Name: "{app}\knowledge"
 Type: files; Name: "{app}\install.log"
 Type: files; Name: "{app}\configure_model.ps1"
 Type: files; Name: "{app}\setup_knowledge.ps1"
+Type: filesandordirs; Name: "{app}\scripts"
 Type: files; Name: "{userdesktop}\ShineosQA-はじめに.txt"
 
 [Code]
@@ -346,6 +348,15 @@ begin
       ProgressPage.Show;
 
       ProgressPage.SetText('Windowsサービスを登録中...', '');
+
+      { モデル一覧の最適化: ベースモデル（bge-m3/qwen2.5:3b）を一覧から除外するパッチを適用 }
+      { （冪等スクリプト。Open WebUI 0.11.0 に非表示機能が無いため、サービス起動前に適用する） }
+      ProgressPage.SetText('モデル一覧を最適化しています...', '');
+      if Exec('"' + AppDir + '\venv\Scripts\python.exe"', '"' + AppDir + '\scripts\patch_openwebui_models.py"', '', SW_HIDE, ewWaitUntilTerminated, RC) then
+        if RC <> 0 then
+          MsgBox('モデル一覧の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
+                 'チャットのモデル一覧に不要なモデルが表示されることがあります。', mbInformation, MB_OK);
+
       Ready := RunPowerShell('register_service.ps1', '-AppDir "' + AppDir + '" -Model "' + SelectedModel + '" -Port ' + IntToStr(SelectedPort), RC) and (RC = 0);
       if not Ready then
       begin

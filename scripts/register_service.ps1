@@ -82,7 +82,10 @@ $envs = @(
     '"BYPASS_WEB_SEARCH_WEB_LOADER=True"',
     '"ENABLE_NOTES=False"',
     '"ENABLE_VERSION_UPDATE_CHECK=False"',
-    '"WEBUI_NAME=Shineos社内知恵袋"'
+    '"WEBUI_NAME=Shineos社内知恵袋"',
+    # モデル一覧に表示しないモデル（bge-m3:latest は埋め込み用・qwen2.5:3b はカスタムモデルの土台。
+    # patch_openwebui_models.py が /api/models から除外する → チャット一覧はプリセット3つのみ表示）
+    '"OLLAMA_HIDDEN_MODELS=bge-m3:latest;qwen2.5:3b"'
 )
 Log 'nssm set AppEnvironmentExtra'
 & $nssm set $svc AppEnvironmentExtra $envs | Out-Null

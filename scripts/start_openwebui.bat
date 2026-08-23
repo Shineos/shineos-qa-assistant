@@ -31,6 +31,9 @@ set "BYPASS_WEB_SEARCH_WEB_LOADER=True"
 rem モデルが「回答をノートに書く」（write_note）関数呼び出しを選び、
 rem チャットに回答が表示されなくなる問題を防ぐため Notes 機能を無効化
 set "ENABLE_NOTES=False"
+rem モデル一覧に表示しないモデル（埋め込み用 bge-m3・カスタムモデルの土台 qwen2.5:3b）
+rem 効かせるには scripts\patch_openwebui_models.py の適用が必要（インストーラが自動適用済み）
+set "OLLAMA_HIDDEN_MODELS=bge-m3:latest;qwen2.5:3b"
 
 echo Starting 社内知恵袋 (Open WebUI)...
 echo Open http://localhost:8080 in your browser after the server is up.
