@@ -40,6 +40,8 @@ namespace ShineosQA
         readonly TextBlock overlayMessage;
         readonly Button retryButton;
         readonly string firstRunFile;
+        readonly string appLogFile;
+        readonly string userDataDir;
         bool closing;
 
         public MainWindow()
@@ -58,12 +60,16 @@ namespace ShineosQA
             }
             catch { }
             Port = port;
-            // 初回起動ガイドのフラグファイル（{app}\app 配下。アンインストール時に削除される）
-            firstRunFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "first_run.txt");
-            // ?lang=ja-JP で Open WebUI の UI を日本語表示にする
-            // （ブラウザ言語の自動検出を上書きして確実に日本語を表示する）
-            AppUrl = "http://localhost:" + Port + "/?lang=ja-JP";
-            HealthUrl = "http://localhost:" + Port + "/health";
+            // ユーザーごとのデータフォルダ（Program Files 配下は一般ユーザーが書き込めないため）
+            // 初回起動ガイドのフラグ・アプリログをここに保存する
+            userDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShineosQA");
+            try { Directory.CreateDirectory(userDataDir); } catch { }
+            firstRunFile = Path.Combine(userDataDir, "first_run.txt");
+            appLogFile = Path.Combine(userDataDir, "app.log");
+            // 127.0.0.1 を明示指定する（localhost は ::1（IPv6）が優先解決され、
+            // Open WebUI（IPv4 のみで LISTEN）に接続できないため）
+            AppUrl = "http://127.0.0.1:" + Port + "/?lang=ja-JP";
+            HealthUrl = "http://127.0.0.1:" + Port + "/health";
 
             Title = "社内知恵袋";
             Width = 1200;
@@ -335,8 +341,8 @@ namespace ShineosQA
         {
             try
             {
-                string f = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.log");
-                File.AppendAllText(f, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + msg + Environment.NewLine);
+                // Program Files 配下は一般ユーザーが書き込めないため %APPDATA%\ShineosQA に保存
+                File.AppendAllText(appLogFile, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " " + msg + Environment.NewLine);
             }
             catch { }
         }
