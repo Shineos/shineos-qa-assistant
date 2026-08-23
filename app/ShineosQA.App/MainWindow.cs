@@ -548,6 +548,26 @@ namespace ShineosQA
             try { Directory.CreateDirectory(wvDataDir); } catch { }
             var wvEnv = await CoreWebView2Environment.CreateAsync(null, wvDataDir);
             await webView.EnsureCoreWebView2Async(wvEnv);
+            // 「新機能（What's New）」ダイアログを非表示にする
+            // （初回表示の抑制: localStorage に「見たバージョン」を記録し、
+            //   表示された場合も自動で閉じる）
+            webView.NavigationCompleted += async (s, e) =>
+            {
+                try
+                {
+                    await webView.ExecuteScriptAsync(
+                        "(function(){" +
+                        "try{var ks=['whatsNewSeenVersion','whats-new-seen-version','whatsNewVersion','whats-new-version','whatsNew','whats-new','whatsNewSeen'];ks.forEach(function(k){if(localStorage.getItem(k)===null)localStorage.setItem(k,'0.11.0');});}catch(e){}" +
+                        "function closeDlg(){" +
+                        "var bs=document.querySelectorAll('button');for(var i=0;i<bs.length;i++){var b=bs[i];var t=(b.textContent||'').trim();var a=b.getAttribute('aria-label')||'';if(t==='Got it'||t==='OK'||t==='Close'||t==='閉じる'||t==='了解'||a==='Close'){b.click();}}" +
+                        "var ms=document.querySelectorAll('[role=\"dialog\"][class*=\"modal\"], [role=\"dialog\"][class*=\"Modal\"]');for(var j=0;j<ms.length;j++){var m=ms[j];if(m&&m.parentNode&&(m.textContent||'').indexOf('What')>-1)m.remove();}" +
+                        "}" +
+                        "closeDlg();" +
+                        "var ob=new MutationObserver(closeDlg);ob.observe(document.body,{childList:true,subtree:true});setTimeout(function(){ob.disconnect();},30000);" +
+                        "})();");
+                }
+                catch { }
+            };
             webView.Source = new Uri(AppUrl);
         }
 
