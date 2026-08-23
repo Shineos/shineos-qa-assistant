@@ -63,8 +63,9 @@ $envs = @(
     '"DEFAULT_MODELS=社内知恵袋"',
     '"RAG_EMBEDDING_ENGINE=ollama"',
     '"RAG_EMBEDDING_MODEL=bge-m3"',
-    '"CHUNK_SIZE=500"',
-    '"CHUNK_OVERLAP=50"',
+    # チャンク 300: 情報密度を上げ、スモールモデルが扱いやすい単位にする（500→300）
+    '"CHUNK_SIZE=300"',
+    '"CHUNK_OVERLAP=30"',
     '"RAG_TOP_K=3"',
     # embedding は直列処理（同期）にする。非同期だとローカル（Ollama）でキューが詰まり
     # ナレッジ登録が停滞するため（初回起動時の PersistentConfig）

@@ -14,8 +14,9 @@ rem ツール無効化済みで「応答なし」を防ぐ。素のモデルタ�
 set "DEFAULT_MODELS=社内知恵袋"
 set "RAG_EMBEDDING_ENGINE=ollama"
 set "RAG_EMBEDDING_MODEL=bge-m3"
-set "CHUNK_SIZE=500"
-set "CHUNK_OVERLAP=50"
+rem チャンク 300: 情報密度を上げ、スモールモデルが扱いやすい単位にする
+set "CHUNK_SIZE=300"
+set "CHUNK_OVERLAP=30"
 set "RAG_TOP_K=3"
 rem embedding は直列処理（同期）: 非同期だとローカルでキューが詰まりナレッジ登録が停滞する
 set "ENABLE_ASYNC_EMBEDDING=False"
