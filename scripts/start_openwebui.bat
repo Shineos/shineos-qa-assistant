@@ -22,7 +22,8 @@ set "ENABLE_ASYNC_EMBEDDING=False"
 rem ハイブリッド検索（BM25 + ベクトル）: 型番・規程番号・固有名詞を漏らさずヒットさせる
 set "ENABLE_RAG_HYBRID_SEARCH=True"
 set "HYBRID_BM25_WEIGHT=0.5"
-set "ENABLE_WEB_SEARCH=True"
+rem Web 検索は既定 OFF（ON にすると質問内容が外部の検索サービスに送信されるため）
+set "ENABLE_WEB_SEARCH=False"
 set "WEB_SEARCH_ENGINE=duckduckgo"
 set "BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL=True"
 set "BYPASS_WEB_SEARCH_WEB_LOADER=True"

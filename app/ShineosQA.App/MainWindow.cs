@@ -193,6 +193,17 @@ namespace ShineosQA
                 "画面左の「ナレッジ」メニューから、PDF やマニュアルをドラッグ＆ドロップで追加できます。");
             AddGuideStep(guideCenter, "3", "モデルを切り替える",
                 "画面右上のモデル選択で「経費精算ガイド」「ITヘルプデスク」に切り替えられます。");
+            // Web 検索の注意（社内情報の外部送信を防ぐための初回警告）
+            guideCenter.Children.Add(new TextBlock
+            {
+                Text = "※ Web 検索は最初は OFF になっています。ON にすると、入力した質問が外部の検索サービスに送信されます。社内情報を質問するときは OFF のままにしてください。",
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(0xB0, 0x5A, 0x00)),
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 12, 0, 0)
+            });
             // 次回からガイドを表示しないためのチェックボックス（チェック時のみフラグを作成）
             var guideCheckbox = new CheckBox
             {
@@ -236,7 +247,7 @@ namespace ShineosQA
             root.Children.Add(webView);
             Content = root;
 
-            Loaded += async (s, e) => { try { await Startup(); } catch (Exception ex) { ShowError("起動に失敗しました: " + ex.Message, true); } };
+            Loaded += async (s, e) => { try { await Startup(); } catch (Exception ex) { Log("startup exception: " + ex.Message); ShowError("起動できませんでした。\n\nしばらく待ってから「再試行」を押してください。\n解決しない場合は、管理者にご相談ください。", true); } };
             Closed += (s, e) => StopService();
             Application.Current.SessionEnding += (s, e) => { closing = true; };
         }
@@ -479,8 +490,7 @@ namespace ShineosQA
             Log("port " + Port + " owner pid=" + owner + " (service pid=" + svcPid + ")");
             if (owner != 0 && !(svcPid != 0 && IsDescendantOf(owner, svcPid)))
             {
-                ShowError("ポート " + Port + " が他のアプリ（PID " + owner + "）で使用されています。\n\n" +
-                          "そのアプリを終了してから「再試行」を押してください。", true);
+                ShowError("起動できませんでした。\n\n別のアプリがこのツールの通信先を使用しています。\nそのアプリを終了してから「再試行」を押してください。", true);
                 return;
             }
 
@@ -504,7 +514,7 @@ namespace ShineosQA
             bool ok = await Task.Run(() => WaitForHealth(240));
             if (!ok)
             {
-                ShowError("起動に失敗しました（サービスが応答しません）。\n\nログ: " + Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "logs", "openwebui.err.log"), true);
+                ShowError("起動できませんでした。\n\nしばらく待ってから「再試行」を押してください。\n解決しない場合は、管理者にご相談ください。", true);
                 return;
             }
 
@@ -514,8 +524,7 @@ namespace ShineosQA
 
             if (owner != 0 && !IsDescendantOf(owner, svcPid))
             {
-                ShowError("ポート " + Port + " が他のアプリ（PID " + owner + "）で使用されています。\n\n" +
-                          "そのアプリを終了してから「再試行」を押してください。", true);
+                ShowError("起動できませんでした。\n\n別のアプリがこのツールの通信先を使用しています。\nそのアプリを終了してから「再試行」を押してください。", true);
                 return;
             }
 

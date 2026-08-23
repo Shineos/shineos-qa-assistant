@@ -73,7 +73,9 @@ $envs = @(
     # 社内特有の型番・規程番号・固有名詞を漏らさずヒットさせる（初回起動時の PersistentConfig）
     '"ENABLE_RAG_HYBRID_SEARCH=True"',
     '"HYBRID_BM25_WEIGHT=0.5"',
-    '"ENABLE_WEB_SEARCH=True"',
+    # Web 検索は既定 OFF（社内Q&Aツールとして、ON にすると質問内容が外部の
+    # 検索サービスに送信されるため。必要な組織は管理画面から有効化する）
+    '"ENABLE_WEB_SEARCH=False"',
     '"WEB_SEARCH_ENGINE=duckduckgo"',
     '"BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL=True"',
     '"BYPASS_WEB_SEARCH_WEB_LOADER=True"',
