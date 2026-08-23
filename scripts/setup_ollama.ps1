@@ -167,7 +167,7 @@ function Set-OllamaTuning {
         'OLLAMA_MAX_LOADED_MODELS' = '1'    # LLM/埋め込みモデルの同時常駐を防ぎRAMを節約
         'OLLAMA_KV_CACHE_TYPE'     = 'q8_0' # KVキャッシュ量子化でメモリ約半減（品質影響ほぼなし）
         'OLLAMA_FLASH_ATTENTION'   = '1'    # 長文コンテキストの高速化（KV量子化の前提条件）
-        'OLLAMA_KEEP_ALIVE'        = '10m'  # モデルを10分常駐させ連続利用の応答を高速化
+        'OLLAMA_KEEP_ALIVE'        = '60m'  # モデルを1時間常駐させ、再ロード待ちによる応答遅延を防止
         'OLLAMA_NUM_PARALLEL'      = '1'    # 単一ユーザー用途。並列数を抑えてメモリを節約
     }
     Log 'applying Ollama performance tuning (env vars)'
