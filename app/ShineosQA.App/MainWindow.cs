@@ -20,6 +20,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 
 namespace ShineosQA
@@ -540,7 +541,13 @@ namespace ShineosQA
                 HideLoading();
             else
                 ShowGuide();
-            await webView.EnsureCoreWebView2Async(null);
+            // WebView2 のユーザーデータフォルダを明示指定する
+            // （既定では実行ファイルの隣（Program Files 配下）に作成しようとして
+            //   アクセス拒否 E_ACCESSDENIED になるため、%APPDATA%\ShineosQA\WebView2 を使う）
+            string wvDataDir = Path.Combine(userDataDir, "WebView2");
+            try { Directory.CreateDirectory(wvDataDir); } catch { }
+            var wvEnv = await CoreWebView2Environment.CreateAsync(null, wvDataDir);
+            await webView.EnsureCoreWebView2Async(wvEnv);
             webView.Source = new Uri(AppUrl);
         }
 
