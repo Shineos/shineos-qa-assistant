@@ -82,7 +82,7 @@ $envs = @(
     '"BYPASS_WEB_SEARCH_WEB_LOADER=True"',
     '"ENABLE_NOTES=False"',
     '"ENABLE_VERSION_UPDATE_CHECK=False"',
-    '"WEBUI_NAME=社内知恵袋"'
+    '"WEBUI_NAME=Shineos社内知恵袋"'
 )
 Log 'nssm set AppEnvironmentExtra'
 & $nssm set $svc AppEnvironmentExtra $envs | Out-Null
