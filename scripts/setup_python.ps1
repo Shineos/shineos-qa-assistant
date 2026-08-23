@@ -98,8 +98,13 @@ try {
         Progress 'downloading python 3.12.10 (portable)...'
         # -sS: 進捗メーターを抑制（PowerShell 5.1 は stderr 出力をエラー扱いし、
         # ユーザーに「エラー」と誤解させるため。エラー時のみ表示する）
-        & curl.exe -sS -L --fail --retry 3 --connect-timeout 30 -o $nupkg $url
-        if ($LASTEXITCODE -ne 0) { throw "python download failed (curl exit $LASTEXITCODE)" }
+        # -C -: 途中で切断された場合は続きから再開（レジューム）
+        # --retry-all-errors: 一時エラーでも自動再試行
+        & curl.exe -sS -L --fail -C - --retry 10 --retry-all-errors --retry-delay 5 --connect-timeout 30 -o $nupkg $url
+        if ($LASTEXITCODE -ne 0) {
+            Remove-Item $nupkg -Force -ErrorAction SilentlyContinue
+            throw "python download failed (curl exit $LASTEXITCODE)"
+        }
         $size = (Get-Item $nupkg).Length
         Log "downloaded: $([math]::Round($size / 1MB, 1)) MB"
         Progress "download complete: $([math]::Round($size / 1MB, 1)) MB"

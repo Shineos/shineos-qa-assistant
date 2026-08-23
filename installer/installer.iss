@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.38"
+#define MyAppVersion "1.0.39"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -100,7 +100,7 @@ Type: files; Name: "{userdesktop}\ShineosQA-はじめに.txt"
 var
   ProgressPage: TOutputProgressWizardPage;
   ModelPage: TInputOptionWizardPage;
-  KnowledgePage: TInputDirWizardPage;
+  KnowledgePage: TInputOptionWizardPage;
   RamGB: Integer;
   PortFree: Boolean;
   OsOk: Boolean;
@@ -198,15 +198,19 @@ begin
   else
     ModelPage.SelectedValueIndex := 0;
 
-  { ナレッジ（社内文書）フォルダの指定（任意） }
-  KnowledgePage := CreateInputDirPage(ModelPage.ID,
+  { ナレッジ（社内文書）の登録方法（任意）
+    TInputDirWizardPage はパス検証があり「指定しない」を表現できないため、
+    ラジオボタン + フォルダ選択ダイアログ（BrowseForFolder）方式にする }
+  KnowledgePage := CreateInputOptionPage(ModelPage.ID,
     '社内文書（ナレッジ）フォルダ',
-    'PDF・Markdown を置いたフォルダを選択してください（任意）',
-    '選択したフォルダの文書がインストール時に自動登録されます。' + #13#10 +
-    '指定しない場合は、インストーラ同梱のサンプル（QA_list.md）のみ登録されます。' + #13#10 +
+    '社内文書の登録方法を選択してください',
+    '「指定しない」を選ぶと、インストーラ同梱のサンプル（QA_list.md）のみ登録されます。' + #13#10 +
+    '「フォルダを指定する」を選ぶと、フォルダ選択ダイアログが表示されます。' + #13#10 +
     'インストール後は、アプリ画面からも資料を追加できます。',
-    False, '');
-  KnowledgePage.Add('');
+    True, False);
+  KnowledgePage.Add('指定しない（インストーラ同梱のサンプルのみ登録）');
+  KnowledgePage.Add('社内文書フォルダを指定する（選択ダイアログを表示）');
+  KnowledgePage.SelectedValueIndex := 0;
 end;
 
 { ---------- 長い処理（キャンセル可能な進捗ページ） ---------- }
@@ -270,9 +274,16 @@ var
   AppDir: String;
 begin
   Result := True;
-  { ナレッジフォルダ指定ページの入力を保持（未指定なら空のまま = 同梱サンプルのみ） }
+  { ナレッジ登録方法の選択（「指定する」を選んだ場合のみフォルダ選択ダイアログを表示） }
   if CurPageID = KnowledgePage.ID then
-    SelectedKnowledgeDir := Trim(KnowledgePage.Values[0]);
+  begin
+    SelectedKnowledgeDir := '';
+    if KnowledgePage.SelectedValueIndex = 1 then
+    begin
+      if not BrowseForFolder('社内文書（PDF・Markdown）を置いたフォルダを選択してください', SelectedKnowledgeDir, False) then
+        SelectedKnowledgeDir := '';
+    end;
+  end;
   if CurPageID = wpReady then
   begin
     AppDir := ExpandConstant('{app}');
