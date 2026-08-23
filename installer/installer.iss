@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.44"
+#define MyAppVersion "1.0.45"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -185,7 +185,7 @@ begin
     'AIモデルの選択',
     'インストールするAIモデルを選択してください',
     '検出メモリ: ' + IntToStr(RamGB) + ' GB。使用ポート: ' + IntToStr(SelectedPort) + '（8080 が空いていれば 8080）。' + #13#10 +
-    '動作が重い場合は下の「軽量」を選択してください。',
+    'メモリが少ない PC では「軽量」を選ぶと、他のアプリへの影響を抑えられます。動作が重い場合は下の「軽量」を選択してください。',
     True, False);
   ModelPage.Add('qwen2.5:3b（推奨）　高速・確実・約1.9GB・応答約1秒（8GB機でも快適）');
   ModelPage.Add('qwen2.5:7b（高品質）　16GB以上のメモリ推奨・約4.7GB・応答数秒');
@@ -365,7 +365,7 @@ begin
 
         { AIモデル設定（qwen3系の思考モード無効化とコンテキスト長の最適化） }
         ProgressPage.SetText('AIモデルを設定しています...', '');
-        if not (RunPowerShell('configure_model.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -Model "' + SelectedModel + '" -LogFile "' + AppDir + '\logs\configure_model.log"', RC) and (RC = 0)) then
+        if not (RunPowerShell('configure_model.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -Model "' + SelectedModel + '" -RamGB ' + IntToStr(RamGB) + ' -LogFile "' + AppDir + '\logs\configure_model.log"', RC) and (RC = 0)) then
           MsgBox('モデル設定に失敗しました。' + #13#10 +
                  'qwen3系モデルの場合、思考モードが無効化されないため応答が遅くなることがあります。' + #13#10 +
                  'ログ: ' + AppDir + '\logs\openwebui.err.log', mbInformation, MB_OK);

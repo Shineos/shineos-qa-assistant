@@ -7,12 +7,13 @@
 #   ツールがあるとモデルが関数呼び出しを選び、チャットにテキスト回答が残らず
 #   「応答なし」になるため（実機検証済み）。
 # - params.think=false で qwen3系の思考モードを無効化（応答なし防止）
-# - 全モデルに num_ctx 4096 を設定（長文・RAG 対応）
+# - 全モデルに num_ctx を設定（RAM に応じて自動調整し、他アプリへのメモリ影響を抑制）
 # 冪等: 同一モデル id の設定は上書きされる
 # 終了コード: 0 = 成功 / 非0 = 失敗
 param(
     [string]$BaseUrl = 'http://localhost:8080',
     [string]$Model = 'qwen2.5:3b',
+    [int]$RamGB = 16,
     [string]$Email = 'admin@localhost',
     [string]$Password = 'admin',
     [string]$LogFile = ''
@@ -108,10 +109,15 @@ try {
         }
     )
 
+    # num_ctx を RAM に応じて自動調整（KV キャッシュのメモリ使用量を抑え、
+    # 低メモリ機でも他のアプリへの影響を防ぐ）
+    #   8GB 未満: 2048（メモリ節約優先） / 8〜16GB: 4096 / 16GB 以上: 8192（品質優先）
+    $numCtx = if ($RamGB -lt 8) { 2048 } elseif ($RamGB -lt 16) { 4096 } else { 8192 }
+
     foreach ($preset in $presets) {
         $params = @{
             think   = $false
-            num_ctx = 4096
+            num_ctx = $numCtx
             # 応答の安定性向上（表記ブレ・揺らぎ・幻覚の抑制のため温度を低くする。
             # Q&A用途では決定論的な回答が望ましい）
             temperature = 0.2
