@@ -57,7 +57,7 @@
 
 - **本体は無償**（MIT License・自己責任でのご利用）
 - **導入支援・保守サポートは有償**: 導入の代行、社内文書の登録支援、障害対応は [https://shineos.com/contact/](https://shineos.com/contact/) まで
-- 本ツールは オープンソース **Open WebUI** を内部エンジンとして利用しています（UI名の「powered by Open WebUI」は帰属の明示です）
+- 本ツールは オープンソース **Open WebUI** を内部エンジンとして利用しています（UIヘッダー2行目の「powered by Open WebUI」は帰属の明示です）
 
 ## ドキュメント
 

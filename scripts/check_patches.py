@@ -30,6 +30,11 @@ MARKERS = [
         "[Shineos patch] 空クエリ対策",
         '検索語フォールバックパッチ（空クエリ対策）',
     ),
+    (
+        os.path.join('env.py'),
+        "[Shineos patch] no auto (Open WebUI) suffix",
+        '名称表示パッチ（(Open WebUI) 重複付加の除去）',
+    ),
 ]
 
 

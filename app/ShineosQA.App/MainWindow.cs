@@ -610,13 +610,22 @@ namespace ShineosQA
                 {
                     await webView.ExecuteScriptAsync(
                         "(function(){" +
+                        // v1.0.56: ヘッダー（サイドバーのブランド）を2行化:
+                        // 1行目=社内知恵袋、2行目=小さめの powered by Open WebUI（帰属表示）
+                        "function brandSubtitle(){" +
+                        "var as=document.querySelectorAll('a[href=\"/\"],a[href=\"'+location.origin+'/\"]');" +
+                        "for(var i=0;i<as.length;i++){var a=as[i];var t=(a.textContent||'').trim();" +
+                        "if(t==='社内知恵袋'&&!a.getAttribute('data-shineos-sub')){" +
+                        "a.setAttribute('data-shineos-sub','1');" +
+                        "a.innerHTML='社内知恵袋<br><span style=\"font-size:10px;font-weight:400;opacity:.55;letter-spacing:.02em\">powered by Open WebUI</span>';" +
+                        "break;}}}" +
                         "function closeDlg(){" +
                         "var bs=document.querySelectorAll('button');for(var i=0;i<bs.length;i++){var b=bs[i];var t=(b.textContent||'').trim();var a=b.getAttribute('aria-label')||'';" +
                         "if(t==='Got it'||t==='OK'||t==='Close'||t==='閉じる'||t==='了解'||t==='OK、始めましょう！'||t==='Okay, Let\\'s Go!'||a==='Close'){b.click();}}" +
                         "var ms=document.querySelectorAll('[role=\"dialog\"][class*=\"modal\"], [role=\"dialog\"][class*=\"Modal\"]');for(var j=0;j<ms.length;j++){var m=ms[j];if(m&&m.parentNode&&((m.textContent||'').indexOf('What')>-1||(m.textContent||'').indexOf('新機能')>-1)){var bs2=m.querySelectorAll('button');for(var k=0;k<bs2.length;k++){bs2[k].click();break;}}}" +
                         "}" +
-                        "closeDlg();" +
-                        "var ob=new MutationObserver(closeDlg);ob.observe(document.body,{childList:true,subtree:true});setTimeout(function(){ob.disconnect();},60000);" +
+                        "brandSubtitle();closeDlg();" +
+                        "var ob=new MutationObserver(function(){brandSubtitle();closeDlg();});ob.observe(document.body,{childList:true,subtree:true});setTimeout(function(){ob.disconnect();},60000);" +
                         "})();");
                 }
                 catch { }

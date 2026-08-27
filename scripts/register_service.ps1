@@ -99,8 +99,10 @@ $envs = @(
     '"BYPASS_WEB_SEARCH_WEB_LOADER=True"',
     '"ENABLE_NOTES=False"',
     '"ENABLE_VERSION_UPDATE_CHECK=False"',
-    # v1.0.52: Open WebUI ライセンスの帰属明示のため、正式名称をヘッダーに表示する
-    '"WEBUI_NAME=社内知恵袋 powered by Open WebUI"',
+    # v1.0.56: WEBUI_NAME は製品名のみ。Open WebUI への帰属は UI の2行目
+    # 「powered by Open WebUI」（ラッパー挿入）と NOTICES で明示する。
+    # （既定では " (Open WebUI)" が自動付加されるが patch_openwebui_branding.py で無効化）
+    '"WEBUI_NAME=社内知恵袋"',
     # モデル一覧に表示しないモデル（bge-m3:latest は埋め込み用・qwen2.5:3b はカスタムモデルの土台。
     # patch_openwebui_models.py が /api/models から除外する → チャット一覧はプリセット3つのみ表示）
     '"OLLAMA_HIDDEN_MODELS=bge-m3:latest;qwen2.5:3b"',

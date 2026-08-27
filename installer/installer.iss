@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.55"
+#define MyAppVersion "1.0.56"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -80,6 +80,7 @@ Source: "..\scripts\repair_middleware.py"; DestDir: "{app}\scripts"; Flags: igno
 Source: "..\scripts\preserve_uploads.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\check_patches.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\smoke_test.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\patch_openwebui_branding.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion
 ; WebView2 ラッパーアプリ（URL入力不要・閉じたらサービス停止）
@@ -534,6 +535,13 @@ begin
         MsgBox('モデル一覧の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
                'チャットのモデル一覧に不要なモデルが表示されることがあります。' + #13#10 +
                'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
+
+      { 名称表示パッチ（v1.0.56: "(Open WebUI)" の自動付加を除去し、
+        帰属は UI の2行目「powered by Open WebUI」で表示する） }
+      ProgressPage.SetText('表示名を調整しています...', '');
+      Exec('cmd.exe',
+        '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\patch_openwebui_branding.py" >> "' + AppDir + '\install.log" 2>&1"',
+        '', SW_HIDE, ewWaitUntilTerminated, RC);
 
       { ナレッジ常時RAG注入パッチ（v1.0.47: 0.11.0 の knowledge → metadata.files 不整合を修正） }
       ProgressPage.SetText('ナレッジ注入を最適化しています...', '');

@@ -3,7 +3,7 @@
 
 本製品（インストーラ）は、以下のオープンソースコンポーネントを同梱・自動導入します。
 各コンポーネントのライセンス全文は、それぞれの配布元で確認できます。
-本製品の UI 名に "powered by Open WebUI" と表示しているのは、主要コンポーネントである
+本製品の UI（ヘッダー2行目）に "powered by Open WebUI" と表示しているのは、主要コンポーネントである
 Open WebUI の帰属（attribution）を明示するためです。
 
 1. NSSM (nssm.exe)
@@ -22,7 +22,7 @@ Open WebUI の帰属（attribution）を明示するためです。
      全文: https://github.com/open-webui/open-webui/blob/main/LICENSE
    - 出典: https://github.com/open-webui/open-webui
    - 用途: チャットUI・RAG・Web検索（pipで自動導入）
-   - 帰属: 本製品のヘッダー・ドキュメントに「powered by Open WebUI」と明示
+   - 帰属: 本製品の UI（ヘッダー2行目）・ドキュメントに「powered by Open WebUI」と明示
 
 4. Qwen2.5 (qwen2.5:3b / qwen2.5:1.5b / qwen2.5:7b)
    - ライセンス: Tongyi Qianwen LICENSE（Apache 2.0 ベース・商用利用可。
