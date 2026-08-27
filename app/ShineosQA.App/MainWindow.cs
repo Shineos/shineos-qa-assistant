@@ -459,6 +459,43 @@ namespace ShineosQA
             return output != null && (output.Contains("SERVICE_NAME") || output.Contains("RUNNING") || output.Contains("STOPPED"));
         }
 
+        // Open WebUI へのパッチ適用状態を自己診断する（v1.0.52）。
+        // パッチが外れていると RAG（社内文書検索）が静かに止まり、根拠の無い回答の
+        // 原因になるため、起動時に検査して壊れていたら利用者に明示する。
+        void CheckPatchHealth()
+        {
+            try
+            {
+                string py = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "venv", "Scripts", "python.exe");
+                string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "scripts", "check_patches.py");
+                if (!File.Exists(py) || !File.Exists(script)) return;
+                var psi = new ProcessStartInfo(py, "-X utf8 \"" + script + "\"")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    if (!p.WaitForExit(20000)) { try { p.Kill(); } catch { } return; }
+                    if (p.ExitCode != 0)
+                    {
+                        Log("patch health check FAILED");
+                        System.Windows.MessageBox.Show(
+                            "内部コンポーネント（Open WebUI）の状態が正常ではありません。\n" +
+                            "社内文書を参照した回答ができない可能性があります。\n\n" +
+                            "デスクトップの「ShineosQA-repair.bat」を実行するか、\n" +
+                            "社内知恵袋を再インストールしてください。\n" +
+                            "解決しない場合は https://shineos.com/contact/ までご連絡ください。",
+                            "社内知恵袋 - 注意", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                    else Log("patch health check OK");
+                }
+            }
+            catch (Exception ex) { Log("patch health check error: " + ex.Message); }
+        }
+
         bool WaitForHealth(int timeoutSeconds)
         {
             var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
@@ -541,6 +578,8 @@ namespace ShineosQA
                 HideLoading();
             else
                 ShowGuide();
+            // パッチ健全性チェック（RAGが静かに壊れているのを防ぐ: v1.0.52）
+            CheckPatchHealth();
             // WebView2 のユーザーデータフォルダを明示指定する
             // （既定では実行ファイルの隣（Program Files 配下）に作成しようとして
             //   アクセス拒否 E_ACCESSDENIED になるため、%APPDATA%\ShineosQA\WebView2 を使う）

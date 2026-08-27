@@ -26,15 +26,32 @@ $dataDir = Join-Path $AppDir 'data'
 $logDir = Join-Path $AppDir 'logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
-# --- 既存サービス・データのクリーンアップ（再インストール対応） ---
+# --- 既存サービス・データのクリーンアップ（アップグレード対応） ---
 Log 'removing existing service (if any)'
 & sc.exe stop $svc 2>$null | Out-Null
 & sc.exe delete $svc 2>$null | Out-Null
 Start-Sleep -Seconds 1
 
 if (Test-Path $dataDir) {
-    Log 'removing previous data directory (fresh install)'
-    Remove-Item -Recurse -Force $dataDir
+    # v1.0.52: 画面から追加された文書を knowledge へ退避してからデータをバックアップ。
+    # （アップグレードで社内文書が消えるのを防ぐ。古いバックアップは1世代のみ保持）
+    $preservePy = Join-Path $AppDir 'scripts\preserve_uploads.py'
+    $venvPy = Join-Path $AppDir 'venv\Scripts\python.exe'
+    if ((Test-Path $preservePy) -and (Test-Path $venvPy)) {
+        $pOut = & $venvPy $preservePy $AppDir 2>&1
+        foreach ($l in $pOut) { Log "preserve: $l" }
+    }
+    # 古いバックアップを削除（1世代のみ保持）
+    Get-ChildItem $AppDir -Directory -Filter 'data.backup-*' -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | Select-Object -Skip 1 | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    $bkName = 'data.backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+    try {
+        Rename-Item -Path $dataDir -NewName $bkName -ErrorAction Stop
+        Log "data backed up: $bkName （WEBUI_AUTH=False は新規DB前提のため初期化。文書は退避済み）"
+    } catch {
+        Log "WARNING: data backup failed, falling back to delete: $($_.Exception.Message)"
+        Remove-Item -Recurse -Force $dataDir
+    }
 }
 
 # --- サービス登録 ---
@@ -82,7 +99,8 @@ $envs = @(
     '"BYPASS_WEB_SEARCH_WEB_LOADER=True"',
     '"ENABLE_NOTES=False"',
     '"ENABLE_VERSION_UPDATE_CHECK=False"',
-    '"WEBUI_NAME=Shineos社内知恵袋"',
+    # v1.0.52: Open WebUI ライセンスの帰属明示のため、正式名称をヘッダーに表示する
+    '"WEBUI_NAME=社内知恵袋 powered by Open WebUI"',
     # モデル一覧に表示しないモデル（bge-m3:latest は埋め込み用・qwen2.5:3b はカスタムモデルの土台。
     # patch_openwebui_models.py が /api/models から除外する → チャット一覧はプリセット3つのみ表示）
     '"OLLAMA_HIDDEN_MODELS=bge-m3:latest;qwen2.5:3b"',

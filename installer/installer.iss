@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.51"
+#define MyAppVersion "1.0.52"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -77,6 +77,9 @@ Source: "..\scripts\patch_openwebui_rag.py"; DestDir: "{app}\scripts"; Flags: ig
 Source: "..\scripts\attach_knowledge_to_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\warmup_model.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\repair_middleware.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\preserve_uploads.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\check_patches.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\smoke_test.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion
 ; WebView2 ラッパーアプリ（URL入力不要・閉じたらサービス停止）
@@ -87,15 +90,13 @@ Source: "..\knowledge\*";             DestDir: "{app}\knowledge"; Flags: ignorev
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\app\ShineosQA.exe"; IconFilename: "{app}\assets\app.ico"
 
-; --- アンインストール時の完全削除 --------------------------------------------
+; --- アンインストール時の削除（data/knowledge は v1.0.52 以降プロンプトで選択） ---
 [UninstallDelete]
-Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\venv"
 Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\tools"
 Type: filesandordirs; Name: "{app}\app"
-Type: filesandordirs; Name: "{app}\knowledge"
 Type: files; Name: "{app}\install.log"
 Type: files; Name: "{app}\configure_model.ps1"
 Type: files; Name: "{app}\setup_knowledge.ps1"
@@ -114,6 +115,8 @@ var
   SelectedPort: Integer;
   SelectedKnowledgeDir: String;
   UninstallRemoveOllama: Boolean;
+  StartPort: Integer;          { ポート走査の開始ポート（アップグレード時は port.txt の値） }
+  IsUpgrade: Boolean;          { 既存インストール（port.txt）があるか }
 
 const
   PREFLIGHT_INI = 'preflight.ini';
@@ -134,6 +137,29 @@ begin
   ExtractTemporaryFile('nssm.exe');
 end;
 
+{ 既存の自スタック（Open WebUI サービスと venv の python）を停止する（v1.0.52）
+  アップグレード時に自分の待受ポートを占有したままポート判定すると
+  「全ポート使用中」と誤認されるため、判定前に停止してポートを空ける }
+procedure StopOurStack(AppDir: String);
+var
+  RC: Integer;
+  Svc: String;
+begin
+  { 自サービス全停止（アップグレード時、稼働中の exe/nssm がファイル更新を
+    ロックするのを防ぐ。サービスは register_service.ps1 で再登録・再開される） }
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosQA', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosOllama', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosFileGen', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosMcpoFiles', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosMcpoMcp', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Exec('cmd.exe', '/c timeout /t 4 /nobreak >nul', '', SW_HIDE, ewWaitUntilTerminated, RC);
+  { venv 配下の python と自サービスの nssm が残っていれば強制停止（自アプリのみ対象） }
+  Exec('powershell.exe',
+    '-NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { ($_.ExecutablePath -like ''' + AppDir + '\venv\*'') -or ($_.ExecutablePath -eq ''' + AppDir + '\tools\nssm.exe'') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"',
+    '', SW_HIDE, ewWaitUntilTerminated, RC);
+  Exec('cmd.exe', '/c timeout /t 2 /nobreak >nul', '', SW_HIDE, ewWaitUntilTerminated, RC);
+end;
+
 { preflight.ps1 を実行し、結果（OS・空きポート・RAM）を読み取る }
 procedure RunPreflight;
 var
@@ -146,7 +172,7 @@ begin
   SelectedPort := {#Port};
   Ini := ExpandConstant('{tmp}\' + PREFLIGHT_INI);
   if Exec('powershell.exe',
-      '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\preflight.ps1') + '" -IniPath "' + Ini + '"',
+      '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\preflight.ps1') + '" -IniPath "' + Ini + '" -Port ' + IntToStr(StartPort),
       '', SW_HIDE, ewWaitUntilTerminated, RC) then
   begin
     OsOk := (GetIniString('preflight', 'os_ok', 'no', Ini) = 'yes');
@@ -176,22 +202,57 @@ end;
 { ---------- ウィザード初期化 ---------- }
 
 procedure InitializeWizard;
+var
+  PrevPort: Integer;
+  Content: AnsiString;
+  InstallLoc: String;
+  PortTxt: String;
 begin
   ExtractSetupFiles;
+
+  { v1.0.52: アップグレード時は port.txt の前回ポートを走査開始位置にする
+    （自サービス停止後に同じポートを再利用し、ポート番号がずれるのを防ぐ）。
+    ※ ウィザード初期化時点では app 定数が未確定のため、前回のインストール先は
+      アンインストール情報（InstallLocation）から取得する }
+  StartPort := {#Port};
+  IsUpgrade := False;
+  InstallLoc := '';
+  RegQueryStringValue(HKEY_LOCAL_MACHINE,
+    'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppId}_is1',
+    'InstallLocation', InstallLoc);
+  if InstallLoc = '' then
+    InstallLoc := ExpandConstant('{autopf}') + '\ShineosQA';
+  PortTxt := InstallLoc + '\port.txt';
+  if FileExists(PortTxt) then
+  begin
+    if LoadStringFromFile(PortTxt, Content) then
+    begin
+      PrevPort := StrToIntDef(Trim(Content), 0);
+      if (PrevPort >= 8080) and (PrevPort <= 65535) then
+      begin
+        StartPort := PrevPort;
+        IsUpgrade := True;
+      end;
+    end;
+  end;
+
   RunPreflight;
 
   if not OsOk then
     MsgBox('Windows 10 / 11（64bit）以外の環境では 社内知恵袋 を利用できません。' + #13#10 +
            'インストールを中止してください。', mbError, MB_OK);
 
-  if not PortFree then
+  if (not PortFree) and (not IsUpgrade) then
     MsgBox('ポート 8080 が使用中のため、8081 以降の空きポート（' + IntToStr(SelectedPort) + '）でインストールします。', mbInformation, MB_OK);
 
   ModelPage := CreateInputOptionPage(wpSelectDir,
     'AIモデルの選択',
     'インストールするAIモデルを選択してください',
     '検出メモリ: ' + IntToStr(RamGB) + ' GB。使用ポート: ' + IntToStr(SelectedPort) + '（8080 が空いていれば 8080）。' + #13#10 +
-    'メモリが少ない PC では「軽量」を選ぶと、他のアプリへの影響を抑えられます。動作が重い場合は下の「軽量」を選択してください。',
+    'メモリが少ない PC では「軽量」を選ぶと、他のアプリへの影響を抑えられます。動作が重い場合は下の「軽量」を選択してください。' + #13#10 + #13#10 +
+    '【ご期待について】本ツールは社内規定・業務マニュアルのQ&Aに特化しています:' + #13#10 +
+    '・回答まではPCの性能により数秒〜20秒ほどかかります（完全社内処理のため）' + #13#10 +
+    '・ナレッジに登録した文書の内容のみ根拠付きで回答し、一般知識の質問には「該当なし」とお答えします',
     True, False);
   ModelPage.Add('qwen2.5:3b（推奨）　高速・確実・約1.9GB・応答約1秒（8GB機でも快適）');
   ModelPage.Add('qwen2.5:7b（高品質）　16GB以上のメモリ推奨・約4.7GB・応答数秒');
@@ -235,16 +296,21 @@ begin
     ProgressPage.Show;
 
     ProgressPage.SetText('環境チェック中...', '');
+
+    { v1.0.52: 既存の自スタックを先に停止してからポート判定する。
+      旧ロジックは自サービスの待受（8080）を他アプリの占有と誤認し、
+      空きポートがあるのに「全ポート使用中」と誤って中断していた }
+    StopOurStack(AppDir);
     RunPreflight;
     if not OsOk then
     begin
       MsgBox('Windows 10 / 11（64bit）以外の環境ではインストールできません。', mbError, MB_OK);
       Exit;
     end;
-    if not PortFree then
+    if SelectedPort <= 0 then
     begin
-      MsgBox('ポート 8080〜8099 がすべて使用中のため続行できません。' + #13#10 +
-             'いずれかのプログラムを終了してから「次へ」をもう一度押してください。', mbError, MB_OK);
+      MsgBox('ポート ' + IntToStr(StartPort) + '〜' + IntToStr(StartPort + 19) + ' のいずれも空いていないため続行できません。' + #13#10 +
+             '他のアプリがポートを占有しています。終了してから「次へ」をもう一度押してください。', mbError, MB_OK);
       Exit;
     end;
 
@@ -331,7 +397,9 @@ begin
        '・PCを再起動しても自動で起動します（Windowsサービス: ShineosQA）' + #13#10 +
        '・アプリを閉じるとサービスも停止します（再起動後は自動で再開）' + #13#10 +
        '・アンインストール: 設定アプリ → アプリ → 社内知恵袋' + #13#10 +
-       '・再インストールするとデータ（ナレッジ・アップロードした文書など）は初期化されます' + #13#10 + #13#10 +
+       '・アップグレード（再インストール）時も、社内文書は自動で引き継がれます（画面から追加した文書も退避されます）' + #13#10 + #13#10 +
+       '本ツールは無償でご利用いただけます。導入支援・保守サポートは有償となります。' + #13#10 +
+       '本ツールは Open WebUI（オープンソース）を利用しています。ライセンス表記は同梱の THIRD-PARTY-NOTICES.txt をご覧ください。' + #13#10 + #13#10 +
        '不具合やご相談は https://shineos.com/contact/ まで。' + #13#10;
   SaveStringToFile(ExpandConstant('{userdesktop}\ShineosQA-はじめに.txt'), S, True);
 end;
@@ -415,6 +483,18 @@ begin
           MsgBox('ナレッジ登録に失敗しました。' + #13#10 +
                  'インストール後、アプリ画面（Open WebUI）から資料を追加できます。' + #13#10 +
                  'ログ: ' + AppDir + '\logs\setup_knowledge.log', mbInformation, MB_OK);
+
+        { 導入検証スモークテスト（v1.0.52）: RAG回答・ガードレール・モデル一覧・
+          パッチ状態を自動検証する（2問のAI回答を含むため約1〜2分） }
+        ProgressPage.SetText('動作検証（スモークテスト）を実行しています...', '社内文書からの回答とガードレールを確認中（約1〜2分）');
+        Exec('cmd.exe',
+          '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\smoke_test.py" --base-url "http://localhost:' + IntToStr(SelectedPort) + '" >> "' + AppDir + '\logs\smoke_test.log" 2>&1"',
+          '', SW_HIDE, ewWaitUntilTerminated, RC);
+        if RC <> 0 then
+          MsgBox('導入検証（スモークテスト）で不合格項目がありました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
+                 'アプリは起動できますが、正しく動作しない場合があります。' + #13#10 +
+                 '詳細ログ: ' + AppDir + '\logs\smoke_test.log' + #13#10 + #13#10 +
+                 'お手数ですが https://shineos.com/contact/ までご連絡ください。', mbInformation, MB_OK);
       end;
 
       { 使用ポートをラッパーアプリ用に保存 }
@@ -431,7 +511,9 @@ begin
         'インストールが完了しました。' + #13#10 + #13#10 +
         'デスクトップの「社内知恵袋」をダブルクリックすると、アプリ画面が開きます（URL入力不要）。' + #13#10 +
         'アプリを閉じるとサービスも停止します。' + #13#10 + #13#10 +
-        '詳しい使い方はデスクトップの「ShineosQA-はじめに.txt」を参照してください。';
+        '詳しい使い方はデスクトップの「ShineosQA-はじめに.txt」を参照してください。' + #13#10 + #13#10 +
+        '本ツールは無償でご利用いただけます（導入支援・保守サポートは有償: https://shineos.com/contact/）。' + #13#10 +
+        '内部エンジンに Open WebUI（OSS）を利用しています。';
     finally
       ProgressPage.Hide;
       ProgressPage.Free;
@@ -520,6 +602,18 @@ begin
     Exec(ExpandConstant('{sys}\sc.exe'), 'delete ShineosMcpoMcp', '', SW_HIDE, ewWaitUntilTerminated, RC);
     { 起動時ウォームアップのタスクも削除（v1.0.48） }
     Exec(ExpandConstant('{sys}\schtasks.exe'), '/delete /tn ShineosWarmup /f', '', SW_HIDE, ewWaitUntilTerminated, RC);
+
+    { v1.0.52: ナレッジ（社内文書・検索データ）を残すか尋ねる。
+      アップグレード目的のアンインストールでは「はい」で文書を保持できる }
+    if MsgBox('ナレッジ（社内文書・検索データ）を残しますか？' + #13#10 + #13#10 +
+              '「はい」: 社内文書と検索データを残します（アップグレード・再インストールの場合はこちらを推奨）。' + #13#10 +
+              '「いいえ」: すべて完全に削除します（通常のアンインストール）。' + #13#10 +
+              '※ Ollama 本体とAIモデルの扱いは、開始時のご質問の回答に従います。',
+              mbConfirmation, MB_YESNO) = IDNO then
+    begin
+      DelTree(ExpandConstant('{app}\data'), True, True, True);
+      DelTree(ExpandConstant('{app}\knowledge'), True, True, True);
+    end;
     if UninstallRemoveOllama then
       RemoveOllamaCompletely
     else

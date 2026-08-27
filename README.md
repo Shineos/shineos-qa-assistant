@@ -150,6 +150,31 @@ Windows機で [Inno Setup 6.7.3](https://jrsoftware.org/isinfo.php) を導入し
 
 ビルド・テスト・更新手順の詳細は [構築ドキュメント](docs/build.md) を参照してください。
 
+## 提供形態とサポート（v1.0.52）
+
+- **本体は無償**（MIT License・自己責任でのご利用）
+- **導入支援・保守サポートは有償**: 導入の代行、社内文書の登録支援、障害対応は https://shineos.com/contact/ まで
+- 本ツールは オープンソース **Open WebUI** を内部エンジンとして利用しています（UI名の「powered by Open WebUI」は帰属の明示です）。ライセンス表記は [vendor/THIRD-PARTY-NOTICES.txt](vendor/THIRD-PARTY-NOTICES.txt) を参照
+
+## アップグレード（バージョン更新）について（v1.0.52）
+
+新しいバージョンのインストーラを上書きで実行するだけで更新できます:
+
+- **社内文書は引き継がれます**: `{app}\knowledge` に置いた文書に加え、画面のナレッジメニューから追加した文書も自動で退避・再登録されます
+- 旧データは `{app}\data.backup-<日付>` に1世代バックアップされます
+- チャット履歴は初期化されます（AIモデルの設定・プリセットは自動再構築）
+- 導入後は自動スモークテスト（RAG回答・ガードレール・モデル一覧）で動作を検証します
+
+## 動作検証（スモークテスト）
+
+インストール時に自動実行されるほか、任意のタイミングで手動実行できます:
+
+```
+& "C:\Program Files\ShineosQA\venv\Scripts\python.exe" "C:\Program Files\ShineosQA\scripts\smoke_test.py"
+```
+
+検証内容: パッチ適用状態 / モデル一覧（プリセットのみ表示）/ ナレッジ紐付け / RAG根拠付き回答（宿泊費→15,000円）/ ガードレール（ナレッジ外の質問→拒否＋架空引用なし）
+
 ## ライセンス
 
 本プロジェクトのコードは MIT License です。同梱・導入するコンポーネントのライセンスは [vendor/THIRD-PARTY-NOTICES.txt](vendor/THIRD-PARTY-NOTICES.txt) を参照してください。

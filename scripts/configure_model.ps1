@@ -115,6 +115,25 @@ try {
     $numCtx = if ($RamGB -lt 8) { 2048 } elseif ($RamGB -lt 16) { 4096 } else { 8192 }
 
     foreach ($preset in $presets) {
+        # 既存モデルの knowledge 紐付けを引き継ぐ（v1.0.52）。
+        # このスクリプトはモデル設定を全文上書きするため、引き継ぎがないと
+        # setup_knowledge で紐付けたナレッジが外れ、RAGが止まって幻覚の原因になる
+        # （README に手動実行手順が載っているため、再実行でも安全である必要がある）。
+        # ※ GET の応答は PS 5.1 で文字化けするため curl + ファイル読みで取得する
+        $existingKnowledge = $null
+        try {
+            $tmpGet = Join-Path $env:TEMP ('cfg_model_' + [guid]::NewGuid().ToString('N') + '.json')
+            $idEnc = [Uri]::EscapeDataString($preset.id)
+            & curl.exe -sS -m 30 -o "$tmpGet" "$BaseUrl/api/v1/models/model?id=$idEnc" -H "Authorization: Bearer $($session.token)" 2>$null
+            if (Test-Path $tmpGet) {
+                $existing = ([System.IO.File]::ReadAllText($tmpGet, [System.Text.Encoding]::UTF8)) | ConvertFrom-Json
+                if ($existing -and $existing.meta -and $existing.meta.knowledge) {
+                    $existingKnowledge = @($existing.meta.knowledge)
+                }
+                Remove-Item $tmpGet -Force -ErrorAction SilentlyContinue
+            }
+        } catch { Log "WARNING: could not read existing model knowledge for $($preset.id): $($_.Exception.Message)" }
+
         $params = @{
             think   = $false
             num_ctx = $numCtx
@@ -131,14 +150,19 @@ try {
             function_calling = 'legacy'
             system  = $preset.system
         }
+        # meta は変数化し、knowledge は既存がある場合のみ含める
+        # （$null を入れると "knowledge": null として送信され紐付けがクリアされるため）
+        $meta = @{
+            capabilities  = @{ tools = $true }
+            builtinTools = $builtinTools
+        }
+        if ($existingKnowledge) { $meta['knowledge'] = $existingKnowledge }
+
         $body = @{
             id             = $preset.id
             base_model_id  = $Model
             name           = $preset.id
-            meta           = @{
-                capabilities  = @{ tools = $true }
-                builtinTools = $builtinTools
-            }
+            meta           = $meta
             params         = $params
             access_grants  = @()
             is_active      = $true

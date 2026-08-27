@@ -148,8 +148,18 @@ $nssmTmp = Join-Path $TmpDir 'nssm.exe'
 if (-not (Test-Path $nssmTmp)) { throw "nssm.exe not found: $nssmTmp" }
 $nssmDurable = Join-Path $AppDir 'tools\nssm.exe'
 New-Item -ItemType Directory -Force -Path (Split-Path $nssmDurable) | Out-Null
-Copy-Item $nssmTmp $nssmDurable -Force
-Log "nssm staged at durable path: $nssmDurable"
+try {
+    Copy-Item $nssmTmp $nssmDurable -Force -ErrorAction Stop
+    Log "nssm staged at durable path: $nssmDurable"
+} catch {
+    # 既に durable nssm が存在する場合（稼働中サービスがロック等で書き換えでき
+    # なかった場合）は既存の利用を許容する。ファイルは次回更新時に置き換わる
+    if (Test-Path $nssmDurable) {
+        Log "WARNING: could not overwrite durable nssm (locked?), keeping existing: $($_.Exception.Message)"
+    } else {
+        throw
+    }
+}
 
 # --- Ollama の起動（公式サービス → NSSM フォールバック → 直接起動 の3段構え） ---
 function Test-OllamaApi {

@@ -17,7 +17,8 @@ if ($os -and $os.Version -like '10.*' -and [Environment]::Is64BitOperatingSystem
     $osOk = $true
 }
 
-# --- ポートチェック（8080〜8099 のうち最初の空きポートを使う） ---
+# --- ポートチェック（指定ポートから順に空きを探し、最初の空きポートを使う） ---
+# v1.0.52: アップグレード時は port.txt の前回ポートから探す（-Port で開始ポートを指定）
 $chosenPort = 0
 for ($p = $Port; $p -lt ($Port + 20); $p++) {
     $busy = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue

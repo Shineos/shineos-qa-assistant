@@ -3,6 +3,8 @@
 
 本製品（インストーラ）は、以下のオープンソースコンポーネントを同梱・自動導入します。
 各コンポーネントのライセンス全文は、それぞれの配布元で確認できます。
+本製品の UI 名に "powered by Open WebUI" と表示しているのは、主要コンポーネントである
+Open WebUI の帰属（attribution）を明示するためです。
 
 1. NSSM (nssm.exe)
    - ライセンス: Public Domain
@@ -15,18 +17,22 @@
    - 用途: ローカルLLM実行エンジン（インストール時に自動導入）
 
 3. Open WebUI
-   - ライセンス: BSD-3-Clause License
+   - ライセンス: Open WebUI License（BSD-3-Clause を基礎としブランド保護条項を含む）
+     Copyright (c) 2023 - 2025 Open WebUI
+     全文: https://github.com/open-webui/open-webui/blob/main/LICENSE
    - 出典: https://github.com/open-webui/open-webui
    - 用途: チャットUI・RAG・Web検索（pipで自動導入）
+   - 帰属: 本製品のヘッダー・ドキュメントに「powered by Open WebUI」と明示
 
-4. Qwen2.5 (qwen2.5:3b / qwen2.5:1.5b)
-   - ライセンス: Apache License 2.0
+4. Qwen2.5 (qwen2.5:3b / qwen2.5:1.5b / qwen2.5:7b)
+   - ライセンス: Tongyi Qianwen LICENSE（Apache 2.0 ベース・商用利用可。
+     一部サイズはライセンス種別が異なるため配布元で確認してください）
    - 出典: https://ollama.com/library/qwen2.5 / https://huggingface.co/Qwen
-   - 用途: LLMモデル（インストール時にダウンロード）
+   - 用途: LLMモデル（インストール時に公式レジストリからダウンロード）
 
-5. nomic-embed-text
-   - ライセンス: Apache License 2.0
-   - 出典: https://ollama.com/library/nomic-embed-text
+5. BAAI bge-m3
+   - ライセンス: MIT License
+   - 出典: https://ollama.com/library/bge-m3 / https://huggingface.co/BAAI/bge-m3
    - 用途: RAG文書検索用の埋め込みモデル（インストール時にダウンロード）
 
 6. Python (3.12)
