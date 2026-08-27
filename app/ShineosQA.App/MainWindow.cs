@@ -548,22 +548,36 @@ namespace ShineosQA
             try { Directory.CreateDirectory(wvDataDir); } catch { }
             var wvEnv = await CoreWebView2Environment.CreateAsync(null, wvDataDir);
             await webView.EnsureCoreWebView2Async(wvEnv);
-            // 「新機能（What's New）」ダイアログを非表示にする
-            // （初回表示の抑制: localStorage に「見たバージョン」を記録し、
-            //   表示された場合も自動で閉じる）
+            // 「新機能（What's New）」ダイアログを非表示にする（v1.0.49）
+            // 【原因】Open WebUI 0.11 はユーザー設定 settings.showChangelog（既定 true）が有効で、
+            //   保存済みバージョン ≠ 現在バージョンのときにモーダルを開く。
+            //   旧 inject の localStorage キー（whatsNewSeenVersion 等）は 0.11 では無関係で、
+            //   自動クリックも ja-JP ボタン文言「OK、始めましょう！」に一致せず閉じられていなかった。
+            // 【対策】(1) ドキュメント生成時（アプリJSより前）に settings.showChangelog=false を書き込み、
+            //   モーダルが開かないようにする。(2) 万一表示されても自動で閉じる。
+            string changelogOffScript =
+                "if(window.top===window){try{" +
+                "var s={};try{s=JSON.parse(localStorage.getItem('settings')||'{}')}catch(e){}" +
+                "if(s.showChangelog!==false){s.showChangelog=false;localStorage.setItem('settings',JSON.stringify(s));}" +
+                "}catch(e){}}";
+            try
+            {
+                webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(changelogOffScript);
+            }
+            catch { }
             webView.NavigationCompleted += async (s, e) =>
             {
                 try
                 {
                     await webView.ExecuteScriptAsync(
                         "(function(){" +
-                        "try{var ks=['whatsNewSeenVersion','whats-new-seen-version','whatsNewVersion','whats-new-version','whatsNew','whats-new','whatsNewSeen'];ks.forEach(function(k){if(localStorage.getItem(k)===null)localStorage.setItem(k,'0.11.0');});}catch(e){}" +
                         "function closeDlg(){" +
-                        "var bs=document.querySelectorAll('button');for(var i=0;i<bs.length;i++){var b=bs[i];var t=(b.textContent||'').trim();var a=b.getAttribute('aria-label')||'';if(t==='Got it'||t==='OK'||t==='Close'||t==='閉じる'||t==='了解'||a==='Close'){b.click();}}" +
-                        "var ms=document.querySelectorAll('[role=\"dialog\"][class*=\"modal\"], [role=\"dialog\"][class*=\"Modal\"]');for(var j=0;j<ms.length;j++){var m=ms[j];if(m&&m.parentNode&&(m.textContent||'').indexOf('What')>-1)m.remove();}" +
+                        "var bs=document.querySelectorAll('button');for(var i=0;i<bs.length;i++){var b=bs[i];var t=(b.textContent||'').trim();var a=b.getAttribute('aria-label')||'';" +
+                        "if(t==='Got it'||t==='OK'||t==='Close'||t==='閉じる'||t==='了解'||t==='OK、始めましょう！'||t==='Okay, Let\\'s Go!'||a==='Close'){b.click();}}" +
+                        "var ms=document.querySelectorAll('[role=\"dialog\"][class*=\"modal\"], [role=\"dialog\"][class*=\"Modal\"]');for(var j=0;j<ms.length;j++){var m=ms[j];if(m&&m.parentNode&&((m.textContent||'').indexOf('What')>-1||(m.textContent||'').indexOf('新機能')>-1)){var bs2=m.querySelectorAll('button');for(var k=0;k<bs2.length;k++){bs2[k].click();break;}}}" +
                         "}" +
                         "closeDlg();" +
-                        "var ob=new MutationObserver(closeDlg);ob.observe(document.body,{childList:true,subtree:true});setTimeout(function(){ob.disconnect();},30000);" +
+                        "var ob=new MutationObserver(closeDlg);ob.observe(document.body,{childList:true,subtree:true});setTimeout(function(){ob.disconnect();},60000);" +
                         "})();");
                 }
                 catch { }

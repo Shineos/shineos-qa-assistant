@@ -161,10 +161,12 @@ try {
     }
     # ---------- 4. UI言語を日本語に設定（フロントの初回表示に反映） ----------
     try {
-        $langBody = @{ ui = @{ locale = 'ja-JP'; language = 'ja-JP' } } | ConvertTo-Json -Depth 4
+        # showChangelog=false: 「新機能」ダイアログ（What's New）の表示を無効化（v1.0.49）。
+        # UserSettings は extra=allow のため任意キーを保存できる
+        $langBody = @{ ui = @{ locale = 'ja-JP'; language = 'ja-JP' }; showChangelog = $false } | ConvertTo-Json -Depth 4
         $langBytes = [System.Text.Encoding]::UTF8.GetBytes($langBody)
         Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/users/user/settings/update" -Headers $headers -Body $langBytes -ContentType 'application/json' -TimeoutSec 30 | Out-Null
-        Log 'ui language set to ja-JP'
+        Log 'ui language set to ja-JP / showChangelog=false'
     } catch { Log 'WARNING: ui language setting failed' }
     Log "preset models configured: $($presets.id -join ', ')"
     Log 'configure_model done'
