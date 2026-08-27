@@ -121,10 +121,11 @@ try {
             # 応答の安定性向上（表記ブレ・揺らぎ・幻覚の抑制のため温度を低くする。
             # Q&A用途では決定論的な回答が望ましい）
             temperature = 0.2
-            # native でツール（Web検索）をモデルに提供する。
-            # web_search ツールのみ有効化し、他のツールは無効（「回答なし」防止）。
-            # ファイル生成ツール（PDF/PPT）は別途ツールサーバーとして登録する。
-            function_calling = 'native'
+            # レガシー指定でツール（Web検索）をモデルに提供する。
+            # v1.0.47: 'legacy' に変更。ナレッジの常時RAG注入は legacy のみ対応し、
+            # native は小規模モデルがツール呼び出しを誤選択して「応答なし」の原因になる
+            # （0.11.0 実機検証）。ナレッジ注入は patch_openwebui_rag.py + attach スクリプトとセット。
+            function_calling = 'legacy'
             system  = $preset.system
         }
         $body = @{

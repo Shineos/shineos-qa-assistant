@@ -12,7 +12,8 @@ param(
     [string]$KnowledgeDir = '',
     [string]$Email = 'admin@localhost',
     [string]$Password = 'admin',
-    [string]$LogFile = ''
+    [string]$LogFile = '',
+    [string]$AppDir = 'C:\Program Files\ShineosQA'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -142,6 +143,20 @@ try {
         }
     } else {
         Add-CollectionFiles -CollName '社内ナレッジ' -Dir $KnowledgeDir
+    }
+
+    # ---------- 6. コレクションをプリセットモデルへ紐付ける ----------
+    # （RAGはモデルの meta.knowledge 単位で検索されるため。未紐付けだと
+    #   社内文書が参照されずハルシネーションの原因になる:v1.0.47実機検証）
+    $attachPy = Join-Path $AppDir 'scripts\attach_knowledge_to_models.py'
+    $venvPy = Join-Path $AppDir 'venv\Scripts\python.exe'
+    if ((Test-Path $attachPy) -and (Test-Path $venvPy)) {
+        $attachOut = & $venvPy $attachPy --base-url $BaseUrl --email $Email --password $Password 2>&1
+        $attachCode = $LASTEXITCODE
+        foreach ($l in $attachOut) { Log "attach: $l" }
+        if ($attachCode -ne 0) { Log "WARNING: knowledge attach failed (exit $attachCode)" }
+    } else {
+        Log "WARNING: attach script not found: $attachPy"
     }
 
     Log 'setup_knowledge done'

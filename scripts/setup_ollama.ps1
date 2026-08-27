@@ -141,6 +141,16 @@ else {
 }
 Log "ollama.exe: $ollamaExe"
 
+# --- NSSM を永続場所（{app}\tools）に確保する ---
+# {tmp} の nssm.exe はインストーラ終了時に消えるため、そのままサービス登録すると
+# ImagePath が tmp を指し、PC 再起動後に ShineosOllama が起動しなくなる（v1.0.47 修正）
+$nssmTmp = Join-Path $TmpDir 'nssm.exe'
+if (-not (Test-Path $nssmTmp)) { throw "nssm.exe not found: $nssmTmp" }
+$nssmDurable = Join-Path $AppDir 'tools\nssm.exe'
+New-Item -ItemType Directory -Force -Path (Split-Path $nssmDurable) | Out-Null
+Copy-Item $nssmTmp $nssmDurable -Force
+Log "nssm staged at durable path: $nssmDurable"
+
 # --- Ollama の起動（公式サービス → NSSM フォールバック → 直接起動 の3段構え） ---
 function Test-OllamaApi {
     try {
@@ -174,16 +184,43 @@ function Set-OllamaTuning {
     foreach ($k in $tuning.Keys) {
         [Environment]::SetEnvironmentVariable($k, $tuning[$k], 'Machine')
     }
+    # 公式トレイアプリ（ollama app.exe）のRunキー自動起動を無効化する。
+    # 0.33系のOllamaSetupはユーザーログオン起動方式のため、サービスと二重起動すると
+    # ポート11434が競合しNSSMフォールバックが「一時停止」になる（v1.0.47 実機検証）。
+    # 常駐は Windowsサービスに一本化する
+    foreach ($rk in 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run') {
+        try {
+            Remove-ItemProperty -Path $rk -Name 'Ollama' -ErrorAction Stop
+            Log "removed autorun: $rk\Ollama"
+        } catch { }
+    }
+    Get-Process -Name 'ollama', 'ollama app' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     # NSSMフォールバックサービスにも直接注入（システム環境変数の再読込を待たず確実に反映）
     $fbSvc2 = Get-Service -Name 'ShineosOllama' -ErrorAction SilentlyContinue
     if ($fbSvc2) {
-        $nssm2 = Join-Path $TmpDir 'nssm.exe'
+        $nssm2 = $nssmDurable
         if (Test-Path $nssm2) {
             $envList = @()
             foreach ($k in $tuning.Keys) { $envList += ('"' + $k + '=' + $tuning[$k] + '"') }
             & $nssm2 set ShineosOllama AppEnvironmentExtra $envList | Out-Null
+            & $nssm2 set ShineosOllama AppPriority BELOW_NORMAL_PRIORITY_CLASS | Out-Null
         }
     }
+
+    # ollama.exe を「通常以下」のCPU優先度で起動する（他アプリへの影響を抑える核心対策）
+    # 実測（Ryzen 7 5700U・16GB RAM）では AI 応答中に CPU 占有率が約82%に達し、
+    # 他アプリの操作感が損なわれる。IFEO の PerfOptions で優先度を BELOW NORMAL に固定すると、
+    # CPU を取り合う場面で Windows スケジューラが必ず他アプリ（通常優先度）を優先する。
+    # システムがアイドルの間は速度は低下しない（優先度は競合時の順序であり、
+    # 空いている CPU は低優先スレッドにも与えられるため）。
+    # 公式サービス・NSSMフォールバック・直接起動のすべての起動経路へ効くよう Image 単位で設定する。
+    $ifeo = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\ollama.exe\PerfOptions'
+    try {
+        New-Item -Path $ifeo -Force | Out-Null
+        Set-ItemProperty -Path $ifeo -Name 'CpuPriorityClass' -Value 5 -Type DWord
+        Log 'set ollama.exe CPU priority to BELOW NORMAL (IFEO PerfOptions)'
+    }
+    catch { Log "WARNING: failed to set IFEO priority: $($_.Exception.Message)" }
     # 環境変数はプロセス起動時に読まれるため、サービスを再起動して反映する
     Log 'restarting Ollama to apply tuning'
     & sc.exe stop Ollama 2>$null | Out-Null
@@ -224,8 +261,8 @@ if (Test-OllamaApi) {
     if (-not $svc -and -not $fbSvc) {
         Log 'no Ollama service registered - registering NSSM fallback (ShineosOllama)'
         Progress 'registering Ollama service...'
-        $nssm = Join-Path $TmpDir 'nssm.exe'
-        if (-not (Test-Path $nssm)) { throw "nssm.exe not found: $nssm" }
+        $nssm = $nssmDurable
+        Log "registering fallback service with durable nssm: $nssm"
         $logDir = Join-Path $AppDir 'logs'
         New-Item -ItemType Directory -Force -Path $logDir | Out-Null
         # 既存プロセスを停止してから登録（ポート競合防止）
@@ -272,8 +309,8 @@ if ($svc) {
 if (-not $fbSvc) {
     Log 'registering NSSM fallback (ShineosOllama)'
     Progress 'registering Ollama service...'
-    $nssm = Join-Path $TmpDir 'nssm.exe'
-    if (-not (Test-Path $nssm)) { throw "nssm.exe not found: $nssm" }
+    $nssm = $nssmDurable
+
     $logDir = Join-Path $AppDir 'logs'
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     & $nssm install ShineosOllama $ollamaExe 'serve' | Out-Null

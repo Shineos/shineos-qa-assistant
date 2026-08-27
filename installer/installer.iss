@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.46"
+#define MyAppVersion "1.0.47"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -73,6 +73,8 @@ Source: "..\scripts\start_openwebui.bat";  DestDir: "{app}";       Flags: ignore
 Source: "..\scripts\configure_model.ps1";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\setup_knowledge.ps1";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\patch_openwebui_rag.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\attach_knowledge_to_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion
 ; WebView2 ラッパーアプリ（URL入力不要・閉じたらサービス停止）
@@ -350,12 +352,26 @@ begin
       ProgressPage.SetText('Windowsサービスを登録中...', '');
 
       { モデル一覧の最適化: ベースモデル（bge-m3/qwen2.5:3b）を一覧から除外するパッチを適用 }
-      { （冪等スクリプト。Open WebUI 0.11.0 に非表示機能が無いため、サービス起動前に適用する） }
+      { （冪等スクリプト。Open WebUI 0.11.0 に非表示機能が無いため、サービス起動前に適用する。
+        v1.0.47: 直接Execだとサイレント失敗したため cmd 経由で install.log へ出力を残す） }
       ProgressPage.SetText('モデル一覧を最適化しています...', '');
-      if Exec('"' + AppDir + '\venv\Scripts\python.exe"', '"' + AppDir + '\scripts\patch_openwebui_models.py"', '', SW_HIDE, ewWaitUntilTerminated, RC) then
-        if RC <> 0 then
-          MsgBox('モデル一覧の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
-                 'チャットのモデル一覧に不要なモデルが表示されることがあります。', mbInformation, MB_OK);
+      Exec('cmd.exe',
+        '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\patch_openwebui_models.py" >> "' + AppDir + '\install.log" 2>&1"',
+        '', SW_HIDE, ewWaitUntilTerminated, RC);
+      if RC <> 0 then
+        MsgBox('モデル一覧の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
+               'チャットのモデル一覧に不要なモデルが表示されることがあります。' + #13#10 +
+               'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
+
+      { ナレッジ常時RAG注入パッチ（v1.0.47: 0.11.0 の knowledge → metadata.files 不整合を修正） }
+      ProgressPage.SetText('ナレッジ注入を最適化しています...', '');
+      Exec('cmd.exe',
+        '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\patch_openwebui_rag.py" >> "' + AppDir + '\install.log" 2>&1"',
+        '', SW_HIDE, ewWaitUntilTerminated, RC);
+      if RC <> 0 then
+        MsgBox('ナレッジ注入の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
+               '社内文書の検索が効かなくなることがあります。' + #13#10 +
+               'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
 
       Ready := RunPowerShell('register_service.ps1', '-AppDir "' + AppDir + '" -Model "' + SelectedModel + '" -Port ' + IntToStr(SelectedPort), RC) and (RC = 0);
       if not Ready then
@@ -393,7 +409,7 @@ begin
                    'インストール後、アプリ画面から資料を追加してください。', mbInformation, MB_OK);
         end;
         ProgressPage.SetText('ナレッジ（社内文書）を登録しています...', '');
-        if not (RunPowerShell('setup_knowledge.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -KnowledgeDir "' + AppDir + '\knowledge" -LogFile "' + AppDir + '\logs\setup_knowledge.log"', RC) and (RC = 0)) then
+        if not (RunPowerShell('setup_knowledge.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -KnowledgeDir "' + AppDir + '\knowledge" -AppDir "' + AppDir + '" -LogFile "' + AppDir + '\logs\setup_knowledge.log"', RC) and (RC = 0)) then
           MsgBox('ナレッジ登録に失敗しました。' + #13#10 +
                  'インストール後、アプリ画面（Open WebUI）から資料を追加できます。' + #13#10 +
                  'ログ: ' + AppDir + '\logs\setup_knowledge.log', mbInformation, MB_OK);
@@ -464,8 +480,11 @@ begin
   DelTree(ExpandConstant('{userprofile}\.ollama'), True, True, True);
   DelTree(ExpandConstant('{localappdata}\Programs\Ollama'), True, True, True);
   DelTree(ExpandConstant('{appdata}\Ollama'), True, True, True);
-  { サービス（SYSTEMアカウント）がモデルを保存した場合は systemprofile 側も削除 }
+  { サービス（SYSTEMアカウント）がモデルを保存した場合は systemprofile 側も削除。
+    実際のSYSTEMプロファイルは System32\config\systemprofile（実機検証: v1.0.47）。
+    systemprofile 直下も念のため掃除する }
   DelTree(ExpandConstant('{sys}\..\systemprofile\.ollama'), True, True, True);
+  DelTree(ExpandConstant('{sys}\config\systemprofile\.ollama'), True, True, True);
 
   { インストーラが設定した性能チューニング用環境変数を削除 }
   RegDeleteValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'OLLAMA_MAX_LOADED_MODELS');
@@ -473,6 +492,10 @@ begin
   RegDeleteValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'OLLAMA_FLASH_ATTENTION');
   RegDeleteValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'OLLAMA_KEEP_ALIVE');
   RegDeleteValue(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'OLLAMA_NUM_PARALLEL');
+
+  { インストーラが設定した ollama.exe の優先度設定（IFEO PerfOptions）を削除 }
+  { ※ RegDeleteKey は存在しないため RegDeleteKeyIncludingSubkeys を使用 }
+  RegDeleteKeyIncludingSubkeys(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\ollama.exe');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -484,6 +507,15 @@ begin
     { サービス停止 → 削除（ファイル削除前に実行される） }
     Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosQA', '', SW_HIDE, ewWaitUntilTerminated, RC);
     Exec(ExpandConstant('{sys}\sc.exe'), 'delete ShineosQA', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    { ファイル生成ツールサーバーも停止・削除する。
+      （削除しないとNSSMサービスが venv の python.exe を掴み続け、
+        アンインストール後も「起動に失敗する自動開始サービス」がPCに残る） }
+    Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosFileGen', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete ShineosFileGen', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosMcpoFiles', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete ShineosMcpoFiles', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosMcpoMcp', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'delete ShineosMcpoMcp', '', SW_HIDE, ewWaitUntilTerminated, RC);
     if UninstallRemoveOllama then
       RemoveOllamaCompletely
     else
