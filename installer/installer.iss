@@ -1,4 +1,4 @@
-﻿; ============================================================================
+; ============================================================================
 ; 社内知恵袋 - インストーラ（Inno Setup 6.7.3）
 ;
 ; 社内規定・業務マニュアルをナレッジ化して社内Q&Aを実現する
@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.53"
+#define MyAppVersion "1.0.54"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -286,6 +286,34 @@ end;
 function Win32GetTickCount: Longint;
   external 'GetTickCount@kernel32.dll stdcall';
 
+{ install.log の末尾 MaxLines 行を改行結合で返す（v1.0.54）。
+  TSetupForm のカスタムフォームは昇格実行時に "Resource TSetupForm not found"
+  でクラッシュするため、標準プログレスページのメッセージ行に直近ログを表示する }
+function GetLogTail(const LogPath: String; MaxLines: Integer): String;
+var
+  Lines: TStringList;
+  Count: Integer;
+  i: Integer;
+  Start: Integer;
+begin
+  Result := '';
+  if not FileExists(LogPath) then Exit;
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(LogPath);
+    Count := Lines.Count;
+    Start := Count - MaxLines;
+    if Start < 0 then Start := 0;
+    for i := Start to Count - 1 do
+    begin
+      if Result <> '' then Result := Result + #13#10;
+      Result := Result + Lines[i];
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
 { 秒数を見やすい残り時間表記に整形（v1.0.53） }
 function FmtRemaining(Sec: Integer): String;
 begin
@@ -313,15 +341,16 @@ var
   RemainSec: Integer;
 begin
   Result := False;
+  { v1.0.54: 標準プログレスページに「バー＋％/残り時間＋直近ログ」を表示する。
+    詳細ログ用のPowerShellコンソールは表示しない（ログは本画面内に流す） }
   ProgressPage := CreateOutputProgressPage('インストール中',
     '社内知恵袋 のセットアップを実行しています。' + #13#10 +
-    '完了まで約20〜60分かかります（Ollama本体1.5GB＋AIモデル2.5GB＋Python・Open WebUI等、合計約7GBのダウンロードを含みます）。' + #13#10 +
-    'この画面のバーに進捗％と残り時間が表示されます。詳細ログは別コンソールに表示されます。' + #13#10 +
-    'インストール中はウィンドウを閉じないでください。');
+    '完了まで約20〜60分かかります（合計約6GBのダウンロードを含みます）。' + #13#10 +
+    'バーの下に進捗％・残り時間・処理内容と、リアルタイムログを表示します。');
   try
     ProgressPage.Show;
-
     ProgressPage.SetText('環境チェック中...', '');
+    WizardForm.Update;
 
     { v1.0.52: 既存の自スタックを先に停止してからポート判定する。
       旧ロジックは自サービスの待受（8080）を他アプリの占有と誤認し、
@@ -341,20 +370,19 @@ begin
     end;
 
     ProgressPage.SetProgress(1, 100);
-    ProgressPage.SetText('インストール中...', '進捗％と残り時間を表示します。詳細ログは別コンソールに表示されます');
+    ProgressPage.SetText('準備中...', '0% 完了');
     WizardForm.Update;
 
-    { v1.0.53: run_all.ps1 を非同期起動し、進捗INIを毎秒ポーリングして
-      ％・残り時間・現在の処理内容をプログレスバーに表示する。
-      （長時間のダウンロード中に利用者が中断してしまわないための対策） }
+    { v1.0.53: run_all.ps1 を非同期起動し、進捗INIを毎秒ポーリング。
+      v1.0.54: コンソールは非表示にし、install.log の末尾も画面へ表示 }
     PercentFile := ExpandConstant('{tmp}\install_progress.ini');
     DeleteFile(PercentFile);
     Exec('powershell.exe',
       '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\run_all.ps1') + '"' +
       ' -AppDir "' + AppDir + '" -TmpDir "' + ExpandConstant('{tmp}') + '"' +
       ' -Model "' + SelectedModel + '" -PythonVersion "{#PythonVersion}" -OpenWebuiVersion "{#OpenWebuiVersion}"' +
-      ' -ProgressIni "' + PercentFile + '"',
-      '', SW_SHOWNORMAL, ewNoWait, RC);
+' -ProgressIni "' + PercentFile + '"',
+      '', SW_HIDE, ewNoWait, RC);
 
     Ticks0 := Win32GetTickCount;
     DoneCode := -1;
@@ -377,7 +405,7 @@ begin
       end;
       StatusLine := StatusLine + '（経過 ' + IntToStr(ElapsedSec div 60) + '分）';
       ProgressPage.SetProgress(LastPct, 100);
-      ProgressPage.SetText(LastLabel, StatusLine);
+      ProgressPage.SetText(LastLabel, StatusLine + #13#10#13#10 + GetLogTail(AppDir + '\install.log', 6));
       WizardForm.Update;
       if DoneCode >= 0 then break;
       { 安全装置: 4時間経っても完了しなければタイムアウト扱い }
@@ -406,6 +434,8 @@ begin
     end;
 
     ProgressPage.SetProgress(100, 100);
+    ProgressPage.SetText('ダウンロード完了。サービスを登録しています...', '100% 完了・まもなく完了します');
+    WizardForm.Update;
     Result := True;
   finally
     ProgressPage.Hide;
