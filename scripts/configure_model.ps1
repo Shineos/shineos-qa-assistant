@@ -181,6 +181,32 @@ try {
         }
         Log "model configured: $($preset.id) (base=$Model, think=$($params.think), num_ctx=$($params.num_ctx), tools=disabled)"
     }
+    # ---------- 3.5 RAGテンプレートの日本語化（v1.0.55） ----------
+    # 既定（英語・長文）のRAGテンプレートは、3Bモデルが出力に指示文をそのまま
+    # 漏洩させる原因（実機検証: 英語の "### Task:..." が回答に混入）。
+    # 日本語の簡潔なテンプレートに差し替え、英語出力とテンプレート漏洩を防ぐ
+    try
+    {
+        $ragTemplate = @'
+### 依頼
+次の資料だけを使って、質問に日本語で答えてください。
+
+### 出力のルール
+- 質問も回答も日本語で行うこと（英語は使わない）。
+- 資料の内容やこの指示文を、そのまま出力に貼り付けないこと。要点を整理して答える。
+- 資料に id がある場合は [1] のように引用番号を付ける。id が無い資料には番号を付けない。
+- 資料に答えが無い場合は「ナレッジに該当する記載がありません」とだけ答える。
+
+<context>
+{{CONTEXT}}
+</context>
+'@
+        $ragBody = @{ RAG_TEMPLATE = $ragTemplate } | ConvertTo-Json -Depth 3
+        $ragBytes = [System.Text.Encoding]::UTF8.GetBytes($ragBody)
+        Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/retrieval/config/update" -Headers $headers -Body $ragBytes -ContentType 'application/json' -TimeoutSec 30 | Out-Null
+        Log 'RAG template set to Japanese (anti template-leak)'
+    } catch { Log "WARNING: RAG template update failed: $($_.Exception.Message)" }
+
     # ---------- 4. UI言語を日本語に設定（フロントの初回表示に反映） ----------
     try {
         # showChangelog=false: 「新機能」ダイアログ（What's New）の表示を無効化（v1.0.49）。
