@@ -10,7 +10,8 @@ param(
     [string]$AppDir,
     [string]$TmpDir,
     [string]$Version = '3.12.10',
-    [string]$ProgressFile = ''
+    [string]$ProgressFile = '',
+    [string]$ProgressIni = ''
 )
 
 $ErrorActionPreference = 'Stop'

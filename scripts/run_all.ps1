@@ -9,13 +9,26 @@ param(
     [string]$TmpDir,
     [string]$PythonVersion = '3.12.10',
     [string]$Model = 'qwen2.5:3b',
-    [string]$OpenWebuiVersion = '0.11.0'
+    [string]$OpenWebuiVersion = '0.11.0',
+    [string]$ProgressIni = ''
 )
 
 $ErrorActionPreference = 'Continue'
 $LogFile = Join-Path $AppDir 'install.log'
 $here = $PSScriptRoot
 $ErrorFile = Join-Path $TmpDir 'step_error.txt'
+
+# --- インストーラ進捗ファイル（％・ラベル・完了コード）への書き込み ---
+# Inno Setup 側が毎秒読み取り、進捗バーに％と残り時間を表示する（v1.0.53）。
+# UTF-16 (BOM) で書くことで Inno のワイド文字列 API で日本語ラベルが化けないようにする
+function Write-InstallerProgress {
+    param([int]$Percent, [string]$Label, [int]$Done = -1)
+    if (-not $ProgressIni) { return }
+    try {
+        $lines = '[progress]', "percent=$Percent", "label=$Label", "done=$Done"
+        Set-Content -Path $ProgressIni -Value $lines -Encoding Unicode
+    } catch { }
+}
 
 function Save-Error {
     param([string]$Message)
@@ -33,6 +46,7 @@ catch {
     $msg = "FATAL: cannot write to $AppDir - $($_.Exception.Message)"
     Save-Error $msg
     Write-Output $msg
+    Write-InstallerProgress 0 $msg 90
     exit 90
 }
 
@@ -46,9 +60,14 @@ function Invoke-Step {
     param(
         [string]$Name,
         [string]$Script,
-        [string[]]$Params
+        [string[]]$Params,
+        [int]$PctBefore,       # ステップ開始時の％
+        [int]$PctAfter,        # ステップ成功時の％
+        [string]$LabelBefore,  # ステップ中の表示ラベル
+        [string]$LabelAfter    # ステップ完了直後のラベル
     )
     Log-Console "===== STEP START: $Name ====="
+    Write-InstallerProgress $PctBefore $LabelBefore
     $outFile = Join-Path $TmpDir 'step_output.txt'
     # PS 5.1 は配列引数をネイティブコマンドに渡す際、空白を含むパスを
     # 「C:\Program」のように途中で切ってしまう（= 根本原因）。
@@ -63,15 +82,23 @@ function Invoke-Step {
         $tail = Get-Content $outFile -Tail 15 -ErrorAction SilentlyContinue
         Save-Error ("STEP FAILED: $Name (exit $code)`n" + ($tail -join "`n"))
         Get-Content $outFile -Tail 15 -ErrorAction SilentlyContinue | ForEach-Object { Log-Console "  | $_" }
+        Write-InstallerProgress $PctBefore "ステップ失敗: $Name" $code
         exit $code
     }
     Log-Console "===== STEP OK: $Name ====="
+    Write-InstallerProgress $PctAfter $LabelAfter
 }
 
-Invoke-Step -Name 'Python (3.12)' -Script 'setup_python.ps1' -Params @('-AppDir', $AppDir, '-TmpDir', $TmpDir, '-Version', $PythonVersion)
-Invoke-Step -Name 'Ollama' -Script 'setup_ollama.ps1' -Params @('-AppDir', $AppDir, '-TmpDir', $TmpDir)
-Invoke-Step -Name 'AI Models' -Script 'setup_openwebui.ps1' -Params @('-AppDir', $AppDir, '-Mode', 'models', '-Model', $Model)
-Invoke-Step -Name 'Open WebUI' -Script 'setup_openwebui.ps1' -Params @('-AppDir', $AppDir, '-Mode', 'app', '-OpenWebuiVersion', $OpenWebuiVersion)
+# 進捗％の配分: Python 0-3 / Ollama 3-35 / AIモデル 35-80 / Open WebUI 80-98（実測時間に基づく）
+$piArg = @()
+if ($ProgressIni) { $piArg = @('-ProgressIni', $ProgressIni) }
+
+Write-InstallerProgress 1 '準備中（Python環境）...'
+Invoke-Step -Name 'Python (3.12)' -Script 'setup_python.ps1' -Params (@('-AppDir', $AppDir, '-TmpDir', $TmpDir, '-Version', $PythonVersion) + $piArg) -PctBefore 1 -PctAfter 3 -LabelBefore 'Python環境を導入中...' -LabelAfter 'Python環境が完了しました'
+Invoke-Step -Name 'Ollama' -Script 'setup_ollama.ps1' -Params (@('-AppDir', $AppDir, '-TmpDir', $TmpDir) + $piArg) -PctBefore 3 -PctAfter 35 -LabelBefore 'Ollama（AI実行エンジン）を導入中...' -LabelAfter 'Ollamaが完了しました'
+Invoke-Step -Name 'AI Models' -Script 'setup_openwebui.ps1' -Params (@('-AppDir', $AppDir, '-Mode', 'models', '-Model', $Model) + $piArg) -PctBefore 35 -PctAfter 80 -LabelBefore 'AIモデルをダウンロード中...' -LabelAfter 'AIモデルが完了しました'
+Invoke-Step -Name 'Open WebUI' -Script 'setup_openwebui.ps1' -Params (@('-AppDir', $AppDir, '-Mode', 'app', '-OpenWebuiVersion', $OpenWebuiVersion) + $piArg) -PctBefore 80 -PctAfter 98 -LabelBefore 'Open WebUI（アプリ画面）を導入中...' -LabelAfter 'Open WebUIが完了しました'
 
 Log-Console '===== ALL STEPS COMPLETED ====='
+Write-InstallerProgress 100 'ダウンロード完了。サービスを登録しています...' 0
 exit 0

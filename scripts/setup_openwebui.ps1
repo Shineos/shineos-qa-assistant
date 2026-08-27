@@ -10,7 +10,8 @@ param(
     [string]$Model = 'qwen2.5:7b',
     [string]$EmbeddingModel = 'bge-m3',
     [string]$OpenWebuiVersion = '0.11.0',
-    [string]$ProgressFile = ''
+    [string]$ProgressFile = '',
+    [string]$ProgressIni = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +23,36 @@ function Progress {
     if ($ProgressFile) {
         [System.IO.File]::AppendAllText($ProgressFile, "$Message`n", (New-Object System.Text.UTF8Encoding($false)))
     }
+}
+
+# インストーラ進捗INIへの書き込み（v1.0.53）。
+# models モードは 35〜80、app モードは 80〜98 の範囲を担当
+function Write-InstallerProgress {
+    param([int]$Percent, [string]$Label)
+    if (-not $ProgressIni) { return }
+    try {
+        $lines = '[progress]', "percent=$Percent", "label=$Label", 'done=-1'
+        Set-Content -Path $ProgressIni -Value $lines -Encoding Unicode
+    } catch { }
+}
+
+# ollama pull の出力行（"pulling xxx: 45% ... 850 MB/1.9 GB" 等）を解析して
+# 指定範囲（$Base〜$Base+$Span）の％に変換しながら進捗INIへ書く
+function Invoke-PullWithProgress {
+    param([string]$OllamaExe, [string]$ModelName, [int]$Base, [int]$Span, [string]$DisplayName)
+    $lastPct = $Base
+    $out = & $OllamaExe pull $ModelName 2>&1 | ForEach-Object {
+        Progress $_
+        if ($_ -is [string] -and $_ -match '(\d{1,3})\s*%') {
+            $p = [int]$Matches[1]
+            if ($p -ge 0 -and $p -le 100) {
+                $lastPct = $Base + [int]($p * $Span / 100)
+                Write-InstallerProgress $lastPct ("AIモデルをダウンロード中: {0} ({1}%)" -f $DisplayName, $p)
+            }
+        }
+        $_
+    }
+    return ,$out
 }
 
 function Get-OllamaExe {
@@ -44,10 +75,12 @@ if ($Mode -eq 'models') {
 
     Log "pulling $Model"
     Progress "downloading model $Model..."
+    # 進捗配分: LLM 35→62%、埋め込み 62→80%（サイズ比で重み付け: v1.0.53）
+    Write-InstallerProgress 35 "AIモデルをダウンロード中: $Model"
     # 外部コマンドの stderr 出力（進捗）で NativeCommandError が発生しないよう
     # キャプチャ中のみ ErrorActionPreference を緩める
     $ErrorActionPreference = 'Continue'
-    $pullOut = & $ollama pull $Model 2>&1 | ForEach-Object { Progress $_; $_ }
+    $pullOut = Invoke-PullWithProgress -OllamaExe $ollama -ModelName $Model -Base 35 -Span 27 -DisplayName $Model
     $pullCode = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
     if ($pullCode -ne 0) {
@@ -69,7 +102,7 @@ if ($Mode -eq 'models') {
     Log "pulling $EmbeddingModel"
     Progress "downloading embedding model $EmbeddingModel (274MB)..."
     $ErrorActionPreference = 'Continue'
-    $pullOut2 = & $ollama pull $EmbeddingModel 2>&1 | ForEach-Object { Progress $_; $_ }
+    $pullOut2 = Invoke-PullWithProgress -OllamaExe $ollama -ModelName $EmbeddingModel -Base 62 -Span 18 -DisplayName $EmbeddingModel
     $pullCode2 = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
     if ($pullCode2 -ne 0) {
@@ -94,6 +127,7 @@ elseif ($Mode -eq 'app') {
 
     $venvDir = Join-Path $AppDir 'venv'
     $venvPython = Join-Path $venvDir 'Scripts\python.exe'
+    Write-InstallerProgress 80 'Open WebUI（アプリ画面）を導入中...'
     if (-not (Test-Path $venvPython)) {
         Log 'creating venv'
         Progress 'creating python venv...'
@@ -109,13 +143,16 @@ elseif ($Mode -eq 'app') {
     # torch は CPU 版を先に導入（Windows 既定の CUDA 版 2.5GB 超を回避）
     Log 'installing torch (CPU)'
     Progress 'installing torch (CPU)...'
+    Write-InstallerProgress 82 'Open WebUI導入中: AI演算ライブラリ (torch) を導入...'
     & $venvPython -m pip install torch --index-url https://download.pytorch.org/whl/cpu
     if ($LASTEXITCODE -ne 0) { throw 'torch install failed' }
+    Write-InstallerProgress 90 'Open WebUI導入中: 本体をインストール中...'
 
     Log "installing open-webui==$OpenWebuiVersion"
     Progress 'installing open-webui...'
     & $venvPython -m pip install "open-webui==$OpenWebuiVersion"
     if ($LASTEXITCODE -ne 0) { throw 'open-webui install failed' }
+    Write-InstallerProgress 96 'Open WebUI導入中: ファイル生成ライブラリを導入...'
 
     # ファイル生成ツールサーバー用ライブラリ（PDF/PPTX/Word 生成）
     Log 'installing file generation libraries'
@@ -124,6 +161,7 @@ elseif ($Mode -eq 'app') {
 
     Log 'app install done'
     Progress 'open-webui installed'
+    Write-InstallerProgress 98 'Open WebUIの導入が完了しました'
 }
 else {
     throw "unknown mode: $Mode"

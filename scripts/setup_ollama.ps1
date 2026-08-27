@@ -6,7 +6,8 @@
 param(
     [string]$AppDir,
     [string]$TmpDir,
-    [string]$ProgressFile = ''
+    [string]$ProgressFile = '',
+    [string]$ProgressIni = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,16 @@ function Progress {
     if ($ProgressFile) {
         [System.IO.File]::AppendAllText($ProgressFile, "$Message`n", (New-Object System.Text.UTF8Encoding($false)))
     }
+}
+
+# インストーラ進捗INIへの書き込み（％は 3〜35 の範囲を担当: v1.0.53）
+function Write-InstallerProgress {
+    param([int]$Percent, [string]$Label)
+    if (-not $ProgressIni) { return }
+    try {
+        $lines = '[progress]', "percent=$Percent", "label=$Label", 'done=-1'
+        Set-Content -Path $ProgressIni -Value $lines -Encoding Unicode
+    } catch { }
 }
 
 # インストーラがハングした場合に備えたタイムアウト付き実行
@@ -73,6 +84,7 @@ if ($ollamaExe) {
 else { $needUpgrade = $true }
 
 if ($needUpgrade) {
+    Write-InstallerProgress 3 'Ollama（AI実行エンジン）のダウンロード・導入中...'
     $installer = Join-Path $TmpDir 'OllamaSetup.exe'
     if (-not (Test-Path $installer)) {
         if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
@@ -81,16 +93,36 @@ if ($needUpgrade) {
         $url = 'https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe'
         Log "downloading $url"
         Progress 'downloading Ollama (1.5GB)...'
+        Write-InstallerProgress 4 'Ollama本体をダウンロード中（約1.5GB・数分〜20分）...'
         # -sS: 進捗メーターを抑制（PowerShell 5.1 は stderr 出力をエラー扱いし、
         # ユーザーに「エラー」と誤解させるため。エラー時のみ表示する）
         # -C -: 途中で切断された場合は続きから再開（レジューム）
         # --retry-all-errors --retry 10: 接続リセット等の一時エラーでも自動再試行
-        & curl.exe -sS -L --fail -C - --retry 10 --retry-all-errors --retry-delay 5 --connect-timeout 30 -o $installer $url
-        if ($LASTEXITCODE -ne 0) {
+        # v1.0.53: Start-Process で起動し、ファイルサイズをポーリングして進捗％を
+        # インストーラに通知する（ユーザーが中断しないよう％と残り時間を表示するため）
+        $dl = Start-Process -FilePath 'curl.exe' -ArgumentList @(
+            '-sS','-L','--fail','-C','-','--retry','10','--retry-all-errors','--retry-delay','5',
+            '--connect-timeout','30','-o',$installer,$url
+        ) -PassThru -WindowStyle Hidden
+        while (-not $dl.HasExited) {
+            Start-Sleep -Milliseconds 900
+            try {
+                $sz = (Get-Item $installer -ErrorAction SilentlyContinue).Length
+                if ($sz) {
+                    $ratio = [math]::Min(1.0, $sz / 1.65GB)
+                    $pct = 4 + [int]($ratio * 29)
+                    if ($pct -gt 33) { $pct = 33 }
+                    Write-InstallerProgress $pct ("Ollama本体をダウンロード中... {0:N0} MB / 約1,650 MB" -f ($sz / 1MB))
+                }
+            } catch { }
+        }
+        $dlCode = $dl.ExitCode
+        if ($dlCode -ne 0) {
             # 不完全なファイルが残ると次回も破損ファイルでインストールを試みるため削除する
             Remove-Item $installer -Force -ErrorAction SilentlyContinue
-            throw "OllamaSetup download failed (curl exit $LASTEXITCODE)"
+            throw "OllamaSetup download failed (curl exit $dlCode)"
         }
+        Write-InstallerProgress 34 'Ollama本体のダウンロード完了。インストール中...'
         $size = (Get-Item $installer).Length
         Log "downloaded: $([math]::Round($size / 1MB, 1)) MB"
         Progress "download complete: $([math]::Round($size / 1MB, 1)) MB"
@@ -138,6 +170,7 @@ if ($needUpgrade) {
 else {
     Log 'ollama version is current (no upgrade needed)'
     Progress 'ollama is up to date'
+    Write-InstallerProgress 33 'Ollamaは最新のためダウンロード不要です'
 }
 Log "ollama.exe: $ollamaExe"
 

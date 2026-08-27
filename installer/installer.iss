@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.52"
+#define MyAppVersion "1.0.53"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -282,15 +282,41 @@ end;
 
 { ---------- 長い処理（キャンセル可能な進捗ページ） ---------- }
 
+{ 経過ミリ秒取得（v1.0.53）。Inno に GetTickCount がないため Win32 API を直呼び }
+function Win32GetTickCount: Longint;
+  external 'GetTickCount@kernel32.dll stdcall';
+
+{ 秒数を見やすい残り時間表記に整形（v1.0.53） }
+function FmtRemaining(Sec: Integer): String;
+begin
+  if Sec < 90 then
+    Result := '約' + IntToStr(Sec) + '秒'
+  else if Sec < 5400 then
+    Result := '約' + IntToStr((Sec + 30) div 60) + '分'
+  else
+    Result := '約' + IntToStr(Sec div 3600) + '時間' + IntToStr(((Sec mod 3600) + 30) div 60) + '分';
+end;
+
 function RunLongSteps(AppDir: String): Boolean;
 var
   RC: Integer;
   StepError: AnsiString;  // LoadStringFromFile は AnsiString が必須
+  PercentFile: String;
+  Ticks0: Longint;
+  ElapsedSec: Integer;
+  DoneCode: Integer;
+  LastPct: Integer;
+  Pct: Integer;
+  LastLabel: String;
+  Lbl: String;
+  StatusLine: String;
+  RemainSec: Integer;
 begin
   Result := False;
   ProgressPage := CreateOutputProgressPage('インストール中',
     '社内知恵袋 のセットアップを実行しています。' + #13#10 +
     '完了まで約20〜60分かかります（Ollama本体1.5GB＋AIモデル2.5GB＋Python・Open WebUI等、合計約7GBのダウンロードを含みます）。' + #13#10 +
+    'この画面のバーに進捗％と残り時間が表示されます。詳細ログは別コンソールに表示されます。' + #13#10 +
     'インストール中はウィンドウを閉じないでください。');
   try
     ProgressPage.Show;
@@ -314,12 +340,58 @@ begin
       Exit;
     end;
 
-    ProgressPage.SetProgress(5, 100);
-    ProgressPage.SetText('インストール中...', 'ログは表示されているログウィンドウにリアルタイム表示されます（各ステップの開始・成功・失敗を明記）');
-    if not RunPowerShellVisible('run_all.ps1',
-        '-AppDir "' + AppDir + '" -TmpDir "' + ExpandConstant('{tmp}') + '" -Model "' + SelectedModel + '" -PythonVersion "{#PythonVersion}" -OpenWebuiVersion "{#OpenWebuiVersion}"', RC)
-       or (RC <> 0) then
+    ProgressPage.SetProgress(1, 100);
+    ProgressPage.SetText('インストール中...', '進捗％と残り時間を表示します。詳細ログは別コンソールに表示されます');
+    WizardForm.Update;
+
+    { v1.0.53: run_all.ps1 を非同期起動し、進捗INIを毎秒ポーリングして
+      ％・残り時間・現在の処理内容をプログレスバーに表示する。
+      （長時間のダウンロード中に利用者が中断してしまわないための対策） }
+    PercentFile := ExpandConstant('{tmp}\install_progress.ini');
+    DeleteFile(PercentFile);
+    Exec('powershell.exe',
+      '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\run_all.ps1') + '"' +
+      ' -AppDir "' + AppDir + '" -TmpDir "' + ExpandConstant('{tmp}') + '"' +
+      ' -Model "' + SelectedModel + '" -PythonVersion "{#PythonVersion}" -OpenWebuiVersion "{#OpenWebuiVersion}"' +
+      ' -ProgressIni "' + PercentFile + '"',
+      '', SW_SHOWNORMAL, ewNoWait, RC);
+
+    Ticks0 := Win32GetTickCount;
+    DoneCode := -1;
+    LastPct := 0;
+    LastLabel := '準備中...';
+    while True do
     begin
+      Sleep(1000);
+      Pct := GetIniInt('progress', 'percent', -1, 0, 100, PercentFile);
+      if Pct >= 0 then LastPct := Pct;
+      Lbl := GetIniString('progress', 'label', '', PercentFile);
+      if Lbl <> '' then LastLabel := Lbl;
+      DoneCode := GetIniInt('progress', 'done', -1, -1, 255, PercentFile);
+      ElapsedSec := (Win32GetTickCount - Ticks0) div 1000;
+      StatusLine := IntToStr(LastPct) + '% 完了';
+      if (LastPct >= 5) and (ElapsedSec >= 60) then
+      begin
+        RemainSec := ElapsedSec * (100 - LastPct) div LastPct;
+        StatusLine := StatusLine + '・残り' + FmtRemaining(RemainSec);
+      end;
+      StatusLine := StatusLine + '（経過 ' + IntToStr(ElapsedSec div 60) + '分）';
+      ProgressPage.SetProgress(LastPct, 100);
+      ProgressPage.SetText(LastLabel, StatusLine);
+      WizardForm.Update;
+      if DoneCode >= 0 then break;
+      { 安全装置: 4時間経っても完了しなければタイムアウト扱い }
+      if ElapsedSec > 14400 then
+      begin
+        DoneCode := 124;
+        break;
+      end;
+    end;
+
+    if DoneCode <> 0 then
+    begin
+      ProgressPage.SetText('エラーが発生しました', '詳細はログをご確認ください');
+      WizardForm.Update;
       StepError := '';
       if LoadStringFromFile(ExpandConstant('{tmp}\step_error.txt'), StepError) and (StepError <> '') then
         MsgBox('インストールに失敗しました。' + #13#10 + #13#10 +
