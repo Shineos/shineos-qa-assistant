@@ -173,8 +173,15 @@ function Wait-OllamaApi {
 # 設定はすべて冪等。システム環境変数（公式サービス・直接起動に効く）と
 # NSSMフォールバックサービスへの直接注入の両方を行い、再起動で反映する
 function Set-OllamaTuning {
+    # RAM を検出し、搭載量に応じて同時常駐モデル数を決める（v1.0.48）
+    # 14GB 以上: LLM（約2GB）+ 埋め込み（約1.2GB）の2モデルを同時常駐させ、
+    #            質問ごとのモデル切替（約4〜8秒の再ロード）を排除して応答を高速化
+    # 14GB 未満: 従来どおり1モデル（メモリ節約優先）
+    $ramGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+    $maxLoaded = if ($ramGB -ge 14) { '2' } else { '1' }
+    Log "detected RAM: ${ramGB}GB -> OLLAMA_MAX_LOADED_MODELS=$maxLoaded"
     $tuning = [ordered]@{
-        'OLLAMA_MAX_LOADED_MODELS' = '1'    # LLM/埋め込みモデルの同時常駐を防ぎRAMを節約
+        'OLLAMA_MAX_LOADED_MODELS' = $maxLoaded   # RAM連動: 2モデル常駐でモデル切替の再ロード待ちを排除
         'OLLAMA_KV_CACHE_TYPE'     = 'q8_0' # KVキャッシュ量子化でメモリ約半減（品質影響ほぼなし）
         'OLLAMA_FLASH_ATTENTION'   = '1'    # 長文コンテキストの高速化（KV量子化の前提条件）
         'OLLAMA_KEEP_ALIVE'        = '60m'  # モデルを1時間常駐させ、再ロード待ちによる応答遅延を防止
@@ -195,6 +202,22 @@ function Set-OllamaTuning {
         } catch { }
     }
     Get-Process -Name 'ollama', 'ollama app' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # トレイアプリ本体を無効化（リネーム）する（v1.0.48）。
+    # ユーザーに「見覚えのないアプリが起動した」と誤解されるのを防ぐため、
+    # トレイ（ollama app.exe）は一切起動できないようにする。サービスで常駐する
+    # ollama.exe（サーバー本体）には影響しない。元に戻す場合は .disabled をリネーム。
+    foreach ($tray in @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'),
+            (Join-Path $env:ProgramFiles 'Ollama\ollama app.exe')
+        )) {
+        if (Test-Path $tray) {
+            try {
+                Rename-Item -LiteralPath $tray -NewName ($tray + '.disabled') -Force
+                Log "disabled tray app: $tray -> .disabled"
+            } catch { Log "WARNING: could not disable tray: $tray : $($_.Exception.Message)" }
+        }
+        # 過去に無効化済みで本体が残るケースは掃除しない（冪等）
+    }
     # NSSMフォールバックサービスにも直接注入（システム環境変数の再読込を待たず確実に反映）
     $fbSvc2 = Get-Service -Name 'ShineosOllama' -ErrorAction SilentlyContinue
     if ($fbSvc2) {

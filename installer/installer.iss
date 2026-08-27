@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.47"
+#define MyAppVersion "1.0.48"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -75,6 +75,8 @@ Source: "..\scripts\setup_knowledge.ps1";  DestDir: "{app}";       Flags: ignore
 Source: "..\scripts\patch_openwebui_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_rag.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\attach_knowledge_to_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\warmup_model.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\repair_middleware.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion
 ; WebView2 ラッパーアプリ（URL入力不要・閉じたらサービス停止）
@@ -516,6 +518,8 @@ begin
     Exec(ExpandConstant('{sys}\sc.exe'), 'delete ShineosMcpoFiles', '', SW_HIDE, ewWaitUntilTerminated, RC);
     Exec(ExpandConstant('{sys}\sc.exe'), 'stop ShineosMcpoMcp', '', SW_HIDE, ewWaitUntilTerminated, RC);
     Exec(ExpandConstant('{sys}\sc.exe'), 'delete ShineosMcpoMcp', '', SW_HIDE, ewWaitUntilTerminated, RC);
+    { 起動時ウォームアップのタスクも削除（v1.0.48） }
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/delete /tn ShineosWarmup /f', '', SW_HIDE, ewWaitUntilTerminated, RC);
     if UninstallRemoveOllama then
       RemoveOllamaCompletely
     else

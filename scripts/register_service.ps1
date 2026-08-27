@@ -87,7 +87,17 @@ $envs = @(
     # patch_openwebui_models.py が /api/models から除外する → チャット一覧はプリセット3つのみ表示）
     '"OLLAMA_HIDDEN_MODELS=bge-m3:latest;qwen2.5:3b"',
     # Arena モデル（0.11 の評価用ダミーモデル）も一覧に出さない（社内Q&Aでは無用なため）
-    '"ENABLE_ARENA_MODELS=False"'
+    '"ENABLE_EVALUATION_ARENA_MODELS=False"',
+    # 背景のLLM生成タスクを無効化（v1.0.48: 応答速度優先。
+    # タイトル/タグ/追質問候補/入力補完は回答後にLLMを追加呼び出しし、次の質問を遅くする）
+    '"ENABLE_TITLE_GENERATION=False"',
+    '"ENABLE_TAGS_GENERATION=False"',
+    '"ENABLE_AUTOCOMPLETE_GENERATION=False"',
+    '"ENABLE_FOLLOW_UP_GENERATION=False"',
+    # RAG検索語のLLM生成を無効化（v1.0.48: 検索の安定化。
+    # 3Bモデルが生成する検索語は揺らぎが大きく関連文書を取りこぼすため、
+    # ユーザーの質問文をそのまま検索語として使用する）
+    '"ENABLE_RETRIEVAL_QUERY_GENERATION=False"'
 )
 Log 'nssm set AppEnvironmentExtra'
 & $nssm set $svc AppEnvironmentExtra $envs | Out-Null
@@ -97,6 +107,28 @@ if ($LASTEXITCODE -ne 0) { throw 'nssm AppEnvironmentExtra failed' }
 Log 'starting service'
 & $nssm start $svc | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'service start failed' }
+
+# --- 起動時モデルウォームアップ（v1.0.48）---
+# PC起動後に bge-m3（検索用）と選択LLMをメモリへ事前ロードし、最初の質問から
+# モデル再ロード待ちなしで即答できるようにする。タスクは SYSTEM 実行のため、
+# サービスと同じ SYSTEM プロファイル配下のモデル格納域を共有できる。
+# スクリプト側で RAM 14GB 未満は何もしないため、低メモリ機のメモリ収支は従来どおり。
+$warmupPs = Join-Path $AppDir 'scripts\warmup_model.ps1'
+if (Test-Path $warmupPs) {
+    Log 'registering warmup scheduled task (ShineosWarmup)'
+    try {
+        $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$warmupPs`" -Model $Model"
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        Register-ScheduledTask -TaskName 'ShineosWarmup' -Action $action -Trigger $trigger `
+            -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+        # 登録直後に一度実行（再起動を待たずにウォームアップ済みで使い始められる）
+        Start-ScheduledTask -TaskName 'ShineosWarmup'
+        Log 'warmup task registered and triggered'
+    } catch { Log "WARNING: warmup task registration failed: $($_.Exception.Message)" }
+} else {
+    Log "WARNING: warmup script not found: $warmupPs"
+}
 
 # --- ファイル生成ツールサーバー（PDF/PPTX/Word）をサービス登録 ---
 # 1) 軽量サーバー（filegen_server.py・PDF/PPTX）

@@ -61,6 +61,29 @@ INJECT2 = (
     "        # [Shineos patch] files handler diagnostics\n"
     "        log.debug('[Shineos] files handler: n_files=%s', len(files))\n"
 )
+# 検索語フォールバックの修正（v1.0.48）:
+# ENABLE_RETRIEVAL_QUERY_GENERATION=False のとき generate_queries が例外になり、
+# フォールバックの get_last_user_message(body['messages']) が 0.11.0 の処理済み
+# メッセージから空を返すため、RAG 検索が空クエリになる（実機検証）。
+# metadata.user_message（main.py が格納）へ確実にフォールバックさせる。
+ANCHOR3 = (
+    "        if len(queries) == 0:\n"
+    "            queries = [get_last_user_message(body['messages']) or '']\n"
+)
+INJECT3 = (
+    "        if len(queries) == 0 or not any(isinstance(_q, str) and _q.strip() for _q in queries):\n"
+    "            # [Shineos patch] 空クエリ対策: metadata.user_message へフォールバック\n"
+    "            _um = (body.get('metadata') or {}).get('user_message')\n"
+    "            if not _um:\n"
+    "                _um = get_last_user_message(body.get('messages') or [])\n"
+    "            if isinstance(_um, dict):\n"
+    "                _um = _um.get('content')\n"
+    "            if isinstance(_um, list):\n"
+    "                _um = ' '.join(str(_b.get('text', '')) for _b in _um if isinstance(_b, dict))\n"
+    "            if _um and isinstance(_um, str) and _um.strip():\n"
+    "                queries = [_um.strip()]\n"
+    "            log.debug('[Shineos] query fallback used: user_message=%s', bool(_um))\n"
+)
 
 
 def find_middleware_py(explicit=None):
@@ -89,9 +112,9 @@ def patch(path):
                 src = f.read()
         elif (
             "legacy knowledge branch ran" not in src
-            or "type 正規化" not in src
+            or "query fallback used" not in src
         ) and os.path.isfile(path + ".shineos.bak"):
-            # 診断ログ無しの旧適用分も作り直す
+            # 旧適用分（診断 or 検索語フォールバック修正なし）も作り直す
             print("[fix] re-applying patch to add diagnostics")
             shutil.copy2(path + ".shineos.bak", path)
             with open(path, encoding="utf-8") as f:
@@ -105,9 +128,12 @@ def patch(path):
         return 1
     shutil.copy2(path, path + ".shineos.bak")
     patched = src.replace(ANCHOR, INJECT_CODE, 1)
-    # ハンドラ側の診断ログ（チャットファイル処理が files を受け取っているか追跡）
-    if MARKER2 not in patched and ANCHOR2 in patched:
+    # ハンドラ側: type 正規化 + 診断ログ
+    if ANCHOR2 in patched:
         patched = patched.replace(ANCHOR2, INJECT2, 1)
+    # 検索語フォールバック修正（空クエリ対策）
+    if ANCHOR3 in patched:
+        patched = patched.replace(ANCHOR3, INJECT3, 1)
     with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(patched)
     print(f"[done] patched: {path}")
