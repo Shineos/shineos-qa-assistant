@@ -134,8 +134,8 @@ def patch(path):
     # 検索語フォールバック修正（空クエリ対策）
     if ANCHOR3 in patched:
         patched = patched.replace(ANCHOR3, INJECT3, 1)
-    from pathlib import Path
-    Path(path).write_text(patched, encoding="utf-8", newline="")
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(patched)
     print(f"[done] patched: {path}")
     return 0
 

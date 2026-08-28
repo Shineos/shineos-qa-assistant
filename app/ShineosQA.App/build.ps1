@@ -37,6 +37,7 @@ $refs = @(
     "/r:$fw\WPF\PresentationCore.dll",
     "/r:$fw\WPF\WindowsBase.dll",
     "/r:$fw\System.Xaml.dll",
+    "/r:$fw\System.ServiceProcess.dll",
     "/r:$sdkLib\Microsoft.Web.WebView2.Core.dll",
     "/r:$sdkLib\Microsoft.Web.WebView2.Wpf.dll"
 )

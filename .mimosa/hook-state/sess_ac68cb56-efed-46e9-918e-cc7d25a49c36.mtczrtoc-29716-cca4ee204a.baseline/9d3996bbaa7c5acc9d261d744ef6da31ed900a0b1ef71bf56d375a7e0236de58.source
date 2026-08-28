@@ -58,8 +58,8 @@ def main():
         print(f"[error] anchor not found in: {path}")
         return 1
     shutil.copy2(path, path + ".shineos.bak")
-    from pathlib import Path
-    Path(path).write_text(src.replace(OLD, NEW, 1), encoding="utf-8", newline="")
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(src.replace(OLD, NEW, 1))
     print(f"[done] patched: {path}")
     return 0
 

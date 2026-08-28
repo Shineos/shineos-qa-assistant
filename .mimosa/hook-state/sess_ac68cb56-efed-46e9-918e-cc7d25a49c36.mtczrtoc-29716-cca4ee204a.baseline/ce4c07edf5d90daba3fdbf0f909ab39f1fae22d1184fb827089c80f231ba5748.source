@@ -49,12 +49,6 @@ def find_package_root(explicit=None):
 
 
 def run_check(root=None):
-    if root:
-        # パス解釈脱出対策: site-packages 配下の open_webui のみ許可する（v1.0.60）
-        normalized = os.path.abspath(root).replace('\\', '/')
-        if 'site-packages' not in normalized or not normalized.rstrip('/').endswith('open_webui'):
-            print('[ERROR] invalid root: must point to site-packages/open_webui')
-            sys.exit(1)
     root = root or find_package_root()
     if not root:
         print('[ERROR] open_webui パッケージが見つかりません')

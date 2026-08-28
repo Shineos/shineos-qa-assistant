@@ -13,11 +13,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Management;
 using System.Net;
-using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.ServiceProcess;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -353,25 +351,26 @@ namespace ShineosQA
 
         bool IsServiceRunning()
         {
-            // sc.exe の代わりに ServiceController で状態を確認する（外部プロセスを起動しない v1.0.60）
-            try
-            {
-                using (var sc = new ServiceController(ServiceName))
-                    return sc.Status == ServiceControllerStatus.Running;
-            }
-            catch { return false; }
+            string output = RunSc("query " + ServiceName);
+            return output != null && output.Contains("RUNNING");
         }
 
         int GetServicePid()
         {
-            // ServiceController は PID を返さないため WMI で取得する
-            try
+            string output = RunSc("queryex " + ServiceName);
+            if (output == null) return 0;
+            foreach (string line in output.Split('\n'))
             {
-                var searcher = new ManagementObjectSearcher("SELECT ProcessId FROM Win32_Service WHERE Name='" + ServiceName + "'");
-                foreach (ManagementBaseObject obj in searcher.Get())
-                    return Convert.ToInt32(obj["ProcessId"]);
+                if (line.IndexOf("PID", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    Match m = Regex.Match(line, @"\d+");
+                    if (m.Success)
+                    {
+                        int pid;
+                        if (int.TryParse(m.Value, out pid)) return pid;
+                    }
+                }
             }
-            catch { }
             return 0;
         }
 
@@ -401,73 +400,58 @@ namespace ShineosQA
 
         int GetPortOwnerPid(int port)
         {
-            // netstat.exe を起動せず、IP Helper API でリスナーポートの所有 PID を取得する
-            // （外部プロセスを起動しないため高速かつ安全。v1.0.60）
             try
             {
-                const int AF_INET = 2;
-                const int TCP_TABLE_OWNER_PID_LISTENER = 3;
-                const int ERROR_INSUFFICIENT_BUFFER = 122;
-                int size = 0;
-                uint rc = GetExtendedTcpTable(IntPtr.Zero, ref size, true, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0);
-                if (rc != 0 && rc != ERROR_INSUFFICIENT_BUFFER) return 0;
-                IntPtr buf = Marshal.AllocHGlobal(size);
-                try
+                var psi = new ProcessStartInfo("netstat.exe", "-ano")
                 {
-                    if (GetExtendedTcpTable(buf, ref size, true, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0) != 0) return 0;
-                    int count = Marshal.ReadInt32(buf, 0);
-                    // MIB_TCPROW_OWNER_PID: state(4) localAddr(4) localPort(4) remoteAddr(4) remotePort(4) pid(4) = 24バイト
-                    // localPort はネットワークバイトオーダーで格納されているため、byte8<<8|byte9 が実ポート値になる
-                    IntPtr row = new IntPtr(buf.ToInt64() + 4);
-                    for (int i = 0; i < count; i++)
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    string output = p.StandardOutput.ReadToEnd();
+                    if (!p.WaitForExit(5000)) { try { p.Kill(); } catch { } return 0; }
+                    foreach (string line in output.Split('\n'))
                     {
-                        int state = Marshal.ReadInt32(row, 0);
-                        int localPort = (Marshal.ReadByte(row, 8) << 8) | Marshal.ReadByte(row, 9);
-                        int pid = Marshal.ReadInt32(row, 20);
-                        if (state == 2 /*LISTEN*/ && localPort == port) return pid;
-                        row = new IntPtr(row.ToInt64() + 24);
+                        if (line.IndexOf(":" + port, StringComparison.Ordinal) >= 0 && line.IndexOf("LISTENING", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length >= 5)
+                            {
+                                int pid;
+                                if (int.TryParse(parts[parts.Length - 1], out pid)) return pid;
+                            }
+                        }
                     }
                 }
-                finally { Marshal.FreeHGlobal(buf); }
             }
             catch { }
             return 0;
         }
 
-        [DllImport("iphlpapi.dll", SetLastError = true)]
-        static extern uint GetExtendedTcpTable(IntPtr tcpTable, ref int tableSize, bool order, int ipVersion, int tableClass, int reserved);
-
-        // sc.exe の代わりに ServiceController でサービスを制御する（外部プロセスを起動しない v1.0.60）
-        void ScStop()
+        string RunSc(string args)
         {
             try
             {
-                using (var sc = new ServiceController(ServiceName))
+                var psi = new ProcessStartInfo("sc.exe", args)
                 {
-                    if (sc.Status != ServiceControllerStatus.Stopped)
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    string output = p.StandardOutput.ReadToEnd();
+                    if (!p.WaitForExit(10000))
                     {
-                        sc.Stop();
-                        sc.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(20));
+                        try { p.Kill(); } catch { }
+                        return null;
                     }
+                    return output;
                 }
             }
-            catch { }
-        }
-
-        void ScStart()
-        {
-            try
-            {
-                using (var sc = new ServiceController(ServiceName))
-                {
-                    if (sc.Status != ServiceControllerStatus.Running)
-                    {
-                        sc.Start();
-                        sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
-                    }
-                }
-            }
-            catch { }
+            catch { return null; }
         }
 
         // 前回セッションの残骸を掃除する（v1.0.57）。
@@ -491,7 +475,7 @@ namespace ShineosQA
                     if (owner != 0 && !IsDescendantOf(owner, svcPid))
                     {
                         Log("sweep: port owner pid=" + owner + " is not under service (svc=" + svcPid + ") - restarting service");
-                        ScStop();
+                        RunSc("stop " + ServiceName);
                         System.Threading.Thread.Sleep(5000);
                         svcRunning = false;
                     }
@@ -523,41 +507,33 @@ namespace ShineosQA
 
         bool ServiceExists()
         {
-            // sc.exe の代わりに ServiceController で存在確認する（v1.0.60）
-            try
-            {
-                using (var sc = new ServiceController(ServiceName))
-                    return sc.Status != 0;
-            }
-            catch { return false; }
+            string output = RunSc("query " + ServiceName);
+            return output != null && (output.Contains("SERVICE_NAME") || output.Contains("RUNNING") || output.Contains("STOPPED"));
         }
 
         // Open WebUI へのパッチ適用状態を自己診断する（v1.0.52）。
         // パッチが外れていると RAG（社内文書検索）が静かに止まり、根拠の無い回答の
         // 原因になるため、起動時に検査して壊れていたら利用者に明示する。
-        // v1.0.60: python サブプロセスを起動せず、C# から site-packages を直接読んで検査する。
-        // { 相対パス, マーカー文字列, 説明 }
-        static readonly string[][] PatchMarkers = new[]
-        {
-            new[] { @"utils\models.py",     "OLLAMA_HIDDEN_MODELS",                              "モデル一覧の最適化パッチ（ベースモデル非表示）" },
-            new[] { @"utils\middleware.py", "[Shineos patch] model knowledge -> metadata.files", "ナレッジRAG注入パッチ（検索結果の自動注入）" },
-            new[] { @"utils\middleware.py", "[Shineos patch] 空クエリ対策",                      "検索語フォールバックパッチ（空クエリ対策）" },
-            new[] { @"env.py",              "[Shineos patch] no auto (Open WebUI) suffix",       "名称表示パッチ（(Open WebUI) 重複付加の除去）" },
-        };
-
         void CheckPatchHealth()
         {
             try
             {
-                string root = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "venv", "Lib", "site-packages", "open_webui"));
-                if (!Directory.Exists(root)) { Log("patch health: open_webui not found"); return; }
-                foreach (var m in PatchMarkers)
+                string py = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "venv", "Scripts", "python.exe");
+                string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "scripts", "check_patches.py");
+                if (!File.Exists(py) || !File.Exists(script)) return;
+                var psi = new ProcessStartInfo(py, "-X utf8 \"" + script + "\"")
                 {
-                    string path = Path.Combine(root, m[0].Replace('\\', Path.DirectorySeparatorChar));
-                    string content = File.Exists(path) ? File.ReadAllText(path) : "";
-                    if (!content.Contains(m[1]))
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    if (!p.WaitForExit(20000)) { try { p.Kill(); } catch { } return; }
+                    if (p.ExitCode != 0)
                     {
-                        Log("patch health check FAILED: " + m[2]);
+                        Log("patch health check FAILED");
                         System.Windows.MessageBox.Show(
                             "内部コンポーネント（Open WebUI）の状態が正常ではありません。\n" +
                             "社内文書を参照した回答ができない可能性があります。\n\n" +
@@ -565,10 +541,9 @@ namespace ShineosQA
                             "社内知恵袋を再インストールしてください。\n" +
                             "解決しない場合は https://shineos.com/contact/ までご連絡ください。",
                             "社内知恵袋 - 注意", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
                     }
+                    else Log("patch health check OK");
                 }
-                Log("patch health check OK");
             }
             catch (Exception ex) { Log("patch health check error: " + ex.Message); }
         }
@@ -621,7 +596,7 @@ namespace ShineosQA
             if (!IsServiceRunning())
             {
                 ShowLoading("サービスを起動しています...");
-                ScStart();
+                RunSc("start " + ServiceName);
             }
 
             svcPid = 0;
@@ -717,7 +692,7 @@ namespace ShineosQA
         {
             if (closing) return;
             closing = true;
-            try { ScStop(); } catch { }
+            try { RunSc("stop " + ServiceName); } catch { }
             // アプリ終了時に Ollama のロード済みモデルをアンロードしてメモリを解放する
             // （Open WebUI は停止するが Ollama は常駐のため、モデルだけ明示的に解放する）
             try

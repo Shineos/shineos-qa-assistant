@@ -80,8 +80,8 @@ def patch(path):
         shutil.copy2(path, bak)
         print(f"[backup] {bak}")
 
-    from pathlib import Path
-    Path(path).write_text(src, encoding="utf-8")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(src)
     print(f"[ok] patched: {path}")
     return 0
 

@@ -2273,9 +2273,11 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
                 rel.set('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/commentAuthors')
                 rel.set('Target', 'commentAuthors.xml')
                 
-                Path(rels_file).write_bytes(etree.tostring(rels_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
+                with open(rels_file, 'wb') as f:
+                    f.write(etree.tostring(rels_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
         
-        Path(authors_file).write_bytes(etree.tostring(root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
+        with open(authors_file, 'wb') as f:
+            f.write(etree.tostring(root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
         
         comments_dir = temp_path / 'ppt' / 'comments'
         comments_dir.mkdir(parents=True, exist_ok=True)
@@ -2306,7 +2308,8 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
             rel.set('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments')
             rel.set('Target', f'../comments/comment{slide_num}.xml')
             
-            Path(slide_rels_file).write_bytes(etree.tostring(slide_rels_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
+            with open(slide_rels_file, 'wb') as f:
+                f.write(etree.tostring(slide_rels_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
         
         existing_ids = [int(c.get('idx')) for c in comments_root.findall('.//p:cm', namespaces)]
         next_id = max(existing_ids) + 1 if existing_ids else 1
@@ -2323,7 +2326,8 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
         text_elem = etree.SubElement(comment, f'{{{namespaces["p"]}}}text')
         text_elem.text = comment_text
         
-        Path(comment_file).write_bytes(etree.tostring(comments_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
+        with open(comment_file, 'wb') as f:
+            f.write(etree.tostring(comments_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
         
         content_types_file = temp_path / '[Content_Types].xml'
         if content_types_file.exists():
@@ -2349,7 +2353,8 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
                 override.set('PartName', f'/ppt/comments/comment{slide_num}.xml')
                 override.set('ContentType', 'application/vnd.openxmlformats-officedocument.presentationml.comments+xml')
             
-            Path(content_types_file).write_bytes(etree.tostring(ct_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
+            with open(content_types_file, 'wb') as f:
+                f.write(etree.tostring(ct_root, xml_declaration=True, encoding='UTF-8', pretty_print=True))
         
         with zipfile.ZipFile(pptx_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for file_path in temp_path.rglob('*'):
@@ -2511,8 +2516,9 @@ async def review_document(
 
         elif file_type == "pptx":
             try:
-                temp_pptx = Path(temp_folder) / "temp_input.pptx"
-                temp_pptx.write_bytes(user_file.read())
+                temp_pptx = os.path.join(temp_folder, "temp_input.pptx")
+                with open(temp_pptx, 'wb') as f:
+                    f.write(user_file.read())
                 
                 prs = Presentation(temp_pptx)
                 slides_by_id = {int(s.slide_id): s for s in prs.slides}

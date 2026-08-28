@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.59"
+#define MyAppVersion "1.0.60"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -82,6 +82,7 @@ Source: "..\scripts\repair_middleware.py"; DestDir: "{app}\scripts"; Flags: igno
 Source: "..\scripts\preserve_uploads.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\check_patches.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\smoke_test.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\purge_orphan_vectors.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_branding.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion

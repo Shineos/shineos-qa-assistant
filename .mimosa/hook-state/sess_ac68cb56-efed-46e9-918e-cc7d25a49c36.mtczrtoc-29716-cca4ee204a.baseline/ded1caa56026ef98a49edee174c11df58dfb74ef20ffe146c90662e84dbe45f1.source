@@ -36,10 +36,6 @@ def http_json(base_url, path, method='GET', token=None, body=None, timeout=420):
         headers['Authorization'] = 'Bearer ' + token
     if body is not None:
         data = json.dumps(body, ensure_ascii=False).encode('utf-8')
-    # SSRF対策: ローカルの社内知恵袋 API のみに接続する
-    u = urllib.parse.urlparse(url)
-    if u.scheme != 'http' or u.hostname not in ('127.0.0.1', 'localhost'):
-        raise ValueError('blocked non-local url: %r' % url)
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode('utf-8')

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "pretooluse-ffe5cc65d0e606abe89a2d7b4b8f0932",
+  "runId": null,
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": []
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "PreToolUse"
+  },
+  "revision": null,
+  "diffHash": null,
+  "rulesVersion": null,
+  "sessionHash": "91fb2598dbb85272f6748156383e57b031eb00cd19721beb0206b05bb306ba86",
+  "reportRef": null,
+  "events": [
+    {
+      "eventId": "hook-46d0703f82db0e2c302c6fa9e60e9d93",
+      "findingId": "mimosa-71b2a194b99736cddef6efef",
+      "type": "finding_blocked",
+      "at": "2026-08-28T13:24:33.679Z",
+      "identity": {
+        "projectRelativeFile": "app/ShineosQA.App/MainWindow.cs",
+        "ruleId": "security",
+        "codeEvidenceHash": "79d30763b3af2e74c9cf3fc7c29fb98f847c1067e664448aa2a8111ba06cbf49",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 410,
+      "endLine": 410,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "79d30763b3af2e74c9cf3fc7c29fb98f847c1067e664448aa2a8111ba06cbf49"
+      },
+      "sequence": 0
+    }
+  ],
+  "observedFindingIds": [],
+  "verifiedFiles": [],
+  "recordedAt": "2026-08-28T13:24:34.190Z"
+}
