@@ -73,6 +73,12 @@ See the **[user guide (Japanese)](docs/user-guide.md)** for details.
 
 ## Screenshots
 
+### Installation flow (animated)
+
+The actual flow from launching the installer to completion (3x speed).
+
+![Installation flow](assets/videos/installer.gif)
+
 ### Usage demo (animated)
 
 The actual flow from question to a cited answer, recorded from real usage.
