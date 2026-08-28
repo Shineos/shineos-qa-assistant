@@ -72,11 +72,11 @@ See the **[user guide (Japanese)](docs/user-guide.md)** for details.
 
 ## Screenshots
 
-### Usage demo (animated)
+### Usage demo (video)
 
-The actual flow from question to a cited answer, recorded from the real app (~2.5x speed).
+The actual flow from question to a cited answer, recorded from real usage (~40 seconds, no audio).
 
-![Usage demo: question to cited answer](assets/videos/app-usage.gif)
+[▶ Play usage demo (MP4)](assets/videos/app-usage.mp4)
 
 ### App screens
 
