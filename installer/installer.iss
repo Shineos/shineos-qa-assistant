@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.60"
+#define MyAppVersion "1.0.61"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -568,7 +568,8 @@ begin
         '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\patch_openwebui_branding.py" >> "' + AppDir + '\install.log" 2>&1"',
         '', SW_HIDE, ewWaitUntilTerminated, RC);
 
-      { ナレッジ常時RAG注入パッチ（v1.0.47: 0.11.0 の knowledge → metadata.files 不整合を修正） }
+      { ナレッジ常時RAG注入パッチ（v1.0.47: 0.11.0 の knowledge → metadata.files 不整合を修正）＋
+        PPTX読込パッチ・ナレッジ登録エラーの日本語化（v1.0.61）を同一スクリプトで適用 }
       ProgressPage.SetText('ナレッジ注入を最適化しています...', '');
       Exec('cmd.exe',
         '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\patch_openwebui_rag.py" >> "' + AppDir + '\install.log" 2>&1"',

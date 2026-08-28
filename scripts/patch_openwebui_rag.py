@@ -68,7 +68,7 @@ INJECT2 = (
 # metadata.user_message（main.py が格納）へ確実にフォールバックさせる。
 ANCHOR3 = (
     "        if len(queries) == 0:\n"
-    "            queries = [get_last_user_message(body['messages']) or '']\n"
+    "        queries = [get_last_user_message(body['messages']) or '']\n"
 )
 INJECT3 = (
     "        if len(queries) == 0 or not any(isinstance(_q, str) and _q.strip() for _q in queries):\n"
@@ -85,18 +85,106 @@ INJECT3 = (
     "            log.debug('[Shineos] query fallback used: user_message=%s', bool(_um))\n"
 )
 
+# PPTX読込パッチ（v1.0.61）: unstructured 非同梱のため python-pptx の PptxLoader を直接使う
+PPTX_MARKER = "# [Shineos patch] offline pptx loader (python-pptx)"
+PPTX_ANCHOR = (
+    "            elif file_content_type in [\n"
+    "                'application/vnd.ms-powerpoint',\n"
+    "                'application/vnd.openxmlformats-officedocument.presentationml.presentation',\n"
+    "            ] or file_ext in ['ppt', 'pptx']:\n"
+    "                try:\n"
+    "                    from langchain_community.document_loaders import UnstructuredPowerPointLoader\n"
+    "\n"
+    "                    loader = UnstructuredPowerPointLoader(file_path)\n"
+    "                except ImportError:\n"
+    "                    log.warning(\n"
+    "                        \"The 'unstructured' package is not installed. \"\n"
+    "                        'Falling back to python-pptx for PowerPoint file loading. '\n"
+    "                        'Install unstructured for better results: pip install unstructured'\n"
+    "                    )\n"
+    "                    loader = PptxLoader(file_path)"
+)
+PPTX_NEW = (
+    "            elif file_content_type in [\n"
+    "                'application/vnd.ms-powerpoint',\n"
+    "                'application/vnd.openxmlformats-officedocument.presentationml.presentation',\n"
+    "            ] or file_ext in ['ppt', 'pptx']:\n"
+    "                # [Shineos patch] offline pptx loader (python-pptx)\n"
+    "                # unstructured は同梱しないため、python-pptx ベースの PptxLoader を直接使う\n"
+    "                loader = PptxLoader(file_path)"
+)
 
-def find_middleware_py(explicit=None):
+# ナレッジ登録のエラーメッセージパッチ（v1.0.61）: 画像などテキスト抽出できない形式を
+# 英語の技術的メッセージではなく、日本語でわかりやすく拒否する
+KMSG_MARKER = "# [Shineos patch] knowledge: friendly rejection for non-text files"
+KMSG_ANCHOR = (
+    "    # Add content to the vector database\n"
+    "    try:\n"
+    "        await process_file(\n"
+    "            request,\n"
+    "            ProcessFileForm(file_id=form_data.file_id, collection_name=id),\n"
+    "            user=user,\n"
+    "            db=db,\n"
+    "        )\n"
+    "    except Exception as e:\n"
+    "        raise HTTPException(\n"
+    "            status_code=status.HTTP_400_BAD_REQUEST,\n"
+    "            detail=str(e),\n"
+    "        )"
+)
+KMSG_NEW = (
+    "    # [Shineos patch] knowledge: friendly rejection for non-text files\n"
+    "    # 画像などテキスト抽出できない形式は、わかりやすい日本語で拒否する\n"
+    "    _lower = (file.filename or '').lower()\n"
+    "    if _lower.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tif', '.tiff', '.svg', '.ico', '.heic')):\n"
+    "        raise HTTPException(\n"
+    "            status_code=status.HTTP_400_BAD_REQUEST,\n"
+    "            detail='画像ファイルはナレッジに登録できません（テキストが含まれていないため）。テキストの含まれる PDF・Word・Markdown などを登録してください。',\n"
+    "        )\n"
+    "    try:\n"
+    "        await process_file(\n"
+    "            request,\n"
+    "            ProcessFileForm(file_id=form_data.file_id, collection_name=id),\n"
+    "            user=user,\n"
+    "            db=db,\n"
+    "        )\n"
+    "    except Exception as e:\n"
+    "        raise HTTPException(\n"
+    "            status_code=status.HTTP_400_BAD_REQUEST,\n"
+    "            detail='ナレッジに登録できませんでした（テキストが抽出できない形式の可能性があります）: ' + str(e),\n"
+    "        )"
+)
+
+
+def find_openwebui_file(rel, explicit=None):
     if explicit:
-        p = os.path.join(explicit, "utils", "middleware.py")
+        p = os.path.join(explicit, rel)
         if os.path.isfile(p):
             return p
         raise FileNotFoundError(f"not found: {p}")
     venv = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
-    p = os.path.join(venv, "Lib", "site-packages", "open_webui", "utils", "middleware.py")
+    p = os.path.join(venv, "Lib", "site-packages", "open_webui", rel.replace('/', os.sep))
     if not os.path.isfile(p):
         raise FileNotFoundError(f"not found: {p}")
     return p
+
+
+def apply_patch(path, marker, anchor, inject):
+    """共通適用処理: バックアップ → 置換 → Path.write_text で書き込み"""
+    with open(path, encoding="utf-8") as f:
+        src = f.read()
+    if marker in src:
+        print(f"[skip] already patched ({marker[:40]}...): {path}")
+        return 0
+    if anchor not in src:
+        print(f"[error] anchor not found in: {path}")
+        print("        Open WebUI のバージョンが変わった可能性があります。ANCHOR を見直してください。")
+        return 1
+    shutil.copy2(path, path + ".shineos.bak")
+    from pathlib import Path
+    Path(path).write_text(src.replace(anchor, inject, 1), encoding="utf-8", newline="")
+    print(f"[done] patched: {path}")
+    return 0
 
 
 def patch(path):
@@ -142,13 +230,31 @@ def patch(path):
 
 def main():
     explicit = sys.argv[1] if len(sys.argv) > 1 else None
+    worst = 0
+    print(f"target: {find_openwebui_file('utils/middleware.py', explicit)}")
+    worst = max(worst, patch(find_openwebui_file('utils/middleware.py', explicit)))
+
+    # PPTX読込パッチ（v1.0.61）: python-pptx の PptxLoader を直接使う
     try:
-        path = find_middleware_py(explicit)
+        pptx_path = find_openwebui_file("retrieval/loaders/main.py", explicit)
     except FileNotFoundError as e:
         print(f"[error] {e}")
-        return 1
-    print(f"target: {path}")
-    return patch(path)
+        worst = 1
+    else:
+        print(f"target: {pptx_path}")
+        worst = max(worst, apply_patch(pptx_path, PPTX_MARKER, PPTX_ANCHOR, PPTX_NEW))
+
+    # ナレッジ登録の日本語エラーパッチ（v1.0.61）
+    try:
+        kn_path = find_openwebui_file("routers/knowledge.py", explicit)
+    except FileNotFoundError as e:
+        print(f"[error] {e}")
+        worst = 1
+    else:
+        print(f"target: {kn_path}")
+        worst = max(worst, apply_patch(kn_path, KMSG_MARKER, KMSG_ANCHOR, KMSG_NEW))
+
+    return worst
 
 
 if __name__ == "__main__":

@@ -35,6 +35,16 @@ MARKERS = [
         "[Shineos patch] no auto (Open WebUI) suffix",
         '名称表示パッチ（(Open WebUI) 重複付加の除去）',
     ),
+    (
+        os.path.join('retrieval', 'loaders', 'main.py'),
+        "[Shineos patch] offline pptx loader (python-pptx)",
+        'PPTX読込パッチ（python-pptxで直接読込）',
+    ),
+    (
+        os.path.join('routers', 'knowledge.py'),
+        "[Shineos patch] knowledge: friendly rejection for non-text files",
+        '登録不可形式の日本語エラーパッチ',
+    ),
 ]
 
 

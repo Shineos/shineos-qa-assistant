@@ -543,6 +543,8 @@ namespace ShineosQA
             new[] { @"utils\middleware.py", "[Shineos patch] model knowledge -> metadata.files", "ナレッジRAG注入パッチ（検索結果の自動注入）" },
             new[] { @"utils\middleware.py", "[Shineos patch] 空クエリ対策",                      "検索語フォールバックパッチ（空クエリ対策）" },
             new[] { @"env.py",              "[Shineos patch] no auto (Open WebUI) suffix",       "名称表示パッチ（(Open WebUI) 重複付加の除去）" },
+            new[] { @"retrieval\loaders\main.py", "[Shineos patch] offline pptx loader (python-pptx)", "PPTX読込パッチ（python-pptxで直接読込）" },
+            new[] { @"routers\knowledge.py", "[Shineos patch] knowledge: friendly rejection for non-text files", "登録不可形式の日本語エラーパッチ" },
         };
 
         void CheckPatchHealth()
