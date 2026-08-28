@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.56"
+#define MyAppVersion "1.0.57"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"

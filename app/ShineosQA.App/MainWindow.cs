@@ -8,6 +8,7 @@
 //   （サービスの子プロセス（python）が8080を持つ場合は「自サービス」と判定）
 // - ビルド: build.ps1（.NET Framework 4.x csc 使用・SDK 不要）
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Management;
@@ -453,6 +454,57 @@ namespace ShineosQA
             catch { return null; }
         }
 
+        // 前回セッションの残骸を掃除する（v1.0.57）。
+        // アプリ強制終了等で閉じる処理が走らなかった場合に備え、起動時に2通りを対処:
+        //  (1) サービス停止中なのに自前（venv 配下）の python が生きている → kill 試行
+        //      （SYSTEM 権限で動く python は非管理者から kill 不可のため、失敗時は
+        //        従来どおりポート占有エラーを表示して案内する）
+        //  (2) サービス稼働中なのにポートの持ち主がサービス配下でない（WebUI ハング等）
+        //      → サービス停止→起動で回復（サービス制御権はインストーラが利用者に付与済み）
+        void SweepOrphanWebUi()
+        {
+            try
+            {
+                string venvDir = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "venv")) + Path.DirectorySeparatorChar;
+                bool svcRunning = IsServiceRunning();
+
+                if (svcRunning)
+                {
+                    int owner = GetPortOwnerPid(Port);
+                    int svcPid = GetServicePid();
+                    if (owner != 0 && !IsDescendantOf(owner, svcPid))
+                    {
+                        Log("sweep: port owner pid=" + owner + " is not under service (svc=" + svcPid + ") - restarting service");
+                        RunSc("stop " + ServiceName);
+                        System.Threading.Thread.Sleep(5000);
+                        svcRunning = false;
+                    }
+                    else return; // 正常稼働中（PC起動時の自動起動含む）は掃除不要
+                }
+
+                var orphans = new List<Process>();
+                using (var searcher = new ManagementObjectSearcher("SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE Name='python.exe' OR Name='pythonw.exe'"))
+                foreach (ManagementBaseObject obj in searcher.Get())
+                {
+                    string path = obj["ExecutablePath"] as string;
+                    if (string.IsNullOrEmpty(path)) continue;
+                    if (!path.StartsWith(venvDir, StringComparison.OrdinalIgnoreCase)) continue;
+                    try { orphans.Add(Process.GetProcessById(Convert.ToInt32(obj["ProcessId"]))); } catch { }
+                }
+                foreach (var p in orphans)
+                {
+                    try
+                    {
+                        Log("sweep: killing orphan webui python pid=" + p.Id);
+                        p.Kill();
+                    }
+                    catch (Exception ex) { Log("sweep: kill failed pid=" + p.Id + " (" + ex.Message + ")"); }
+                }
+                if (orphans.Count > 0) System.Threading.Thread.Sleep(2000);
+            }
+            catch (Exception ex) { Log("sweep error: " + ex.Message); }
+        }
+
         bool ServiceExists()
         {
             string output = RunSc("query " + ServiceName);
@@ -526,6 +578,9 @@ namespace ShineosQA
                 ShowError("社内知恵袋 がインストールされていません。\n\nインストーラ（ShineosQA-Setup.exe）を実行してください。", false);
                 return;
             }
+
+            // 前回の残骸（孤児化した WebUI python）を掃除してからポート判定する（v1.0.57）
+            SweepOrphanWebUi();
 
             // ポート占有チェック（サービス停止中なら 8080 を持つのは必ず別アプリ）
             // 占有されている場合はサービスを起動せずエラー表示する
