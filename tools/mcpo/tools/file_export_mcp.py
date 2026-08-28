@@ -2207,6 +2207,20 @@ def _get_pptx_namespaces():
         'p14': 'http://schemas.microsoft.com/office/powerpoint/2010/main'
     }
 
+def _parse_pptx_xml(path):
+    """XXE対策: アップロードされた PPTX 内の XML を解析する。
+    DOCTYPE/ENTITY 宣言を含む XML は拒否し、外部実体・ネットワーク読込を
+    無効化したパーサで解析する（v1.0.61）。"""
+    data = Path(path).read_bytes()
+    low = data[:4096].lower()
+    if b"<!doctype" in low or b"<!entity" in low:
+        raise ValueError("XML with DOCTYPE/ENTITY is not allowed")
+    parser = etree.XMLParser(
+        resolve_entities=False, no_network=True, load_dtd=False, dtd_validation=False
+    )
+    return etree.fromstring(data, parser=parser)
+
+
 def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, x=100, y=100):
     """
     Add a native PowerPoint comment by directly manipulating the ZIP file.
@@ -2232,7 +2246,7 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
         
         authors_file = temp_path / 'ppt' / 'commentAuthors.xml'
         if authors_file.exists():
-            root = etree.parse(str(authors_file)).getroot()
+            root = _parse_pptx_xml(authors_file)
             found = False
             for author in root.findall('.//p:cmAuthor', namespaces):
                 if author.get('name') == 'AI Reviewer':
@@ -2264,7 +2278,7 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
             
             rels_file = temp_path / 'ppt' / '_rels' / 'presentation.xml.rels'
             if rels_file.exists():
-                rels_root = etree.parse(str(rels_file)).getroot()
+                rels_root = _parse_pptx_xml(rels_file)
                 existing_ids = [int(rel.get('Id')[3:]) for rel in rels_root.findall('.//{http://schemas.openxmlformats.org/package/2006/relationships}Relationship')]
                 next_rid = max(existing_ids) + 1 if existing_ids else 1
                 
@@ -2282,7 +2296,7 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
         comment_file = comments_dir / f'comment{slide_num}.xml'
         
         if comment_file.exists():
-            comments_root = etree.parse(str(comment_file)).getroot()
+            comments_root = _parse_pptx_xml(comment_file)
         else:
             comments_root = etree.Element(
                 f'{{{namespaces["p"]}}}cmLst',
@@ -2291,7 +2305,7 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
             
             slide_rels_file = temp_path / 'ppt' / 'slides' / '_rels' / f'slide{slide_num}.xml.rels'
             if slide_rels_file.exists():
-                slide_rels_root = etree.parse(str(slide_rels_file)).getroot()
+                slide_rels_root = _parse_pptx_xml(slide_rels_file)
             else:
                 slide_rels_file.parent.mkdir(parents=True, exist_ok=True)
                 slide_rels_root = etree.Element(
@@ -2327,7 +2341,7 @@ def _add_native_pptx_comment_zip(pptx_path, slide_num, comment_text, author_id, 
         
         content_types_file = temp_path / '[Content_Types].xml'
         if content_types_file.exists():
-            ct_root = etree.parse(str(content_types_file)).getroot()
+            ct_root = _parse_pptx_xml(content_types_file)
             ns = {'ct': 'http://schemas.openxmlformats.org/package/2006/content-types'}
             
             has_authors = False
