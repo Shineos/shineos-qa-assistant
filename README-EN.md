@@ -70,6 +70,23 @@ Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://
 
 See the **[user guide (Japanese)](docs/user-guide.md)** for details.
 
+## Screenshots
+
+### Usage demo (animated)
+
+The actual flow from question to a cited answer, recorded from the real app (~2.5x speed).
+
+![Usage demo: question to cited answer](assets/videos/app-usage.gif)
+
+### App screens
+
+| Screen | Description |
+|------|------|
+| [![Main screen](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **Main screen** — opens from the desktop icon, no URL entry needed |
+| [![Cited answer](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **Answer with citation** — "15,000 yen (tax incl.) per night" shown together with the source document (QA_list.md) |
+| [![Knowledge management](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **Knowledge management** — review and add company documents (PDF / Markdown) |
+| [![Model presets](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **Purpose-built presets** — "Expense Reimbursement Guide", "IT Helpdesk" and more |
+
 ## Licensing & Support
 
 - **The product itself is free** (MIT License, provided as-is)

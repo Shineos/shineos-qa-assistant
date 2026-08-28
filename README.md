@@ -53,6 +53,23 @@
 
 詳しくは **[ユーザーマニュアル](docs/user-guide.md)** を参照してください。
 
+## 画面ギャラリー
+
+### 使用例（動画）
+
+質問してから出典付きの回答が返るまでの実際の流れです（実際のアプリ画面を録画・約2.5倍速）。
+
+![使用例: 質問から出典付き回答まで](assets/videos/app-usage.gif)
+
+### アプリ画面
+
+| 画面 | 内容 |
+|------|------|
+| [![メイン画面](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **メイン画面**。デスクトップのアイコンから起動するとこの画面が開きます（URL入力不要） |
+| [![出典付き回答](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **出典付きの回答**。「1泊あたり15,000円(税込)」と引用元文書（QA_list.md）が一緒に表示されます |
+| [![ナレッジ管理](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **ナレッジ管理**。社内文書（PDF・Markdown）の登録状況を確認・追加できます |
+| [![モデル一覧](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **用途別プリセット**。「経費精算ガイド」「ITヘルプデスク」など目的に合わせて選択できます |
+
 ## 提供形態とサポート
 
 - **本体は無償**（MIT License・自己責任でのご利用）
