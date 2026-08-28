@@ -85,6 +85,8 @@ See the **[user guide (Japanese)](docs/user-guide.md)** for details.
 | [Technical notes (Japanese)](docs/technical-notes.md) | Memory/speed tuning, how the RAG patches work, upgrades, smoke tests |
 | [Build docs (Japanese)](docs/build.md) | Build, test and release procedures (for developers) |
 | [CHANGELOG.md](CHANGELOG.md) | Version-by-version changes |
+| [Code Signing Policy](CODE_SIGNING.md) | What is signed, build/signing pipeline, team roles (SignPath Foundation requirements) |
+| [Privacy Policy](PRIVACY.md) | No telemetry, network access breakdown, local data storage |
 
 ## Contact
 

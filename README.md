@@ -67,6 +67,8 @@
 | [技術資料](docs/technical-notes.md) | メモリ/速度チューニング、RAGの仕組み、アップグレード、スモークテスト等の技術詳細 |
 | [構築ドキュメント](docs/build.md) | ビルド・テスト・リリース手順（開発者向け） |
 | [変更履歴](CHANGELOG.md) | バージョンごとの変更内容 |
+| [コード署名ポリシー](CODE_SIGNING.md) | 署名対象・ビルド/署名フロー・チーム役割（SignPath Foundation 要件） |
+| [プライバシーポリシー](PRIVACY.md) | データ収集なし・通信の内訳・データ保存先 |
 | [README-EN.md](README-EN.md) | English documentation |
 
 ## ライセンス
