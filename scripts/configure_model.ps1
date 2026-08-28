@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 if ($LogFile) { New-Item -ItemType Directory -Force -Path (Split-Path $LogFile) | Out-Null }
 function Log { param([string]$Message)
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
-    if ($LogFile) { $line | Out-File -FilePath $LogFile -Append -Encoding utf8 }
+    for ($i = 0; $i -lt 5; $i++) { try { if ($LogFile) { $line | Out-File -FilePath $LogFile -Append -Encoding utf8 -ErrorAction Stop }; break } catch { Start-Sleep -Milliseconds 150 } }
     Write-Host $line
 }
 . (Join-Path $PSScriptRoot 'ollama_common.ps1')

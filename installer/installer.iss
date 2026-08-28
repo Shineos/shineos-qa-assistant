@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.58"
+#define MyAppVersion "1.0.59"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -297,15 +297,25 @@ function Win32GetTickCount: Longint;
 function GetLogTail(const LogPath: String; MaxLines: Integer): String;
 var
   Lines: TStringList;
+  TmpCopy: String;
   Count: Integer;
   i: Integer;
   Start: Integer;
 begin
   Result := '';
   if not FileExists(LogPath) then Exit;
+  { install.log は PowerShell 側が同時書き込み中。直接 LoadFromFile すると排他ロードが
+    ライター（各スクリプトの Log 関数）と衝突してインストールが失敗する（v1.0.58 で実際に発生）。
+    そのため一度テンポラリへコピーしてから読む。コピーに失敗したら表示を諦める（表示は目的ではない） }
+  TmpCopy := ExpandConstant('{tmp}') + '\install_tail_copy.log';
+  if not FileCopy(LogPath, TmpCopy, False) then Exit;
   Lines := TStringList.Create;
   try
-    Lines.LoadFromFile(LogPath);
+    try
+      Lines.LoadFromFile(TmpCopy);
+    except
+      Exit;
+    end;
     Count := Lines.Count;
     Start := Count - MaxLines;
     if Start < 0 then Start := 0;
@@ -344,6 +354,8 @@ var
   Lbl: String;
   StatusLine: String;
   RemainSec: Integer;
+  TailText: String;
+  LastTailSec: Integer;
 begin
   Result := False;
   { v1.0.54: 標準プログレスページに「バー＋％/残り時間＋直近ログ」を表示する。
@@ -393,6 +405,8 @@ begin
     DoneCode := -1;
     LastPct := 0;
     LastLabel := '準備中...';
+    TailText := '';
+    LastTailSec := -10;
     while True do
     begin
       Sleep(1000);
@@ -409,8 +423,14 @@ begin
         StatusLine := StatusLine + '・残り' + FmtRemaining(RemainSec);
       end;
       StatusLine := StatusLine + '（経過 ' + IntToStr(ElapsedSec div 60) + '分）';
+      { ログ末尾の読み取りは3秒に1回で十分（毎秒だとライターと衝突しやすくなるため） }
+      if (ElapsedSec - LastTailSec) >= 3 then
+      begin
+        TailText := GetLogTail(AppDir + '\install.log', 6);
+        LastTailSec := ElapsedSec;
+      end;
       ProgressPage.SetProgress(LastPct, 100);
-      ProgressPage.SetText(LastLabel, StatusLine + #13#10#13#10 + GetLogTail(AppDir + '\install.log', 6));
+      ProgressPage.SetText(LastLabel, StatusLine + #13#10#13#10 + TailText);
       WizardForm.Update;
       if DoneCode >= 0 then break;
       { 安全装置: 4時間経っても完了しなければタイムアウト扱い }

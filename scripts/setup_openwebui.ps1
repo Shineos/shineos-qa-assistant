@@ -17,7 +17,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $LogFile = Join-Path $AppDir 'install.log'
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
-function Log { param([string]$Message) "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message" | Out-File -FilePath $LogFile -Append -Encoding utf8 }
+# install.log はインストーラ画面（ログ末尾表示）と同時に読み書きされるため一瞬ロードで衝突しうる。
+# ログは手段なので、書き込み失敗ではインストール全体を止めない（短リトライのみ・最悪黙って捨てる）v1.0.59
+function Log { param([string]$Message) $l = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"; for ($i = 0; $i -lt 5; $i++) { try { $l | Out-File -FilePath $LogFile -Append -Encoding utf8 -ErrorAction Stop; return } catch { Start-Sleep -Milliseconds 150 } } }
 function Progress {
     param([string]$Message)
     if ($ProgressFile) {
