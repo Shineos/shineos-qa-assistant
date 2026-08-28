@@ -73,11 +73,11 @@ See the **[user guide (Japanese)](docs/user-guide.md)** for details.
 
 ## Screenshots
 
-### Usage demo (video)
+### Usage demo (animated)
 
-The actual flow from question to a cited answer, recorded from real usage (~40 seconds, no audio).
+The actual flow from question to a cited answer, recorded from real usage.
 
-[▶ Play usage demo (MP4)](assets/videos/app-usage.mp4)
+![Usage demo: question to cited answer](assets/videos/app-usage.gif)
 
 ### App screens
 
