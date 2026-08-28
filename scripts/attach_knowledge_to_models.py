@@ -22,6 +22,7 @@ import urllib.request
 
 
 def http_json(base_url, path, method="GET", token=None, body=None, timeout=60):
+    url = base_url.rstrip("/") + path
     # SSRF対策: ローカルの社内知恵袋 API のみに接続する
     u = urllib.parse.urlparse(url)
     if u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost"):
