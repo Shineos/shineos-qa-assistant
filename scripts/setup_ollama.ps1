@@ -13,6 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $LogFile = Join-Path $AppDir 'install.log'
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+. (Join-Path $PSScriptRoot 'ollama_common.ps1')
 function Log { param([string]$Message) "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message" | Out-File -FilePath $LogFile -Append -Encoding utf8 }
 function Progress {
     param([string]$Message)
@@ -216,11 +217,28 @@ function Wait-OllamaApi {
 # 設定はすべて冪等。システム環境変数（公式サービス・直接起動に効く）と
 # NSSMフォールバックサービスへの直接注入の両方を行い、再起動で反映する
 function Set-OllamaTuning {
+    # GPU / CPU を検出し、機種ごとに最適な動作モードを決める（v1.0.58）。
+    #   cuda / amddgpu: Ollama が自動で GPU オフロードする（我々は設定を妨げない）
+    #   cpu           : 内蔵GPUのみ・専用GPUなし → CPU 推論。他アプリ優先の CPU 制御を適用する
+    # どちらのモードでも「他のアプリへの影響を最小化」する方針は共通。
+    $script:GpuMode = Get-GpuAcceleration
+    $ramGB2 = Get-RamGB
+    Log "detected GPU mode: $script:GpuMode (RAM: ${ramGB2}GB)"
+    try {
+        $gpuNote = switch ($script:GpuMode) {
+            'cuda'    { 'NVIDIA GPU を検出: AI処理をGPUで実行します（高速）' }
+            'amddgpu' { 'AMD GPU を検出: 対応カードの場合はGPUで実行します' }
+            default   { 'GPU非搭載のため CPU で実行します（回答まで10〜20秒程度）' }
+        }
+        [System.IO.File]::WriteAllText((Join-Path $AppDir 'gpu_mode.txt'),
+            "$($script:GpuMode)`n$gpuNote`n", (New-Object System.Text.UTF8Encoding($false)))
+    } catch { Log "WARNING: could not write gpu_mode.txt: $($_.Exception.Message)" }
+
     # RAM を検出し、搭載量に応じて同時常駐モデル数を決める（v1.0.48）
     # 14GB 以上: LLM（約2GB）+ 埋め込み（約1.2GB）の2モデルを同時常駐させ、
     #            質問ごとのモデル切替（約4〜8秒の再ロード）を排除して応答を高速化
     # 14GB 未満: 従来どおり1モデル（メモリ節約優先）
-    $ramGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+    $ramGB = $ramGB2
     $maxLoaded = if ($ramGB -ge 14) { '2' } else { '1' }
     Log "detected RAM: ${ramGB}GB -> OLLAMA_MAX_LOADED_MODELS=$maxLoaded"
     $tuning = [ordered]@{
@@ -269,17 +287,29 @@ function Set-OllamaTuning {
             $envList = @()
             foreach ($k in $tuning.Keys) { $envList += ('"' + $k + '=' + $tuning[$k] + '"') }
             & $nssm2 set ShineosOllama AppEnvironmentExtra $envList | Out-Null
-            & $nssm2 set ShineosOllama AppPriority BELOW_NORMAL_PRIORITY_CLASS | Out-Null
+            # プロセス優先度は CPU 推論機のみ「低」にする。NVIDIA GPU 機では
+            # 生成処理がGPUへオフロードされCPUが遊ぶため、優先度制御は不要（速度最優先）
+            if ($script:GpuMode -eq 'cuda') {
+                & $nssm2 set ShineosOllama AppPriority NORMAL_PRIORITY_CLASS | Out-Null
+            } else {
+                & $nssm2 set ShineosOllama AppPriority BELOW_NORMAL_PRIORITY_CLASS | Out-Null
+            }
         }
     }
 
-    # ollama.exe を「通常以下」のCPU優先度で起動する（他アプリへの影響を抑える核心対策）
+    # ollama.exe を「通常以下」のCPU優先度で起動する（CPU推論機での他アプリ保護）
     # 実測（Ryzen 7 5700U・16GB RAM）では AI 応答中に CPU 占有率が約82%に達し、
     # 他アプリの操作感が損なわれる。IFEO の PerfOptions で優先度を BELOW NORMAL に固定すると、
     # CPU を取り合う場面で Windows スケジューラが必ず他アプリ（通常優先度）を優先する。
     # システムがアイドルの間は速度は低下しない（優先度は競合時の順序であり、
     # 空いている CPU は低優先スレッドにも与えられるため）。
+    # NVIDIA GPU 機では生成がGPUへオフロードされCPU負荷が小さいため、この制御を
+    # 適用せず速度を最優先する（GPU機でもCPUもみ合いは発生しにくい）。
     # 公式サービス・NSSMフォールバック・直接起動のすべての起動経路へ効くよう Image 単位で設定する。
+    if ($script:GpuMode -eq 'cuda') {
+        Log 'skip IFEO CPU priority (NVIDIA GPU offload active)'
+    }
+    else {
     $ifeo = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\ollama.exe\PerfOptions'
     try {
         New-Item -Path $ifeo -Force | Out-Null
@@ -287,6 +317,7 @@ function Set-OllamaTuning {
         Log 'set ollama.exe CPU priority to BELOW NORMAL (IFEO PerfOptions)'
     }
     catch { Log "WARNING: failed to set IFEO priority: $($_.Exception.Message)" }
+    }
     # 環境変数はプロセス起動時に読まれるため、サービスを再起動して反映する
     Log 'restarting Ollama to apply tuning'
     & sc.exe stop Ollama 2>$null | Out-Null

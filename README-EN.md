@@ -35,7 +35,8 @@ Users register their company regulations and manuals (PDF/Markdown) as "knowledg
 | Purpose-built presets | One-click switching between "General", "Expense Reimbursement Guide" and "IT Helpdesk" assistants |
 | Hallucination guardrails | If the knowledge base has no answer, it says so — it never invents document names or numbers |
 | Response-speed tuning | Model co-residency and startup warm-up minimize the wait before each answer |
-| Friendly to other apps | CPU priority control and RAM-adaptive memory usage keep your PC responsive during AI answers |
+| Automatic GPU use | **NVIDIA GPUs are used automatically** for much faster answers; machines without one run on CPU (auto-detected at install) |
+| Friendly to other apps | On CPU-only machines, CPU priority control and RAM-adaptive memory keep your PC responsive; GPU machines favor speed since CPU load is low |
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
 | Auto start | Runs as a Windows service after each reboot |
 | Web search (OFF by default) | Optional DuckDuckGo lookup (no API key). **Queries would be sent externally, so keep it OFF for company questions** |

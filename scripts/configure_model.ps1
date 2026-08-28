@@ -14,6 +14,7 @@ param(
     [string]$BaseUrl = 'http://localhost:8080',
     [string]$Model = 'qwen2.5:3b',
     [int]$RamGB = 16,
+    [string]$GpuMode = '',
     [string]$Email = 'admin@localhost',
     [string]$Password = 'admin',
     [string]$LogFile = ''
@@ -28,6 +29,7 @@ function Log { param([string]$Message)
     if ($LogFile) { $line | Out-File -FilePath $LogFile -Append -Encoding utf8 }
     Write-Host $line
 }
+. (Join-Path $PSScriptRoot 'ollama_common.ps1')
 
 try {
     # ---------- 1. WebUI の起動を待つ（最大5分） ----------
@@ -109,10 +111,15 @@ try {
         }
     )
 
-    # num_ctx を RAM に応じて自動調整（KV キャッシュのメモリ使用量を抑え、
-    # 低メモリ機でも他のアプリへの影響を防ぐ）
-    #   8GB 未満: 2048（メモリ節約優先） / 8〜16GB: 4096 / 16GB 以上: 8192（品質優先）
-    $numCtx = if ($RamGB -lt 8) { 2048 } elseif ($RamGB -lt 16) { 4096 } else { 8192 }
+    # num_ctx を GPU / RAM に応じて自動調整（KV キャッシュのメモリ使用量を抑え、
+    # 他のアプリへの影響を防ぐ）（v1.0.58: GPU 機は VRAM に KV を置けるため 8192 固定）
+    #   GPU（NVIDIA検出）: 8192（KVはVRAMに載る。RAM制約を受けない）
+    #   CPU 推論機     : 8GB 未満 2048 / 8〜16GB 4096 / 16GB 以上 8192
+    $gpuMode = if ($GpuMode) { $GpuMode } else { Get-GpuAcceleration }
+    $numCtx = if ($gpuMode -eq 'cuda') {
+        8192
+    } elseif ($RamGB -lt 8) { 2048 } elseif ($RamGB -lt 16) { 4096 } else { 8192 }
+    Log "performance profile: gpu=$gpuMode ram=${RamGB}GB -> num_ctx=$numCtx"
 
     foreach ($preset in $presets) {
         # 既存モデルの knowledge 紐付けを引き継ぐ（v1.0.52）。

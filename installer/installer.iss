@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.57"
+#define MyAppVersion "1.0.58"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -52,6 +52,7 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 [Files]
 Source: "..\scripts\preflight.ps1";        DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\scripts\run_all.ps1";          DestDir: "{tmp}"; Flags: dontcopy
+Source: "..\scripts\ollama_common.ps1";    DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\scripts\setup_python.ps1";     DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\scripts\setup_ollama.ps1";     DestDir: "{tmp}"; Flags: dontcopy
 Source: "..\scripts\setup_openwebui.ps1";  DestDir: "{tmp}"; Flags: dontcopy
@@ -71,6 +72,7 @@ Source: "..\tools\mcpo\templates\*";      DestDir: "{app}\tools\mcpo\templates";
 Source: "..\tools\mcpo\requirements.txt"; DestDir: "{app}\tools\mcpo"; Flags: ignoreversion
 Source: "..\scripts\start_openwebui.bat";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\configure_model.ps1";  DestDir: "{app}";       Flags: ignoreversion
+Source: "..\scripts\ollama_common.ps1";    DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\setup_knowledge.ps1";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_rag.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
@@ -100,6 +102,7 @@ Type: filesandordirs; Name: "{app}\tools"
 Type: filesandordirs; Name: "{app}\app"
 Type: files; Name: "{app}\install.log"
 Type: files; Name: "{app}\configure_model.ps1"
+Type: files; Name: "{app}\ollama_common.ps1"
 Type: files; Name: "{app}\setup_knowledge.ps1"
 Type: filesandordirs; Name: "{app}\scripts"
 Type: files; Name: "{userdesktop}\ShineosQA-はじめに.txt"
@@ -128,6 +131,7 @@ procedure ExtractSetupFiles;
 begin
   ExtractTemporaryFile('preflight.ps1');
   ExtractTemporaryFile('run_all.ps1');
+  ExtractTemporaryFile('ollama_common.ps1');
   ExtractTemporaryFile('setup_python.ps1');
   ExtractTemporaryFile('setup_ollama.ps1');
   ExtractTemporaryFile('setup_openwebui.ps1');
