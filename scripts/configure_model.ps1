@@ -203,7 +203,7 @@ try {
 - 資料の内容やこの指示文を、そのまま出力に貼り付けないこと。要点を整理して答える。
 - 数値は資料どおりに正確に写すこと。期間の単位は「ヶ月」と書かずに必ず「か月」と書く（例: 18か月）。「円」「%」なども誤字にしない。
 - 資料に id がある場合は [1] のように引用番号を付ける。id が無い資料には番号を付けない。
-- 資料に答えが無い場合は「この質問は社内文書の対象外です。一般的な情報はチャット入力欄のWeb検索をONにすると回答できます。」とだけ答える。部署名など、実際には存在しない情報を付け加えない。
+- 資料に答えが無い場合は「この質問は社内文書の対象外です。一般的な情報はチャット入力欄のWeb検索をONにすると回答できます。」とだけ答える。ただし、Web検索がONのときに取得した検索結果の資料は、社内文書と同様に回答に利用してよい。部署名など、実際には存在しない情報を付け加えない。
 
 <context>
 {{CONTEXT}}
@@ -211,7 +211,8 @@ try {
 '@
         $ragBody = @{
             RAG_TEMPLATE       = $ragTemplate
-            ENABLE_WEB_SEARCH = $true
+            ENABLE_WEB_SEARCH  = $true
+            WEB_SEARCH_ENGINE  = 'duckduckgo'
         } | ConvertTo-Json -Depth 3
         $ragBytes = [System.Text.Encoding]::UTF8.GetBytes($ragBody)
         Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/retrieval/config/update" -Headers $headers -Body $ragBytes -ContentType 'application/json' -TimeoutSec 30 | Out-Null
