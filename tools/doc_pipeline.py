@@ -1,32 +1,40 @@
 #!/usr/bin/env python3
-"""社内知恵袋: /資料 コマンドのコード制御パイプライン（v1.0.66）
+"""社内知恵袋: /doc コマンドのコード制御パイプライン（v1.0.68）
 
-設計方針（docs/plan-document-creation.md の内容を実装。計画書自体は製品に含めない）:
+設計方針:
 - モデルの役割は「目次の JSON 出力（構造化出力で強制）」と「セクションの文章化」のみ。
-  判断・検索・ファイル化はすべてこのモジュール（コード）が実行する。
-- 資料作成は Q&A 経路（拒否システムプロンプト付き）の前に横取りするため、
-  「頼んだのに対象外と拒否される」矛盾を回避する。
-- 幻覚防止のルールは Q&A と同様の精神を資料向けに置き換えて維持:
-  「材料の無いセクションは書かない（社内資料に該当記載なしと明記）」
+  判断・検索・ファイル化・最終応答はすべてこのモジュール（コード）が実行する。
+- v1.0.68 の本質対応: 最終応答に LLM を使わない。
+  生成した案内文を OpenAI 互換の SSE チャンク（StreamingResponse）に変換して
+  標準の応答処理 (process_chat_response) に渡すため、UI 配信・DB 保存・
+  タイトル生成など下流の全処理が通常チャットと同じ経路で動作する。
+  3B モデルの復唱省略・脚色という問題を構造的に解消した。
+- PDF リンクは delta.annotations (url_citation) 経由で「ソース」としても表示する。
 - 生成 PDF は ShineosMcpoFiles (9003) の配信ディレクトリ (data/mcpo_output) に
-  直接書き出し、既存の /files 配信でオフライン閲覧できる。
+  直接書き出し、既存の /files 配信でオフライン閲覧できる。古い PDF は 7 日で自動削除。
 
-使い方: middleware から handle_document_request(request, form_data, extra_params, user, topic)
-を呼び、戻り値 form_data をそのまま返す（process_chat_payload を早期リターンさせる）。
+使い方: main.py の process_chat から
+  maybe_build_doc_response(request, form_data, user, metadata, model)
+を呼び、None 以外ならその戻り値を process_chat の戻り値として返す。
 """
 import asyncio
 import datetime
+import glob
 import html
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import httpx
+from starlette.responses import StreamingResponse
 
+DOC_TRIGGER = "/doc"
 MAX_SECTIONS = 5
 OUTLINE_TIMEOUT = 60.0
 SECTION_TIMEOUT = 120.0
+PDF_RETENTION_DAYS = 7
 REFUSAL_MARKER = "対象外"
 
 # 日本語フォント（tools/filegen_server.py と同じ候補）
@@ -40,6 +48,7 @@ _FONT_CANDIDATES = [
 def _data_dir() -> Path:
     try:
         from open_webui.env import DATA_DIR
+
         return Path(DATA_DIR)
     except Exception:
         return Path(os.environ.get("DATA_DIR", r"C:\Program Files\ShineosQA\data"))
@@ -65,13 +74,29 @@ def _ollama_base(request) -> str:
     return os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 
 
-def _base_model_id(request, model: dict) -> str:
-    mid = ""
+def _base_model_id(request, model_id: str) -> str:
     try:
-        mid = (model.get("info") or {}).get("base_model_id") or ""
+        m = request.app.state.MODELS.get(model_id) or {}
+        mid = (m.get("info") or {}).get("base_model_id") or ""
+        if mid:
+            return mid
     except Exception:
         pass
-    return mid or model.get("id") or "qwen2.5:3b"
+    return model_id or "qwen2.5:3b"
+
+
+def _cleanup_old_pdfs(days: int = PDF_RETENTION_DAYS):
+    """保存期間を過ぎた生成 PDF を削除する（ストレージ蓄積の防止）"""
+    try:
+        cutoff = time.time() - days * 86400
+        for f in glob.glob(str(_output_dir() / "doc_*.pdf")):
+            try:
+                if os.path.getmtime(f) < cutoff:
+                    os.remove(f)
+            except Exception:
+                continue
+    except Exception:
+        pass
 
 
 async def _emit(emitter, description: str, done: bool = False):
@@ -83,7 +108,7 @@ async def _emit(emitter, description: str, done: bool = False):
         pass
 
 
-async def _make_outline(request, model: dict, topic: str) -> dict:
+async def _make_outline(request, model_id: str, topic: str) -> dict:
     """目次を Ollama の構造化出力（format=schema）で生成する。
 
     チャット用モデル（拒否システムプロンプト付き）を使わず素のベースモデルに
@@ -114,7 +139,7 @@ async def _make_outline(request, model: dict, topic: str) -> dict:
         '例: {"title": "出張手当の整理", "sections": [{"heading": "概要", "query": "出張手当"}]}'
     )
     body = {
-        "model": _base_model_id(request, model),
+        "model": _base_model_id(request, model_id),
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "format": schema,
@@ -187,7 +212,7 @@ async def _write_section(request, form_data: dict, heading: str, query: str) -> 
 
 
 def _render_pdf(title: str, sections: list[dict], out_path: Path):
-    """Markdown 風の節構造を PDF にする（reportlab・日本語フォント対応）。"""
+    """節構造（目次つき）を PDF にする（reportlab・日本語フォント対応）。"""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.pdfbase import pdfmetrics
@@ -235,6 +260,7 @@ def _render_pdf(title: str, sections: list[dict], out_path: Path):
 
 
 def _build_pdf(title: str, sections: list[dict]) -> str:
+    _cleanup_old_pdfs()
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     fname = f"doc_{stamp}.pdf"
     out = _output_dir() / fname
@@ -242,46 +268,141 @@ def _build_pdf(title: str, sections: list[dict]) -> str:
     return f"{_file_base_url()}/{fname}"
 
 
-async def handle_document_request(request, form_data: dict, extra_params: dict, user, topic: str) -> dict:
-    """/資料 コマンドを処理し、form_data.messages を完成通知へ差し替える。
+def _sse(chunk: dict) -> str:
+    return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
-    例外は呼び出し側（middleware パッチ）が捕捉して通常チャットへフォールバックする。
+
+def _synthetic_stream(text: str, pdf_url: str, model_id: str, title: str) -> StreamingResponse:
+    """案内文を OpenAI 互換 SSE チャンクに変換する。
+
+    process_chat_response (streaming_chat_response_handler) がこのチャンクを
+    通常の LLM 応答と同じように処理するため、UI 配信・DB 保存・タイトル生成が
+    標準経路で動く。PDF URL は delta.annotations (url_citation) で
+    「ソース」カードとしても表示される。
     """
-    emitter = extra_params.get("__event_emitter__")
-    model = extra_params.get("__model__") or {}
 
+    async def gen():
+        now = int(time.time())
+        base = {"id": "chatcmpl-shineos-doc", "object": "chat.completion.chunk", "created": now, "model": model_id}
+        delta = {"content": text}
+        if pdf_url:
+            fname = pdf_url.rsplit("/", 1)[-1]
+            delta["annotations"] = [
+                {
+                    "type": "url_citation",
+                    "url_citation": {"url": pdf_url, "title": f"{title}（PDF）" if title else fname},
+                }
+            ]
+        yield _sse({**base, "choices": [{"index": 0, "delta": delta}]})
+        yield _sse(
+            {
+                **base,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            }
+        )
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+def _synthetic_completion(text: str, model_id: str) -> dict:
+    """非ストリーム (API) 用の OpenAI 互換レスポンス"""
+    return {
+        "id": "chatcmpl-shineos-doc",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_id,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+async def maybe_build_doc_response(request, form_data: dict, user, metadata: dict, model: dict):
+    """process_chat の LLM 呼び出し前に呼ばれる入口。
+
+    最後のユーザーメッセージが /doc で始まれば資料パイプラインを実行し、
+    案内文の合成レスポンスを返す。/doc 以外は None を返す（通常チャット）。
+    パイプライン失敗時はエラー案内の合成レスポンスを返す
+    （Q&A 経路にフォールバックすると「対象外」拒否になってしまうため）。
+    """
+    # この関数は process_chat の先頭（payload 処理の前）で呼ばれるため、
+    # messages / metadata['user_message'] には生の質問文が入っている。
+    topic = ""
+    um = metadata.get("user_message") or {}
+    c = um.get("content") if isinstance(um, dict) else None
+    if isinstance(c, str):
+        topic = c.strip()
+    elif isinstance(c, list):
+        topic = " ".join(p.get("text", "") for p in c if isinstance(p, dict)).strip()
     if not topic:
-        form_data["messages"] = [
-            {"role": "system", "content": "復唱タスク: ユーザーの文を、最初の文字から最後の文字まで一切変更せずそのまま出力してください。前置き・要約・省略・言い換えは禁止です。"},
-            {"role": "user", "content": "主題が空のため資料を作成できませんでした。/資料 の後に半角スペースと主題を付けて、もう一度送信してください。"},
-        ]
-        return form_data
+        try:
+            from open_webui.utils.misc import get_last_user_message
 
-    await _emit(emitter, "資料の目次を作成しています…")
-    outline = await _make_outline(request, model, topic)
-    sections = [{"heading": s["heading"], "query": s["query"], "body": ""} for s in outline["sections"]]
+            topic = (get_last_user_message(form_data.get("messages", [])) or "").strip()
+        except Exception:
+            pass
+    if not topic.startswith(DOC_TRIGGER):
+        return None
+    topic = topic[len(DOC_TRIGGER):].strip()
 
-    for i, sec in enumerate(sections, 1):
-        await _emit(emitter, f"第{i}節「{sec['heading']}」を執筆しています…")
-        sec["body"] = await _write_section(request, form_data, sec["heading"], sec["query"])
+    model_id = form_data.get("model") or ""
+    emitter = None
+    try:
+        from open_webui.socket.main import get_event_emitter
 
-    await _emit(emitter, "PDF を生成しています…")
-    url = await asyncio.to_thread(_build_pdf, outline["title"], sections)
-    empty = [s["heading"] for s in sections if "該当記載がありません" in s["body"]]
+        emitter = await get_event_emitter(metadata)
+    except Exception:
+        emitter = None
 
-    note = ""
-    if empty:
-        note = "\n※ ナレッジに材料がないセクションは「該当記載なし」と記載しています。"
+    try:
+        if not topic:
+            text = "主題が空のため資料を作成できませんでした。/doc の後に半角スペースと主題を付けて、もう一度送信してください。"
+            return _finish(request, form_data, text, None, model_id, emitter, "")
+        await _emit(emitter, "資料の目次を作成しています…")
+        outline = await _make_outline(request, model_id, topic)
+        sections = [{"heading": s["heading"], "query": s["query"], "body": ""} for s in outline["sections"]]
 
-    # チャット文は短くする（長文の復唱は小モデルが省略・脚色するため。
-    # 目次・本文の詳細は PDF 内に全て入っている）
-    notice = (
-        f"資料を作成しました（PDF / {len(sections)}セクション）。\n"
-        f"PDF: {url}{note}"
-    )
-    form_data["messages"] = [
-        {"role": "system", "content": "復唱タスク: ユーザーの文を、最初の文字から最後の文字まで一切変更せずそのまま出力してください。前置き・要約・省略・言い換えは禁止です。"},
-        {"role": "user", "content": notice},
-    ]
-    await _emit(emitter, "資料を作成しました", done=True)
-    return form_data
+        for i, sec in enumerate(sections, 1):
+            await _emit(emitter, f"第{i}節「{sec['heading']}」を執筆しています…")
+            sec["body"] = await _write_section(request, form_data, sec["heading"], sec["query"])
+
+        await _emit(emitter, "PDF を生成しています…")
+        url = await asyncio.to_thread(_build_pdf, outline["title"], sections)
+
+        empty = [s["heading"] for s in sections if "該当記載がありません" in s["body"]]
+        toc = "\n".join(f"{i}. {s['heading']}" for i, s in enumerate(sections, 1))
+        note = ""
+        if empty:
+            note = "\n\n※ 「" + "」「".join(empty) + "」はナレッジに材料が見つからなかったため、該当記載なしとしています。"
+        notice = (
+            f"資料を作成しました（{len(sections)}セクション / PDF）。\n\n"
+            f"**目次**\n{toc}\n\n"
+            f"PDF を開く: {url}\n"
+            f"（クリックで開かない場合は URL をコピーしてブラウザで開いてください）"
+            f"{note}"
+        )
+        await _emit(emitter, "資料を作成しました", done=True)
+        return _finish(request, form_data, notice, url, model_id, emitter, outline["title"])
+    except Exception:
+        return _finish(
+            request,
+            form_data,
+            "資料の作成中にエラーが発生しました。しばらく待ってからもう一度お試しください。",
+            None,
+            model_id,
+            emitter,
+            "",
+        )
+
+
+def _finish(request, form_data: dict, text: str, pdf_url, model_id: str, emitter, title: str):
+    if form_data.get("stream"):
+        return _synthetic_stream(text, pdf_url, model_id, title)
+    return _synthetic_completion(text, model_id)

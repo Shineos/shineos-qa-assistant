@@ -111,10 +111,10 @@ def main():
     ok5 = ('該当する記載がありません' in ans2) and ('寮管理規程' not in ans2)
     check('ガードレール: 拒否＋架空引用なし', ok5, f'{time.time()-t0:.0f}s')
 
-    # 6) 資料作成（/資料 コマンド: 目次→ナレッジ検索→PDF 生成。約1〜2分）
+    # 6) 資料作成（/doc コマンド: 目次→ナレッジ検索→PDF 生成。約1〜2分）
     print('--- 6. 資料作成（約1〜2分） ---')
     t0 = time.time()
-    ans3, _ = chat(args.base_url, tok, '/資料 経費精算の手順について')
+    ans3, _ = chat(args.base_url, tok, '/doc 経費精算の手順について')
     ok6 = ('資料を作成しました' in ans3 or '/files/doc_' in ans3) and ('.pdf' in ans3)
     check('資料作成: PDFリンク付き回答', ok6, f'{time.time()-t0:.0f}s')
 
