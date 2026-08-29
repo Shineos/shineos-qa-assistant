@@ -214,6 +214,11 @@ def _render_pdf(title: str, sections: list[dict], out_path: Path):
             pass
 
     story = [Paragraph(html.escape(title), styles["Title"]), Spacer(1, 12)]
+    # 目次
+    story.append(Paragraph("目次", styles["Heading2"]))
+    for idx, sec in enumerate(sections, 1):
+        story.append(Paragraph(html.escape(f"{idx}. {sec['heading']}"), styles["BodyText"]))
+    story.append(Spacer(1, 14))
     for idx, sec in enumerate(sections, 1):
         story.append(Paragraph(html.escape(f"{idx}. {sec['heading']}"), styles["Heading2"]))
         story.append(Spacer(1, 6))
@@ -247,8 +252,8 @@ async def handle_document_request(request, form_data: dict, extra_params: dict, 
 
     if not topic:
         form_data["messages"] = [
-            {"role": "system", "content": "ユーザーの文をそのまま出力してください。加工はしない。"},
-            {"role": "user", "content": "資料の主題が空です。「/資料 出張手当について」のように主題を添えて送信してください。"},
+            {"role": "system", "content": "復唱タスク: ユーザーの文を、最初の文字から最後の文字まで一切変更せずそのまま出力してください。前置き・要約・省略・言い換えは禁止です。"},
+            {"role": "user", "content": "主題が空のため資料を作成できませんでした。/資料 の後に半角スペースと主題を付けて、もう一度送信してください。"},
         ]
         return form_data
 
@@ -264,20 +269,18 @@ async def handle_document_request(request, form_data: dict, extra_params: dict, 
     url = await asyncio.to_thread(_build_pdf, outline["title"], sections)
     empty = [s["heading"] for s in sections if "該当記載がありません" in s["body"]]
 
-    toc = "\n".join(f"{i}. {s['heading']}" for i, s in enumerate(sections, 1))
     note = ""
     if empty:
-        note = "\n\n※ 「" + "」「".join(empty) + "」はナレッジに材料が見つからなかったため、該当記載なしとしています。"
+        note = "\n※ ナレッジに材料がないセクションは「該当記載なし」と記載しています。"
 
+    # チャット文は短くする（長文の復唱は小モデルが省略・脚色するため。
+    # 目次・本文の詳細は PDF 内に全て入っている）
     notice = (
-        f"資料を作成しました（{len(sections)}セクション / PDF）。\n\n"
-        f"**目次**\n{toc}\n\n"
-        f"PDF を開く: {url}\n"
-        f"（クリックで開かない場合は URL をコピーしてブラウザで開いてください）"
-        f"{note}"
+        f"資料を作成しました（PDF / {len(sections)}セクション）。\n"
+        f"PDF: {url}{note}"
     )
     form_data["messages"] = [
-        {"role": "system", "content": "あなたは資料作成アシスタントです。ユーザーの文をそのまま出力してください。追加・削除・要約はしない。"},
+        {"role": "system", "content": "復唱タスク: ユーザーの文を、最初の文字から最後の文字まで一切変更せずそのまま出力してください。前置き・要約・省略・言い換えは禁止です。"},
         {"role": "user", "content": notice},
     ]
     await _emit(emitter, "資料を作成しました", done=True)
