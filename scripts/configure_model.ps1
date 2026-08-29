@@ -210,9 +210,11 @@ try {
 </context>
 '@
         $ragBody = @{
-            RAG_TEMPLATE       = $ragTemplate
-            ENABLE_WEB_SEARCH  = $true
-            WEB_SEARCH_ENGINE  = 'duckduckgo'
+            RAG_TEMPLATE                  = $ragTemplate
+            ENABLE_WEB_SEARCH             = $true
+            WEB_SEARCH_ENGINE             = 'duckduckgo'
+            WEB_FETCH_MAX_CONTENT_LENGTH  = '1000000'
+            WEB_LOADER_TIMEOUT            = '30'
         } | ConvertTo-Json -Depth 3
         $ragBytes = [System.Text.Encoding]::UTF8.GetBytes($ragBody)
         Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/retrieval/config/update" -Headers $headers -Body $ragBytes -ContentType 'application/json' -TimeoutSec 30 | Out-Null
