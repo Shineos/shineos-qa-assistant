@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.65"
+#define MyAppVersion "1.0.66"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -65,6 +65,7 @@ Source: "..\vendor\nssm.exe";              DestDir: "{tmp}"; Flags: dontcopy
 ; --- インストール先へ配置するファイル ----------------------------------------
 Source: "..\vendor\nssm.exe";              DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "..\tools\filegen_server.py";     DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "..\tools\doc_pipeline.py";       DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "..\tools\mcpo\tools\file_export_server.py"; DestDir: "{app}\tools\mcpo\tools"; Flags: ignoreversion
 Source: "..\tools\mcpo\tools\file_export_mcp.py";    DestDir: "{app}\tools\mcpo\tools"; Flags: ignoreversion
 Source: "..\tools\mcpo\tools\__init__.py";          DestDir: "{app}\tools\mcpo\tools"; Flags: ignoreversion
@@ -76,6 +77,7 @@ Source: "..\scripts\ollama_common.ps1";    DestDir: "{app}";       Flags: ignore
 Source: "..\scripts\setup_knowledge.ps1";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_rag.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\patch_openwebui_doc.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\attach_knowledge_to_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\warmup_model.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\repair_middleware.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
@@ -578,6 +580,13 @@ begin
         MsgBox('ナレッジ注入の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
                '社内文書の検索が効かなくなることがあります。' + #13#10 +
                'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
+
+      { 資料作成パイプライン（v1.0.66: /資料 コマンドでナレッジから PDF を生成。
+        doc_pipeline.py を site-packages へ配置し middleware に横取り処理を注入する冪等スクリプト） }
+      ProgressPage.SetText('資料作成機能を設定しています...', '');
+      Exec('cmd.exe',
+        '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\patch_openwebui_doc.py" >> "' + AppDir + '\install.log" 2>&1"',
+        '', SW_HIDE, ewWaitUntilTerminated, RC);
 
       Ready := RunPowerShell('register_service.ps1', '-AppDir "' + AppDir + '" -Model "' + SelectedModel + '" -Port ' + IntToStr(SelectedPort), RC) and (RC = 0);
       if not Ready then
