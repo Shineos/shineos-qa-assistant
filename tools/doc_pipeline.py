@@ -31,11 +31,14 @@ import httpx
 from starlette.responses import StreamingResponse
 
 DOC_TRIGGER = "/doc"
+# コマンドごとに出力形式を決める（/doc は PDF 既定の別名）
+TRIGGERS = {"/docx": "docx", "/pptx": "pptx", "/pdf": "pdf", "/doc": "pdf"}
 MAX_SECTIONS = 5
 OUTLINE_TIMEOUT = 60.0
 SECTION_TIMEOUT = 120.0
 PDF_RETENTION_DAYS = 7
 REFUSAL_MARKER = "対象外"
+SUPPORTED_FORMATS = ("pdf", "pptx", "docx")
 
 # 日本語フォント（tools/filegen_server.py と同じ候補）
 _FONT_CANDIDATES = [
@@ -85,16 +88,17 @@ def _base_model_id(request, model_id: str) -> str:
     return model_id or "qwen2.5:3b"
 
 
-def _cleanup_old_pdfs(days: int = PDF_RETENTION_DAYS):
-    """保存期間を過ぎた生成 PDF を削除する（ストレージ蓄積の防止）"""
+def _cleanup_old_files(days: int = PDF_RETENTION_DAYS):
+    """保存期間を過ぎた生成資料（pdf/pptx/docx）を削除する（ストレージ蓄積の防止）"""
     try:
         cutoff = time.time() - days * 86400
-        for f in glob.glob(str(_output_dir() / "doc_*.pdf")):
-            try:
-                if os.path.getmtime(f) < cutoff:
-                    os.remove(f)
-            except Exception:
-                continue
+        for ext in ("pdf", "pptx", "docx"):
+            for f in glob.glob(str(_output_dir() / f"doc_*.{ext}")):
+                try:
+                    if os.path.getmtime(f) < cutoff:
+                        os.remove(f)
+                except Exception:
+                    continue
     except Exception:
         pass
 
@@ -259,13 +263,67 @@ def _render_pdf(title: str, sections: list[dict], out_path: Path):
     doc.build(story)
 
 
-def _build_pdf(title: str, sections: list[dict]) -> str:
-    _cleanup_old_pdfs()
+def _build_document(fmt: str, title: str, sections: list[dict]) -> str:
+    """節構造を指定形式（pdf/pptx/docx）で書き出し、配信 URL を返す"""
+    _cleanup_old_files()
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname = f"doc_{stamp}.pdf"
+    fname = f"doc_{stamp}.{fmt}"
     out = _output_dir() / fname
-    _render_pdf(title, sections, out)
+    if fmt == "pdf":
+        _render_pdf(title, sections, out)
+    elif fmt == "pptx":
+        _render_pptx(title, sections, out)
+    else:
+        _render_docx(title, sections, out)
     return f"{_file_base_url()}/{fname}"
+
+
+def _render_pptx(title: str, sections: list[dict], out_path: Path):
+    """スライド形式: 表題スライド + セクションごとに 1 枚（箇条書き）"""
+    from pptx import Presentation
+    from pptx.util import Pt
+
+    prs = Presentation()
+    title_slide = prs.slides.add_slide(prs.slide_layouts[0])
+    title_slide.shapes.title.text = title
+
+    for sec in sections:
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = sec["heading"]
+        body = slide.placeholders[1].text_frame
+        body.text = ""
+        first = True
+        for line in sec["body"].splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            p = body.paragraphs[0] if first else body.add_paragraph()
+            first = False
+            p.text = ("・" + line.lstrip("-・• ").strip()) if not line.startswith(("（", "(")) else line
+            p.font.size = Pt(18)
+    prs.save(str(out_path))
+
+
+def _render_docx(title: str, sections: list[dict], out_path: Path):
+    """Word 形式: 見出し + 本文（PDF と同じ節構造）"""
+    import docx
+
+    d = docx.Document()
+    d.add_heading(title, 0)
+    d.add_heading("目次", level=1)
+    for idx, sec in enumerate(sections, 1):
+        d.add_paragraph(f"{idx}. {sec['heading']}")
+    for idx, sec in enumerate(sections, 1):
+        d.add_heading(f"{idx}. {sec['heading']}", level=1)
+        for line in sec["body"].splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(("-", "・", "•")):
+                d.add_paragraph(line.lstrip("-・• ").strip(), style="List Bullet")
+            else:
+                d.add_paragraph(line)
+    d.save(str(out_path))
 
 
 def _sse(chunk: dict) -> str:
@@ -348,9 +406,15 @@ async def maybe_build_doc_response(request, form_data: dict, user, metadata: dic
             topic = (get_last_user_message(form_data.get("messages", [])) or "").strip()
         except Exception:
             pass
-    if not topic.startswith(DOC_TRIGGER):
+    # トリガー判定: 長いコマンドから照合（/docx と /doc の前置混同を防ぐ）
+    fmt = None
+    for trigger in sorted(TRIGGERS, key=len, reverse=True):
+        if topic.startswith(trigger):
+            fmt = TRIGGERS[trigger]
+            topic = topic[len(trigger):].strip()
+            break
+    if fmt is None:
         return None
-    topic = topic[len(DOC_TRIGGER):].strip()
 
     model_id = form_data.get("model") or ""
     emitter = None
@@ -363,7 +427,7 @@ async def maybe_build_doc_response(request, form_data: dict, user, metadata: dic
 
     try:
         if not topic:
-            text = "主題が空のため資料を作成できませんでした。/doc の後に半角スペースと主題を付けて、もう一度送信してください。"
+            text = "主題が空のため資料を作成できませんでした。/pdf・/pptx・/docx の後に半角スペースと主題を付けて、もう一度送信してください。"
             return _finish(request, form_data, text, None, model_id, emitter, "")
         await _emit(emitter, "資料の目次を作成しています…")
         outline = await _make_outline(request, model_id, topic)
@@ -373,8 +437,8 @@ async def maybe_build_doc_response(request, form_data: dict, user, metadata: dic
             await _emit(emitter, f"第{i}節「{sec['heading']}」を執筆しています…")
             sec["body"] = await _write_section(request, form_data, sec["heading"], sec["query"])
 
-        await _emit(emitter, "PDF を生成しています…")
-        url = await asyncio.to_thread(_build_pdf, outline["title"], sections)
+        await _emit(emitter, f"{fmt.upper()} を生成しています…")
+        url = await asyncio.to_thread(_build_document, fmt, outline["title"], sections)
 
         empty = [s["heading"] for s in sections if "該当記載がありません" in s["body"]]
         toc = "\n".join(f"{i}. {s['heading']}" for i, s in enumerate(sections, 1))
@@ -382,9 +446,9 @@ async def maybe_build_doc_response(request, form_data: dict, user, metadata: dic
         if empty:
             note = "\n\n※ 「" + "」「".join(empty) + "」はナレッジに材料が見つからなかったため、該当記載なしとしています。"
         notice = (
-            f"資料を作成しました（{len(sections)}セクション / PDF）。\n\n"
+            f"資料を作成しました（{fmt.upper()} / {len(sections)}セクション）。\n\n"
             f"**目次**\n{toc}\n\n"
-            f"PDF を開く: {url}\n"
+            f"ファイルを開く: {url}\n"
             f"（クリックで開かない場合は URL をコピーしてブラウザで開いてください）"
             f"{note}"
         )

@@ -111,12 +111,24 @@ def main():
     ok5 = ('該当する記載がありません' in ans2) and ('寮管理規程' not in ans2)
     check('ガードレール: 拒否＋架空引用なし', ok5, f'{time.time()-t0:.0f}s')
 
-    # 6) 資料作成（/doc コマンド: 目次→ナレッジ検索→PDF 生成。約1〜2分）
-    print('--- 6. 資料作成（約1〜2分） ---')
+    # 6) 資料作成（/pdf・/pptx・/docx コマンド: 目次→ナレッジ検索→資料生成。各約1〜2分）
+    print('--- 6. 資料作成 PDF（約1〜2分） ---')
     t0 = time.time()
-    ans3, _ = chat(args.base_url, tok, '/doc 経費精算の手順について')
-    ok6 = ('資料を作成しました' in ans3 or '/files/doc_' in ans3) and ('.pdf' in ans3)
+    ans3, _ = chat(args.base_url, tok, '/pdf 経費精算の手順について')
+    ok6 = ('doc_' in ans3 and 'pdf' in ans3.lower() and '作成' in ans3)
     check('資料作成: PDFリンク付き回答', ok6, f'{time.time()-t0:.0f}s')
+
+    print('--- 6b. 資料作成 PPTX（約1〜2分） ---')
+    t0 = time.time()
+    ans4, _ = chat(args.base_url, tok, '/pptx 経費精算の手順について')
+    ok6b = 'doc_' in ans4 and '.pptx' in ans4.lower()
+    check('資料作成: PPTXリンク付き回答', ok6b, f'{time.time()-t0:.0f}s')
+
+    print('--- 6c. 資料作成 DOCX（約1〜2分） ---')
+    t0 = time.time()
+    ans5, _ = chat(args.base_url, tok, '/docx 経費精算の手順について')
+    ok6c = 'doc_' in ans5 and '.docx' in ans5.lower()
+    check('資料作成: DOCXリンク付き回答', ok6c, f'{time.time()-t0:.0f}s')
 
     print('==============================')
     if failures:
