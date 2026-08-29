@@ -155,6 +155,31 @@ KMSG_NEW = (
     "        )"
 )
 
+# Web検索の空クエリフォールバック（v1.0.65）: 小規模モデル（qwen2.5:3b）は
+# 検索クエリ生成タスクに対して {"queries": []} を返すことがあり、その場合は
+# 「No search query generated」で検索自体が行われず Web検索が無反応になる
+# （v1.0.64 実機検証）。ユーザーの質問文をそのまま検索クエリとして使う。
+WSF_MARKER = "# [Shineos patch] web search: empty-query fallback"
+WSF_ANCHOR = (
+    "    if len(queries) == 0:\n"
+    "        await event_emitter(\n"
+    "            {\n"
+    "                'type': 'status',\n"
+    "                'data': {\n"
+    "                    'action': 'web_search',\n"
+    "                    'description': 'No search query generated',\n"
+    "                    'done': True,\n"
+    "                },\n"
+    "            }\n"
+    "        )\n"
+    "        return form_data\n"
+)
+WSF_NEW = (
+    "    # [Shineos patch] web search: empty-query fallback\n"
+    "    if len(queries) == 0:\n"
+    "        queries = [user_message or '']\n"
+)
+
 
 def find_openwebui_file(rel, explicit=None):
     if explicit:
@@ -253,6 +278,16 @@ def main():
     else:
         print(f"target: {kn_path}")
         worst = max(worst, apply_patch(kn_path, KMSG_MARKER, KMSG_ANCHOR, KMSG_NEW))
+
+    # Web検索の空クエリフォールバック（v1.0.65）
+    try:
+        mw_path = find_openwebui_file("utils/middleware.py", explicit)
+    except FileNotFoundError as e:
+        print(f"[error] {e}")
+        worst = 1
+    else:
+        print(f"target: {mw_path}")
+        worst = max(worst, apply_patch(mw_path, WSF_MARKER, WSF_ANCHOR, WSF_NEW))
 
     return worst
 

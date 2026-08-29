@@ -160,7 +160,8 @@ try {
         # meta は変数化し、knowledge は既存がある場合のみ含める
         # （$null を入れると "knowledge": null として送信され紐付けがクリアされるため）
         $meta = @{
-            capabilities  = @{ tools = $true }
+            # web_search=true: チャット入力の「連携→ウェブ検索」トグルの表示条件に必要（v1.0.65）
+            capabilities  = @{ tools = $true; web_search = $true }
             builtinTools = $builtinTools
         }
         if ($existingKnowledge) { $meta['knowledge'] = $existingKnowledge }
@@ -209,17 +210,47 @@ try {
 {{CONTEXT}}
 </context>
 '@
+        # Web検索設定（v1.0.61/63/64）: Web検索を有効化し、エンジン・取得サイズを設定する
+        # ※ web セクションは部分送信すると未指定項目が null になるため、
+        #   現在値を取得してマージしてから送信する
+        try {
+            $webCurrent = (Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/v1/retrieval/config" -Headers $headers -TimeoutSec 30).web
+        } catch { $webCurrent = $null }
+        $webCfg = @{}
+        if ($webCurrent) {
+            foreach ($k in $webCurrent.Keys) {
+                if ($null -ne $webCurrent[$k]) { $webCfg[$k] = $webCurrent[$k] }
+            }
+        }
+        $webCfg['ENABLE_WEB_SEARCH'] = $true
+        $webCfg['WEB_SEARCH_ENGINE'] = 'duckduckgo'
+        $webCfg['WEB_FETCH_MAX_CONTENT_LENGTH'] = '1000000'
+        $webCfg['WEB_LOADER_TIMEOUT'] = '30'
+        # 未保存のままだと null になり、process_web_search 内の
+        # asyncio.Semaphore(null) で TypeError となるため明示する（v1.0.65 実機検証）
+        $webCfg['WEB_LOADER_CONCURRENT_REQUESTS'] = 2
+        # 検索結果件数（未指定だと埋め込み化に数分かかるため 3 件に制限）
+        $webCfg['WEB_SEARCH_RESULT_COUNT'] = 3
         $ragBody = @{
-            RAG_TEMPLATE                  = $ragTemplate
-            ENABLE_WEB_SEARCH             = $true
-            WEB_SEARCH_ENGINE             = 'duckduckgo'
-            WEB_FETCH_MAX_CONTENT_LENGTH  = '1000000'
-            WEB_LOADER_TIMEOUT            = '30'
-        } | ConvertTo-Json -Depth 3
+            RAG_TEMPLATE = $ragTemplate
+            web          = $webCfg
+        } | ConvertTo-Json -Depth 6
         $ragBytes = [System.Text.Encoding]::UTF8.GetBytes($ragBody)
         Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/retrieval/config/update" -Headers $headers -Body $ragBytes -ContentType 'application/json' -TimeoutSec 30 | Out-Null
-        Log 'RAG template set to Japanese (anti template-leak)'
+        Log 'RAG template set to Japanese (anti template-leak) / web search enabled (duckduckgo)'
     } catch { Log "WARNING: RAG template update failed: $($_.Exception.Message)" }
+
+    # ---------- 3.6 検索クエリ生成タスクの無効化（v1.0.65） ----------
+    # qwen2.5:3b はクエリ生成プロンプトに対して {"queries": []} を返すことがあり、
+    # その場合 Web検索が「No search query generated」で無反応になる（実機検証）。
+    # 無効化するとユーザーの質問文がそのまま検索クエリとして使われるため確実に検索される。
+    try {
+        $taskCfg = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/v1/tasks/config" -Headers $headers -TimeoutSec 30
+        $taskCfg.ENABLE_SEARCH_QUERY_GENERATION = $false
+        $taskBytes = [System.Text.Encoding]::UTF8.GetBytes(($taskCfg | ConvertTo-Json -Depth 6))
+        Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/tasks/config/update" -Headers $headers -Body $taskBytes -ContentType 'application/json' -TimeoutSec 30 | Out-Null
+        Log 'search query generation disabled (use user message as query)'
+    } catch { Log "WARNING: tasks config update failed: $($_.Exception.Message)" }
 
     # ---------- 4. UI言語を日本語に設定（フロントの初回表示に反映） ----------
     try {

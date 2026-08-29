@@ -154,6 +154,12 @@ elseif ($Mode -eq 'app') {
     Progress 'installing open-webui...'
     & $venvPython -m pip install "open-webui==$OpenWebuiVersion"
     if ($LASTEXITCODE -ne 0) { throw 'open-webui install failed' }
+
+    # aiodns (c-ares) は Windows 環境によっては DNS 引き取りに失敗し
+    # 「Could not contact DNS servers」で Web検索のページ取得が全滅する（v1.0.65 実機検証）。
+    # 除去すると aiohttp が OS 標準リゾルバ (getaddrinfo) へフォールバックするため正常化する。
+    Log 'removing aiodns (use OS resolver for web search)'
+    & $venvPython -m pip uninstall -y aiodns 2>$null
     Write-InstallerProgress 96 'Open WebUI導入中: ファイル生成ライブラリを導入...'
 
     # ファイル生成ツールサーバー用ライブラリ（PDF/PPTX/Word 生成）
