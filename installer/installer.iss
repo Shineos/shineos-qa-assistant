@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.69"
+#define MyAppVersion "1.0.70"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -706,7 +706,10 @@ begin
   end;
 
   { 残ったモデル・データ・プログラムを確実に削除 }
-  DelTree(ExpandConstant('{userprofile}\.ollama'), True, True, True);
+  { ※ ユーザープロファイルルートは Inno の定数に存在しないため
+    環境変数形式 {%USERPROFILE} を使う（v1.0.70 修正: userprofile 定数は
+    Unknown constant ランタイムエラーでアンインストールが中断していた） }
+  DelTree(ExpandConstant('{%USERPROFILE}\.ollama'), True, True, True);
   DelTree(ExpandConstant('{localappdata}\Programs\Ollama'), True, True, True);
   DelTree(ExpandConstant('{appdata}\Ollama'), True, True, True);
   { サービス（SYSTEMアカウント）がモデルを保存した場合は systemprofile 側も削除。
