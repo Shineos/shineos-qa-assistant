@@ -68,7 +68,7 @@ INJECT2 = (
 # metadata.user_message（main.py が格納）へ確実にフォールバックさせる。
 ANCHOR3 = (
     "        if len(queries) == 0:\n"
-    "        queries = [get_last_user_message(body['messages']) or '']\n"
+    "            queries = [get_last_user_message(body['messages']) or '']\n"
 )
 INJECT3 = (
     "        if len(queries) == 0 or not any(isinstance(_q, str) and _q.strip() for _q in queries):\n"
