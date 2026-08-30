@@ -707,7 +707,7 @@ begin
 
   { 残ったモデル・データ・プログラムを確実に削除 }
   { ※ ユーザープロファイルルートは Inno の定数に存在しないため
-    環境変数形式 {%USERPROFILE} を使う（v1.0.70 修正: userprofile 定数は
+    環境変数形式 %USERPROFILE% を使う（v1.0.70 修正: userprofile 定数は
     Unknown constant ランタイムエラーでアンインストールが中断していた） }
   DelTree(ExpandConstant('{%USERPROFILE}\.ollama'), True, True, True);
   DelTree(ExpandConstant('{localappdata}\Programs\Ollama'), True, True, True);
