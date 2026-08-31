@@ -45,6 +45,11 @@ MARKERS = [
         "[Shineos patch] knowledge: friendly rejection for non-text files",
         '登録不可形式の日本語エラーパッチ',
     ),
+    (
+        os.path.join('routers', 'ollama.py'),
+        "[Shineos patch] history truncation (keep last 12)",
+        '履歴打ち切りパッチ（長い会話のプリフィル遅延対策）',
+    ),
 ]
 
 

@@ -317,7 +317,7 @@ def _generate_filename(folder_path: str, ext: str, filename: str = None) -> tupl
     return filepath, filename
 
 styles = getSampleStyleSheet()
-for _fpath, _fname in [("C:\Windows\Fonts\msgothic.ttc", "MSGothic")]:
+for _fpath, _fname in [(r"C:\Windows\Fonts\msgothic.ttc", "MSGothic")]:
     if os.path.exists(_fpath):
         try:
             pdfmetrics.registerFont(TTFont(_fname, _fpath, subfontIndex=0))

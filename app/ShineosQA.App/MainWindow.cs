@@ -545,6 +545,7 @@ namespace ShineosQA
             new[] { @"env.py",              "[Shineos patch] no auto (Open WebUI) suffix",       "名称表示パッチ（(Open WebUI) 重複付加の除去）" },
             new[] { @"retrieval\loaders\main.py", "[Shineos patch] offline pptx loader (python-pptx)", "PPTX読込パッチ（python-pptxで直接読込）" },
             new[] { @"routers\knowledge.py", "[Shineos patch] knowledge: friendly rejection for non-text files", "登録不可形式の日本語エラーパッチ" },
+            new[] { @"routers\ollama.py",     "[Shineos patch] history truncation (keep last 12)", "履歴打ち切りパッチ（長い会話のプリフィル遅延対策）" },
         };
 
         void CheckPatchHealth()
@@ -563,7 +564,7 @@ namespace ShineosQA
                         System.Windows.MessageBox.Show(
                             "内部コンポーネント（Open WebUI）の状態が正常ではありません。\n" +
                             "社内文書を参照した回答ができない可能性があります。\n\n" +
-                            "デスクトップの「ShineosQA-repair.bat」を実行するか、\n" +
+                            "デスクトップの「ShineosQA-repair」を実行するか、\n" +
                             "社内知恵袋を再インストールしてください。\n" +
                             "解決しない場合は https://shineos.com/contact/ までご連絡ください。",
                             "社内知恵袋 - 注意", MessageBoxButton.OK, MessageBoxImage.Warning);

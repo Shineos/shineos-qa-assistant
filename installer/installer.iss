@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.73"
+#define MyAppVersion "1.0.74"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -77,6 +77,7 @@ Source: "..\scripts\ollama_common.ps1";    DestDir: "{app}";       Flags: ignore
 Source: "..\scripts\setup_knowledge.ps1";  DestDir: "{app}";       Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_rag.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\patch_openwebui_hist.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_doc.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\attach_knowledge_to_models.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\warmup_model.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
@@ -86,6 +87,7 @@ Source: "..\scripts\check_patches.py"; DestDir: "{app}\scripts"; Flags: ignoreve
 Source: "..\scripts\smoke_test.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\purge_orphan_vectors.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\scripts\patch_openwebui_branding.py"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "..\scripts\repair.bat";              DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion
 ; WebView2 ラッパーアプリ（URL入力不要・閉じたらサービス停止）
@@ -95,6 +97,7 @@ Source: "..\knowledge\*";             DestDir: "{app}\knowledge"; Flags: ignorev
 
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\app\ShineosQA.exe"; IconFilename: "{app}\assets\app.ico"
+Name: "{autodesktop}\ShineosQA-repair"; Filename: "{app}\scripts\repair.bat"; IconFilename: "{app}\assets\app.ico"; Comment: "社内知恵袋 の修復（パッチ再適用とサービス再起動）"
 
 ; --- アンインストール時の削除（data/knowledge は v1.0.52 以降プロンプトで選択） ---
 [UninstallDelete]
@@ -579,6 +582,17 @@ begin
       if RC <> 0 then
         MsgBox('ナレッジ注入の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
                '社内文書の検索が効かなくなることがあります。' + #13#10 +
+               'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
+
+      { 履歴打ち切りパッチ（v1.0.74: 長い会話のプリフィル遅延対策。
+        Ollama 送信ペイロードのみ直近6往復分に打ち切る。UI表示・保存履歴は無変更） }
+      ProgressPage.SetText('応答速度を最適化しています...', '');
+      Exec('cmd.exe',
+        '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\patch_openwebui_hist.py" >> "' + AppDir + '\install.log" 2>&1"',
+        '', SW_HIDE, ewWaitUntilTerminated, RC);
+      if RC <> 0 then
+        MsgBox('応答速度の最適化に失敗しました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
+               '長い会話で応答が遅くなることがあります。' + #13#10 +
                'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
 
       { 資料作成パイプライン（v1.0.66: /資料 コマンドでナレッジから PDF を生成。

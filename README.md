@@ -78,6 +78,12 @@
 | [![ナレッジ管理](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **ナレッジ管理**。社内文書（PDF・Markdown）の登録状況を確認・追加できます |
 | [![モデル一覧](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **用途別プリセット**。「経費精算ガイド」「ITヘルプデスク」など目的に合わせて選択できます |
 
+## プライバシー
+
+本製品は**データを一切収集しません**（テレメトリ・利用統計・クラッシュレポートなし）。既定の状態では外部への通信は発生せず、社内文書・チャット履歴・検索データはすべてお使いのPC内にのみ保存されます。任意機能のWeb検索（既定OFF）を有効にした場合のみ、入力した質問が外部の検索サービス（DuckDuckGo）へ送信されます。
+
+詳細は [プライバシーポリシー](PRIVACY.md) をご覧ください。
+
 ## 提供形態とサポート
 
 - **本体は無償**（MIT License・自己責任でのご利用）
