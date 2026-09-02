@@ -3,7 +3,7 @@
 #   -Mode models : Ollama に LLM モデルと埋め込みモデルをダウンロード（長い処理）
 #   -Mode app    : venv 作成 → torch(CPU) → open-webui をインストール（長い処理）
 # 各処理は冪等（再実行時はスキップ）
-# 終了コード: 0 = 成功 / 非0 = 失敗
+# 終了コード: 0 = 成功 / 13 = ダウンロード失敗（ネットワーク起因・モデルDL時） / 非0 = 失敗
 param(
     [string]$AppDir,
     [string]$Mode,
@@ -15,6 +15,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# v1.0.76: モデルのダウンロード失敗（ネットワーク起因）は 13 で区別して返す
+$script:NetFail = $false
 $LogFile = Join-Path $AppDir 'install.log'
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 # install.log はインストーラ画面（ログ末尾表示）と同時に読み書きされるため一瞬ロードで衝突しうる。
@@ -92,6 +94,7 @@ if ($Mode -eq 'models') {
             Log '--- ollama.err.log (last 30 lines) ---'
             Get-Content $errLog -Tail 30 | ForEach-Object { Log "ollama-err: $_" }
         }
+        $script:NetFail = $true
         throw "model pull failed: $Model (exit $pullCode)"
     }
     Log "pulled $Model"
@@ -109,6 +112,7 @@ if ($Mode -eq 'models') {
     $ErrorActionPreference = 'Stop'
     if ($pullCode2 -ne 0) {
         $pullOut2 | ForEach-Object { Log "ollama-pull: $_" }
+        $script:NetFail = $true
         throw "embedding model pull failed: $EmbeddingModel (exit $pullCode2)"
     }
     Log "pulled $EmbeddingModel"
@@ -180,6 +184,6 @@ catch {
     Log "ERROR: $($_.Exception.Message)"
     Log "STACK: $($_.ScriptStackTrace)"
     Progress 'PROGRESS_DONE:1'
-    exit 1
+    if ($script:NetFail) { exit 13 } else { exit 1 }
 }
 exit 0

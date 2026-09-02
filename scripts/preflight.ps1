@@ -36,12 +36,31 @@ if ($comp -and $comp.TotalPhysicalMemory) {
     if ($ram -lt 4) { $ram = 4 }
 }
 
+# --- ディスク空き容量チェック（v1.0.76: 15GB 未満を disk_ok=no として報告） ---
+# システムドライブと Program Files 配下のドライブ（既定のインストール先）を確認する。
+# 結果は ini 経由で Inno Setup 側に返し、終了コードは従来どおり 0/1 のまま維持する
+$diskOk = $true
+$diskFreeGb = 0
+$drives = @($env:SystemDrive.TrimEnd(':'))
+$pfDrive = ($env:ProgramFiles.Substring(0, 2)).TrimEnd(':')
+if ($drives -notcontains $pfDrive) { $drives += $pfDrive }
+foreach ($d in $drives) {
+    $drive = Get-PSDrive -Name $d -ErrorAction SilentlyContinue
+    if ($drive) {
+        $freeGb = [math]::Round($drive.Free / 1GB)
+        if ($freeGb -gt $diskFreeGb) { $diskFreeGb = $freeGb }
+        if ($freeGb -lt 15) { $diskOk = $false }
+    }
+}
+
 $lines = @(
     '[preflight]',
     ('os_ok=' + $(if ($osOk) { 'yes' } else { 'no' })),
     ('port_8080_free=' + $(if ($chosenPort -eq 8080) { 'yes' } else { 'no' })),
     ('port=' + $chosenPort),
-    ('ram_gb=' + $ram)
+    ('ram_gb=' + $ram),
+    ('disk_ok=' + $(if ($diskOk) { 'yes' } else { 'no' })),
+    ('disk_free_gb=' + $diskFreeGb)
 )
 $lines -join "`r`n" | Out-File -FilePath $IniPath -Encoding ascii
 

@@ -2,7 +2,7 @@
 # - 既に導入済みならスキップ（冪等）
 # - 公式サービス「Ollama」が無い・停止している場合は NSSM フォールバック登録（ShineosOllama）
 # - API (127.0.0.1:11434) の起動を最大60秒待つ
-# 終了コード: 0 = 成功 / 非0 = 失敗
+# 終了コード: 0 = 成功 / 13 = ダウンロード失敗（ネットワーク起因） / 非0 = 失敗
 param(
     [string]$AppDir,
     [string]$TmpDir,
@@ -11,6 +11,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# v1.0.76: ダウンロード失敗（ネットワーク起因）は 13 で区別して返す
+$script:NetFail = $false
 $LogFile = Join-Path $AppDir 'install.log'
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 . (Join-Path $PSScriptRoot 'ollama_common.ps1')
@@ -123,12 +125,14 @@ if ($needUpgrade) {
         if ($dlCode -ne 0) {
             # 不完全なファイルが残ると次回も破損ファイルでインストールを試みるため削除する
             Remove-Item $installer -Force -ErrorAction SilentlyContinue
+            $script:NetFail = $true
             throw "OllamaSetup download failed (curl exit $dlCode)"
         }
         Write-InstallerProgress 34 'Ollama本体のダウンロード完了。インストール中...'
         $size = (Get-Item $installer).Length
         Log "downloaded: $([math]::Round($size / 1MB, 1)) MB"
         Progress "download complete: $([math]::Round($size / 1MB, 1)) MB"
+        $script:NetFail = $true
         if ($size -lt 100MB) { throw "OllamaSetup download looks invalid (${size} bytes) - proxy/block page の可能性" }
     }
     # 旧バージョンのOllamaプロセス/サービスが動作していると、実行中ファイルを
@@ -450,6 +454,6 @@ catch {
     Log "ERROR: $($_.Exception.Message)"
     Log "STACK: $($_.ScriptStackTrace)"
     Progress 'PROGRESS_DONE:1'
-    exit 1
+    if ($script:NetFail) { exit 13 } else { exit 1 }
 }
 exit 0

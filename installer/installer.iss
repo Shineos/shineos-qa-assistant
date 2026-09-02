@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.75"
+#define MyAppVersion "1.0.76"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -112,6 +112,7 @@ Type: files; Name: "{app}\ollama_common.ps1"
 Type: files; Name: "{app}\setup_knowledge.ps1"
 Type: filesandordirs; Name: "{app}\scripts"
 Type: files; Name: "{userdesktop}\ShineosQA-はじめに.txt"
+Type: files; Name: "{app}\install.completed"
 
 [Code]
 var
@@ -127,9 +128,21 @@ var
   UninstallRemoveOllama: Boolean;
   StartPort: Integer;          { ポート走査の開始ポート（アップグレード時は port.txt の値） }
   IsUpgrade: Boolean;          { 既存インストール（port.txt）があるか }
+  CustomExitCode: Integer;     { 独自終了コード（0 = Inno 標準のまま。v1.0.76） }
+  SameVerCompleted: Boolean;   { 同一バージョン完了済み（サイレント再実行時に 11 を返す） }
+  DiskOk: Boolean;             { ディスク空き容量チェック結果（15GB 未満で False） }
+  DiskFreeGb: Integer;         { 検出した空き容量（GB・表示用） }
 
 const
   PREFLIGHT_INI = 'preflight.ini';
+
+{ カスタム終了コードの返却（v1.0.76）: Microsoft Store のインストールクライアントが
+  シナリオを区別できるよう、独自コード（11/12/13）を返す必要がある場合のみ
+  プロセスの終了コードを上書きする。0 の場合は Inno 標準の終了コードに任せる。
+  ※ ExitProcess を呼ぶと Inno の後処理（{tmp} の削除）がスキップされるため、
+    独自コードが必要な場合のみ使用する }
+procedure ExitProcess(ExitCode: Cardinal); stdcall;
+  external 'ExitProcess@kernel32.dll stdcall';
 
 { ---------- 共通ヘルパー ---------- }
 
@@ -179,6 +192,8 @@ var
 begin
   PortFree := True;
   OsOk := True;
+  DiskOk := True;
+  DiskFreeGb := 0;
   RamGB := 8;
   SelectedPort := {#Port};
   Ini := ExpandConstant('{tmp}\' + PREFLIGHT_INI);
@@ -190,6 +205,8 @@ begin
     PortFree := (GetIniString('preflight', 'port_8080_free', 'no', Ini) = 'yes');
     SelectedPort := GetIniInt('preflight', 'port', {#Port}, 8080, 65535, Ini);
     RamGB := GetIniInt('preflight', 'ram_gb', 8, 4, 512, Ini);
+    DiskOk := (GetIniString('preflight', 'disk_ok', 'yes', Ini) = 'yes');
+    DiskFreeGb := GetIniInt('preflight', 'disk_free_gb', 0, 0, 1000000, Ini);
   end;
 end;
 
@@ -218,6 +235,7 @@ var
   Content: AnsiString;
   InstallLoc: String;
   PortTxt: String;
+  PrevVer: String;
 begin
   ExtractSetupFiles;
 
@@ -247,6 +265,20 @@ begin
     end;
   end;
 
+  { 同一バージョン完了済みの検出（v1.0.76）: サイレント再実行時は「既に存在」として
+    独自終了コード 11 を返す。対話実行時はモデル再選択・修復のため通常どおり実行する
+    （完了マーカー install.completed がある同バージョンのみ対象。失敗途中の再実行は
+    マーカーがないため再開できる） }
+  SameVerCompleted := False;
+  PrevVer := '';
+  if WizardSilent() and
+     RegQueryStringValue(HKEY_LOCAL_MACHINE,
+       'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{#MyAppId}_is1',
+       'DisplayVersion', PrevVer) and
+     (PrevVer = '{#MyAppVersion}') and
+     FileExists(InstallLoc + '\install.completed') then
+    SameVerCompleted := True;
+
   RunPreflight;
 
   if not OsOk then
@@ -255,6 +287,10 @@ begin
 
   if (not PortFree) and (not IsUpgrade) then
     MsgBox('ポート 8080 が使用中のため、8081 以降の空きポート（' + IntToStr(SelectedPort) + '）でインストールします。', mbInformation, MB_OK);
+
+  if not DiskOk then
+    MsgBox('ディスクの空き容量が不足しています（検出: ' + IntToStr(DiskFreeGb) + 'GB）。' + #13#10 +
+           'インストールには 15GB 以上の空き容量が必要です。', mbError, MB_OK);
 
   ModelPage := CreateInputOptionPage(wpSelectDir,
     'AIモデルの選択',
@@ -364,6 +400,7 @@ var
   LastTailSec: Integer;
 begin
   Result := False;
+  CustomExitCode := 0;  { 再試行に備えて毎回リセットする（v1.0.76） }
   { v1.0.54: 標準プログレスページに「バー＋％/残り時間＋直近ログ」を表示する。
     詳細ログ用のPowerShellコンソールは表示しない（ログは本画面内に流す） }
   ProgressPage := CreateOutputProgressPage('インストール中',
@@ -389,6 +426,15 @@ begin
     begin
       MsgBox('ポート ' + IntToStr(StartPort) + '〜' + IntToStr(StartPort + 19) + ' のいずれも空いていないため続行できません。' + #13#10 +
              '他のアプリがポートを占有しています。終了してから「次へ」をもう一度押してください。', mbError, MB_OK);
+      Exit;
+    end;
+    if not DiskOk then
+    begin
+      { ディスク領域不足（v1.0.76）: 独自終了コード 12 を返す }
+      CustomExitCode := 12;
+      MsgBox('ディスクの空き容量が不足しています（検出: ' + IntToStr(DiskFreeGb) + 'GB）。' + #13#10 +
+             'インストールには 15GB 以上の空き容量が必要です。' + #13#10 +
+             '空き容量を確保してからもう一度お試しください。', mbError, MB_OK);
       Exit;
     end;
 
@@ -449,6 +495,8 @@ begin
 
     if DoneCode <> 0 then
     begin
+      if DoneCode = 13 then
+        CustomExitCode := 13;  { ネットワークエラー（モデル等のダウンロード失敗・v1.0.76） }
       ProgressPage.SetText('エラーが発生しました', '詳細はログをご確認ください');
       WizardForm.Update;
       StepError := '';
@@ -474,6 +522,14 @@ begin
   end;
 end;
 
+procedure DeinitializeSetup();
+begin
+  { 独自終了コード（11/12/13）が設定されている場合のみプロセスの終了コードを
+    上書きする（v1.0.76）。0 の場合は Inno 標準の終了コードのまま終了する }
+  if CustomExitCode <> 0 then
+    ExitProcess(CustomExitCode);
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   AppDir: String;
@@ -492,6 +548,16 @@ begin
   if CurPageID = wpReady then
   begin
     AppDir := ExpandConstant('{app}');
+    { 同一バージョン完了済みのサイレント再実行（v1.0.76）: 再インストールを
+      行わず「既に存在」(11) を返して終了する。対話実行時はこの判定を通過しない
+      （モデル再選択・修復のために通常どおり実行） }
+    if SameVerCompleted then
+    begin
+      CustomExitCode := 11;
+      MsgBox('社内知恵袋 ' + '{#MyAppVersion}' + ' は既にインストールされています。', mbInformation, MB_OK);
+      Result := False;
+      Exit;
+    end;
     if not IsAdmin then
     begin
       MsgBox('インストールには管理者権限が必要です。' + #13#10 +
@@ -665,6 +731,11 @@ begin
       { （WebView2ラッパーアプリがUACなしで start/stop するために必要） }
       ProgressPage.SetText('サービスをユーザー操作可能に設定中...', '');
       Exec('sc.exe', 'sdset ShineosQA "D:(A;;0x34;;;AU)(A;;GA;;;SY)(A;;GA;;;BA)"', '', SW_HIDE, ewWaitUntilTerminated, RC);
+
+      { 完了マーカー（v1.0.76）: 同一バージョンのサイレント再実行時に
+        「既に存在」(11) 判定をするために使用する }
+      SaveStringToFile(ExpandConstant('{app}\install.completed'),
+        GetDateTimeString('yyyy/mm/dd hh:nn:ss', '/', ':'), False);
 
       WizardForm.FinishedLabel.Caption :=
         'インストールが完了しました。' + #13#10 + #13#10 +

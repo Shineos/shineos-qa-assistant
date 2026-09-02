@@ -5,7 +5,7 @@
 # - システムPATHは変更しない
 # - 利用可能な Python 3.11/3.12 が既にあれば再利用（冪等・最短化）
 # - 失敗時は原因を install.log に記録する
-# 終了コード: 0 = 成功 / 非0 = 失敗
+# 終了コード: 0 = 成功 / 13 = ダウンロード失敗（ネットワーク起因） / 非0 = 失敗
 param(
     [string]$AppDir,
     [string]$TmpDir,
@@ -15,6 +15,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# v1.0.76: ダウンロード失敗（ネットワーク起因）は 13 で区別して返す
+$script:NetFail = $false
 $LogFile = Join-Path $AppDir 'install.log'
 New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 # install.log はインストーラ画面（ログ末尾表示）と同時に読み書きされるため一瞬ロードで衝突しうる。
@@ -106,11 +108,13 @@ try {
         & curl.exe -sS -L --fail -C - --retry 10 --retry-all-errors --retry-delay 5 --connect-timeout 30 -o $nupkg $url
         if ($LASTEXITCODE -ne 0) {
             Remove-Item $nupkg -Force -ErrorAction SilentlyContinue
+            $script:NetFail = $true
             throw "python download failed (curl exit $LASTEXITCODE)"
         }
         $size = (Get-Item $nupkg).Length
         Log "downloaded: $([math]::Round($size / 1MB, 1)) MB"
         Progress "download complete: $([math]::Round($size / 1MB, 1)) MB"
+        $script:NetFail = $true
         if ($size -lt 10MB) { throw "python download looks invalid (${size} bytes) - proxy/block page の可能性" }
     }
     else {
@@ -138,5 +142,5 @@ catch {
     Log "ERROR: $($_.Exception.Message)"
     Log "STACK: $($_.ScriptStackTrace)"
     Progress 'PROGRESS_DONE:1'
-    exit 1
+    if ($script:NetFail) { exit 13 } else { exit 1 }
 }
