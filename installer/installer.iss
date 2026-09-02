@@ -139,8 +139,8 @@ const
 { カスタム終了コードの返却（v1.0.76）: Microsoft Store のインストールクライアントが
   シナリオを区別できるよう、独自コード（11/12/13）を返す必要がある場合のみ
   プロセスの終了コードを上書きする。0 の場合は Inno 標準の終了コードに任せる。
-  ※ ExitProcess を呼ぶと Inno の後処理（{tmp} の削除）がスキップされるため、
-    独自コードが必要な場合のみ使用する }
+  ※ ExitProcess を呼ぶと Inno の後処理（テンポラリフォルダの削除）が
+    スキップされるため、独自コードが必要な場合のみ使用する }
 procedure ExitProcess(ExitCode: Cardinal);
   external 'ExitProcess@kernel32.dll stdcall';
 
