@@ -30,6 +30,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 配布スクリプトの構文検証（compileall は再帰的に全 .py を検査し、
+      # 構文エラーがあれば非ゼロで終了する）
+      - name: Python syntax check
+        shell: pwsh
+        run: |
+          python --version
+          python -m compileall -q scripts tools
+          if ($LASTEXITCODE -ne 0) { throw "Python syntax check failed (exit $LASTEXITCODE)" }
+
       - name: Install Inno Setup 6.7.3
         shell: pwsh
         run: |

@@ -180,6 +180,36 @@ WSF_NEW = (
     "        queries = [user_message or '']\n"
 )
 
+# no-match guard（v1.0.75）: 関連性しきい値（RELEVANCE_THRESHOLD）により全断片が
+# フィルタされると、apply_source_context_to_messages が早期リターンして RAG
+# テンプレート（対象外ルール付き）ごと注入されなくなる。その状態で素の質問だけを
+# 受け取った小規模モデルは、寮の手続き等の創作回答を生成する（v1.0.75 実機検証）。
+# 該当文書が無いことを明示的に資料欄へ入れ、対象外ルールを確実に発動させる。
+NOMATCH_MARKER = "# [Shineos patch] no-match guard"
+NOMATCH_ANCHOR = (
+    "    if not sources or not user_message:\n"
+    "        return messages\n"
+    "\n"
+    "    context = get_source_context(sources, include_content=include_content)\n"
+    "\n"
+    "    context = context.strip()\n"
+    "    if not context:\n"
+    "        return messages\n"
+)
+NOMATCH_NEW = (
+    "    if not user_message:\n"
+    "        return messages\n"
+    "\n"
+    "    context = get_source_context(sources, include_content=include_content)\n"
+    "\n"
+    "    context = context.strip()\n"
+    "    if not context:\n"
+    "        # [Shineos patch] no-match guard（v1.0.75）: 関連性しきい値により全断片が\n"
+    "        # フィルタされた等でコンテキストが空の場合、テンプレートごと省略せず\n"
+    "        # 該当なしを明示して対象外ルールを発動させる（創作回答の防止）\n"
+    "        context = 'この質問に該当する社内文書は見つかりませんでした。'\n"
+)
+
 
 def find_openwebui_file(rel, explicit=None):
     if explicit:
@@ -288,6 +318,7 @@ def main():
     else:
         print(f"target: {mw_path}")
         worst = max(worst, apply_patch(mw_path, WSF_MARKER, WSF_ANCHOR, WSF_NEW))
+        worst = max(worst, apply_patch(mw_path, NOMATCH_MARKER, NOMATCH_ANCHOR, NOMATCH_NEW))
 
     return worst
 

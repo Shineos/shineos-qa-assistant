@@ -2,7 +2,9 @@
 # - 対象フォルダ: {app}\knowledge（既定。引数 -KnowledgeDir で変更可）
 # - サブフォルダごとにナレッジコレクションを作成し、PDF/Markdown/テキストを
 #   アップロードしてベクトル化する（RAG 検索の事前準備）
-# - サブフォルダが無い場合は「社内ナレッジ」コレクションに登録
+# - ルート直下のファイルは「社内ナレッジ」コレクションに登録する
+#   （サブフォルダの有無に関係なく登録。v1.0.75: サブフォルダ追加時に
+#     QA_list.md が取りこぼされる回帰を修正）
 # - 冪等: 同名コレクションが既に存在する場合は再利用（ファイルは毎回アップロードし直す）
 # - 推奨: ファイル名や文書の先頭に【人事規程】【ITサポート】などのタグを付けると検索精度が向上
 # 終了コード: 0 = 成功（対象なし含む） / 非0 = 失敗
@@ -43,6 +45,11 @@ try {
     }
     Log "knowledge dir: $KnowledgeDir"
 
+    # サービス稼働中の再実行かを記録する（終了時に再起動案内を出すため。v1.0.75:
+    # 稼働中サービスへコレクションを紐付けても、再起動まで検索に反映されない実測のため）
+    $svcRunning = $false
+    try { $svcRunning = ((Get-Service -Name 'ShineosQA' -ErrorAction Stop).Status -eq 'Running') } catch { }
+
     # ---------- 2. Open WebUI の起動を待つ ----------
     $ready = $false
     for ($i = 0; $i -lt 30; $i++) {
@@ -80,7 +87,15 @@ try {
 
     # ---------- 5. コレクション単位の登録処理 ----------
     function Add-CollectionFiles {
-        param([string]$CollName, [string]$Dir)
+        param([string]$CollName, [string]$Dir, [switch]$RootOnly)
+        # 対象ファイルを先に確定する（ファイル0件のコレクション空作成を回避）。
+        # RootOnly: Dir 直下のファイルのみ対象（サブフォルダを辿らない）
+        if ($RootOnly) {
+            $files = @(Get-ChildItem -Path $Dir -File | Where-Object { $_.Extension -match '^\.(pdf|md|txt|docx|doc)$' })
+        } else {
+            $files = @(Get-ChildItem -Path $Dir -File -Recurse | Where-Object { $_.Extension -match '^\.(pdf|md|txt|docx|doc)$' })
+        }
+        if ($files.Count -eq 0) { Log "no supported files in $Dir (skipped)"; return }
         $collId = $script:existing[$CollName]
         if (-not $collId) {
             $body = @{ name = $CollName; description = "社内知恵袋の自動登録ナレッジ（$CollName）" } | ConvertTo-Json -Depth 4
@@ -91,9 +106,6 @@ try {
         } else {
             Log "collection reused: $CollName ($collId)"
         }
-
-        $files = @(Get-ChildItem -Path $Dir -File -Recurse | Where-Object { $_.Extension -match '^\.(pdf|md|txt|docx|doc)$' })
-        if ($files.Count -eq 0) { Log "no supported files in $Dir (skipped)"; return }
         Log "uploading $($files.Count) file(s) to $CollName ..."
 
         foreach ($f in $files) {
@@ -112,13 +124,23 @@ try {
             # コレクションに明示的に追加
             # （multipart メタデータの knowledge_id は Open WebUI 0.11.0 で無視されるため、
             #   /api/v1/knowledge/{id}/file/add で確実に紐付ける）
-            try {
-                $addBody = @{ file_id = $fileId } | ConvertTo-Json
-                $addBytes = [System.Text.Encoding]::UTF8.GetBytes($addBody)
-                Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/knowledge/$collId/file/add" -Headers $headers -Body $addBytes -ContentType 'application/json' -TimeoutSec 60 | Out-Null
-                Log "added to collection ${CollName}: $($f.Name)"
-            } catch {
-                Log "WARNING: could not add to collection: $($f.Name) - $($_.Exception.Message)"
+            # v1.0.75: アップロード直後の追加は 400 で間欠失敗する（ハッシュ確定前の
+            # レース。実機で再現・確認済み）。失敗のまま進むとナレッジが静かに欠落
+            # するため、リトライする
+            $added = $false
+            for ($attempt = 1; $attempt -le 3 -and -not $added; $attempt++) {
+                try {
+                    $addBody = @{ file_id = $fileId } | ConvertTo-Json
+                    $addBytes = [System.Text.Encoding]::UTF8.GetBytes($addBody)
+                    Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/knowledge/$collId/file/add" -Headers $headers -Body $addBytes -ContentType 'application/json' -TimeoutSec 60 | Out-Null
+                    $added = $true
+                    Log "added to collection ${CollName}: $($f.Name) (attempt $attempt)"
+                } catch {
+                    if ($attempt -lt 3) { Log "retry add (${attempt}/3): $($f.Name) - $($_.Exception.Message)"; Start-Sleep -Seconds 5 }
+                }
+            }
+            if (-not $added) {
+                Log "WARNING: could not add to collection after 3 attempts: $($f.Name) - this file will NOT be searchable"
             }
 
             # ベクトル化完了をポーリング（最大5分）
@@ -137,13 +159,13 @@ try {
     }
 
     $subDirs = @(Get-ChildItem -Path $KnowledgeDir -Directory)
-    if ($subDirs.Count -gt 0) {
-        foreach ($d in $subDirs) {
-            Add-CollectionFiles -CollName $d.Name -Dir $d.FullName
-        }
-    } else {
-        Add-CollectionFiles -CollName '社内ナレッジ' -Dir $KnowledgeDir
+    foreach ($d in $subDirs) {
+        Add-CollectionFiles -CollName $d.Name -Dir $d.FullName
     }
+    # ルート直下の社内文書も「社内ナレッジ」へ登録する（v1.0.75）。
+    # 旧ロジックはサブフォルダ存在時にルートの QA_list.md を登録せず、
+    # 新規インストールでサンプルQA（経費精算・パスワード等）が欠落していた
+    Add-CollectionFiles -CollName '社内ナレッジ' -Dir $KnowledgeDir -RootOnly
 
     # ---------- 6. コレクションをプリセットモデルへ紐付ける ----------
     # （RAGはモデルの meta.knowledge 単位で検索されるため。未紐付けだと
@@ -159,6 +181,9 @@ try {
         Log "WARNING: attach script not found: $attachPy"
     }
 
+    if ($svcRunning) {
+        Log '注意: サービス稼働中にナレッジを登録しました。新しく登録したコレクションが検索に反映されるにはサービス再起動が必要です（社内知恵袋アプリを一度閉じて開き直してください）'
+    }
     Log 'setup_knowledge done'
     exit 0
 }

@@ -144,9 +144,10 @@ try {
         $params = @{
             think   = $false
             num_ctx = $numCtx
-            # 応答の安定性向上（表記ブレ・揺らぎ・幻覚の抑制のため温度を低くする。
-            # Q&A用途では決定論的な回答が望ましい）
-            temperature = 0.2
+            # 応答の安定性向上（表記ブレ・揺らぎ・幻覚の抑制）。v1.0.75: 0.2 → 0（貪欲
+            # デコーディング）に変更。同一質問で回答が揺れる（可否質問の対象外混入など）
+            # 問題を実機で解消するため。Q&A用途では決定論的な回答が望ましい
+            temperature = 0
             # 応答長の上限（v1.0.48: 長文生成による応答遅延の防止。社内Q&Aの回答は
             # 簡潔にまとまるため 512 トークンで十分）
             num_predict = 512
@@ -236,6 +237,12 @@ try {
         $ragBody = @{
             RAG_TEMPLATE = $ragTemplate
             web          = $webCfg
+            # 関連性しきい値（v1.0.75）: ナレッジ増加時の無関係断片（検索ノイズ）による
+            # 誤回答を構造的に防ぐ。実測（bge-m3 コサイン類似度）では無関係な質問への
+            # 断片は最大 0.52、正答断片は最小 0.58 で分離するため 0.55 を設定。
+            # しきい値未満の断片は注入されず、文書が見つからない質問は確実に「対象外」と
+            # 回答する。断片が全件フィルタされた場合は空のコンテキストで回答する
+            RELEVANCE_THRESHOLD = 0.55
         } | ConvertTo-Json -Depth 6
         $ragBytes = [System.Text.Encoding]::UTF8.GetBytes($ragBody)
         Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/retrieval/config/update" -Headers $headers -Body $ragBytes -ContentType 'application/json' -TimeoutSec 30 | Out-Null
