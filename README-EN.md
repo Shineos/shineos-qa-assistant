@@ -47,7 +47,7 @@ Users register their company regulations and manuals (PDF/Markdown) as "knowledg
 - Windows 10 / 11 (64-bit)
 - 8 GB RAM or more (16 GB recommended)
 - 15 GB free disk space
-- Internet connection **during installation only** (about 6 GB of downloads: Ollama 1.5 GB, AI models ~3.4 GB, etc. — takes roughly 30–90 minutes)
+- Internet connection **during installation only** (about 6 GB of downloads: Ollama 1.5 GB, AI models ~3.4 GB, etc. — downloads run in parallel and it takes roughly 15–40 minutes depending on your connection)
 - Answers take a few seconds to ~20 seconds (all processing is local). The product specializes in regulations/manuals Q&A; general-knowledge questions are declined with "not found in the knowledge base"
 
 ## Download & Install

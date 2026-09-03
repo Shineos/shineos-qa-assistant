@@ -2,7 +2,14 @@
 
 本プロジェクトのバージョンごとの変更内容です。日本語の紹介ページは [README.md](README.md) / English page: [README-EN.md](README-EN.md) を参照してください。
 
-## 2026-09-02
+## 2026-09-03（v1.0.78・開発中）
+
+### v1.0.78 — ナレッジ即時反映・障害調査性向上・XXE防御の強化
+
+- **ナレッジ即時反映パッチ（fresh knowledge lookup）**: チャット時に参照するナレッジ紐付けが app.state.MODELS のスナップショットのため、UI・API からナレッジを追加・解除してもサービス再起動まで反映されない問題（実機検証）を修正。チャット毎に DB から最新の紐付けを取得して上書きする
+- **install.log の網羅性**: configure_model・setup_knowledge・スモークテストの出力を install.log に統合し、末尾に `=== POST-INSTALL COMPLETED ===` マーカーを追加。install.log 単体でインストール全体の成否を判別できる
+- **XXE 防御の強化（defusedxml ゲート）**: PPTX 内 XML の解析前検査に defusedxml を追加（DTD・実体参照を含む XML を全文走査で拒否。defusedxml 未導入環境では従来の安全パーサで防御）。defusedxml を依存関係に追加
+- ドキュメント: インストール所要時間の表記を並列化後の実測値（約15〜40分）に更新（README / README-EN / ユーザーマニュアル）
 
 ### v1.0.77 — インストールの高速化（並列化・スモーク短縮・Defender一時除外）
 

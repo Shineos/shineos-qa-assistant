@@ -168,7 +168,7 @@ elseif ($Mode -eq 'app') {
 
     # ファイル生成ツールサーバー用ライブラリ（PDF/PPTX/Word 生成）
     Log 'installing file generation libraries'
-    & $venvPython -m pip install reportlab python-pptx python-docx openpyxl py7zr markdown2 beautifulsoup4 emoji "mcp<2"
+    & $venvPython -m pip install reportlab python-pptx python-docx openpyxl py7zr markdown2 beautifulsoup4 emoji defusedxml "mcp<2"
     if ($LASTEXITCODE -ne 0) { throw 'file generation libraries install failed' }
 
     Log 'app install done'

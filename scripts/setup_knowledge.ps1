@@ -45,11 +45,6 @@ try {
     }
     Log "knowledge dir: $KnowledgeDir"
 
-    # サービス稼働中の再実行かを記録する（終了時に再起動案内を出すため。v1.0.75:
-    # 稼働中サービスへコレクションを紐付けても、再起動まで検索に反映されない実測のため）
-    $svcRunning = $false
-    try { $svcRunning = ((Get-Service -Name 'ShineosQA' -ErrorAction Stop).Status -eq 'Running') } catch { }
-
     # ---------- 2. Open WebUI の起動を待つ ----------
     $ready = $false
     for ($i = 0; $i -lt 30; $i++) {
@@ -181,9 +176,6 @@ try {
         Log "WARNING: attach script not found: $attachPy"
     }
 
-    if ($svcRunning) {
-        Log '注意: サービス稼働中にナレッジを登録しました。新しく登録したコレクションが検索に反映されるにはサービス再起動が必要です（社内知恵袋アプリを一度閉じて開き直してください）'
-    }
     Log 'setup_knowledge done'
     exit 0
 }

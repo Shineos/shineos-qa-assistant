@@ -210,6 +210,29 @@ NOMATCH_NEW = (
     "        context = 'この質問に該当する社内文書は見つかりませんでした。'\n"
 )
 
+# ナレッジ即時反映パッチ（v1.0.78）: チャット時に参照する model.info.meta.knowledge は
+# app.state.MODELS のスナップショット値のため、UI・API からナレッジを紐付け直しても
+# サービス再起動まで検索対象にならない（実機検証）。チャット毎に DB から最新の
+# 紐付けを取得して上書きし、追加・解除を即時反映させる。
+FRESH_MARKER = "# [Shineos patch] fresh knowledge lookup"
+FRESH_ANCHOR = (
+    "    user_message = get_last_user_message(form_data['messages'])\n"
+    "    model_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', False)\n"
+)
+FRESH_NEW = (
+    "    user_message = get_last_user_message(form_data['messages'])\n"
+    "    model_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', False)\n"
+    "    # [Shineos patch] fresh knowledge lookup（v1.0.78）: MODELS スナップショットには\n"
+    "    # ナレッジ紐付け変更が反映されないため、DB から最新の紐付けを取得して上書きする\n"
+    "    # （サービス再起動なしでナレッジの追加・解除を反映させる）\n"
+    "    try:\n"
+    "        _fresh_model = await Models.get_model_by_id(model.get('id'))\n"
+    "        if _fresh_model is not None:\n"
+    "            model_knowledge = (_fresh_model.meta or {}).get('knowledge', model_knowledge)\n"
+    "    except Exception:\n"
+    "        pass\n"
+)
+
 
 def find_openwebui_file(rel, explicit=None):
     if explicit:
@@ -319,6 +342,7 @@ def main():
         print(f"target: {mw_path}")
         worst = max(worst, apply_patch(mw_path, WSF_MARKER, WSF_ANCHOR, WSF_NEW))
         worst = max(worst, apply_patch(mw_path, NOMATCH_MARKER, NOMATCH_ANCHOR, NOMATCH_NEW))
+        worst = max(worst, apply_patch(mw_path, FRESH_MARKER, FRESH_ANCHOR, FRESH_NEW))
 
     return worst
 

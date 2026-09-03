@@ -51,6 +51,11 @@ MARKERS = [
         'no-match guard（全断片フィルタ時の創作回答防止・v1.0.75）',
     ),
     (
+        os.path.join('utils', 'middleware.py'),
+        "[Shineos patch] fresh knowledge lookup",
+        'ナレッジ即時反映パッチ（紐付け変更の再起動なし反映・v1.0.78）',
+    ),
+    (
         os.path.join('routers', 'ollama.py'),
         "[Shineos patch] history truncation (keep last 12)",
         '履歴打ち切りパッチ（長い会話のプリフィル遅延対策）',

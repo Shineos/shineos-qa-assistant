@@ -2209,12 +2209,20 @@ def _get_pptx_namespaces():
 
 def _parse_pptx_xml(path):
     """XXE対策: アップロードされた PPTX 内の XML を解析する。
-    DOCTYPE/ENTITY 宣言を含む XML は拒否し、外部実体・ネットワーク読込を
-    無効化したパーサで解析する（v1.0.61）。"""
+    解析前に DOCTYPE/ENTITY 宣言を拒否し、defusedxml による厳格検査を行う
+    （DTD・実体参照を含む XML はここで拒否される）。要素の親参照（getparent）や
+    整形出力に lxml を必要とするため、本体の解析は外部実体・ネットワーク読込を
+    無効化した lxml パーサで行う二段構えとしている。"""
     data = Path(path).read_bytes()
     low = data[:4096].lower()
     if b"<!doctype" in low or b"<!entity" in low:
         raise ValueError("XML with DOCTYPE/ENTITY is not allowed")
+    try:
+        from defusedxml import ElementTree as _SafeET
+
+        _SafeET.fromstring(data)  # DTD・実体参照はここで拒否される（結果は破棄）
+    except ImportError:
+        pass  # defusedxml 未導入環境では前置きの拒否チェックと安全パーサで防御
     parser = etree.XMLParser(
         resolve_entities=False, no_network=True, load_dtd=False, dtd_validation=False
     )

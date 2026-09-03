@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.77"
+#define MyAppVersion "1.0.78"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -715,10 +715,10 @@ begin
 
         { AIモデル設定（qwen3系の思考モード無効化とコンテキスト長の最適化） }
         ProgressPage.SetText('AIモデルを設定しています...', '');
-        if not (RunPowerShell('configure_model.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -Model "' + SelectedModel + '" -RamGB ' + IntToStr(RamGB) + ' -LogFile "' + AppDir + '\logs\configure_model.log"', RC) and (RC = 0)) then
+        if not (RunPowerShell('configure_model.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -Model "' + SelectedModel + '" -RamGB ' + IntToStr(RamGB) + ' -LogFile "' + AppDir + '\install.log"', RC) and (RC = 0)) then
           MsgBox('モデル設定に失敗しました。' + #13#10 +
                  'qwen3系モデルの場合、思考モードが無効化されないため応答が遅くなることがあります。' + #13#10 +
-                 'ログ: ' + AppDir + '\logs\openwebui.err.log', mbInformation, MB_OK);
+                 'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
 
         { ナレッジ自動登録（knowledgeフォルダの社内文書をベクトル化してRAG検索可能にする） }
         { インストール画面で指定されたフォルダの文書をインストール先の knowledge フォルダへコピー }
@@ -732,10 +732,10 @@ begin
                    'インストール後、アプリ画面から資料を追加してください。', mbInformation, MB_OK);
         end;
         ProgressPage.SetText('ナレッジ（社内文書）を登録しています...', '');
-        if not (RunPowerShell('setup_knowledge.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -KnowledgeDir "' + AppDir + '\knowledge" -AppDir "' + AppDir + '" -LogFile "' + AppDir + '\logs\setup_knowledge.log"', RC) and (RC = 0)) then
+        if not (RunPowerShell('setup_knowledge.ps1', '-BaseUrl "http://localhost:' + IntToStr(SelectedPort) + '" -KnowledgeDir "' + AppDir + '\knowledge" -AppDir "' + AppDir + '" -LogFile "' + AppDir + '\install.log"', RC) and (RC = 0)) then
           MsgBox('ナレッジ登録に失敗しました。' + #13#10 +
                  'インストール後、アプリ画面（Open WebUI）から資料を追加できます。' + #13#10 +
-                 'ログ: ' + AppDir + '\logs\setup_knowledge.log', mbInformation, MB_OK);
+                 'ログ: ' + AppDir + '\install.log', mbInformation, MB_OK);
 
         { 導入検証スモークテスト（v1.0.52）: パッチ適用・ナレッジ網羅性・RAG回答・
           ガードレールを検証する（v1.0.77: --quick で資料作成テストを除外し短縮。
@@ -751,14 +751,18 @@ begin
         begin
           ProgressPage.SetText('動作検証（スモークテスト）を実行しています...', '社内文書からの回答とガードレールを確認中（約1分）');
           Exec('cmd.exe',
-            '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\smoke_test.py" --base-url "http://localhost:' + IntToStr(SelectedPort) + '" --quick >> "' + AppDir + '\logs\smoke_test.log" 2>&1"',
+            '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\smoke_test.py" --base-url "http://localhost:' + IntToStr(SelectedPort) + '" --quick >> "' + AppDir + '\install.log" 2>&1"',
             '', SW_HIDE, ewWaitUntilTerminated, RC);
           if RC <> 0 then
             MsgBox('導入検証（スモークテスト）で不合格項目がありました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
                    'アプリは起動できますが、正しく動作しない場合があります。' + #13#10 +
-                   '詳細ログ: ' + AppDir + '\logs\smoke_test.log' + #13#10 + #13#10 +
+                   '詳細ログ: ' + AppDir + '\install.log' + #13#10 + #13#10 +
                    'お手数ですが https://shineos.com/contact/ までご連絡ください。', mbInformation, MB_OK);
         end;
+        { 事後処理の完了記録（v1.0.78）: install.log 単体で最後まで成功したか判別できるようにする }
+        Exec('cmd.exe',
+          '/c echo === POST-INSTALL COMPLETED === >> "' + AppDir + '\install.log" 2>&1',
+          '', SW_HIDE, ewWaitUntilTerminated, RC);
       end;
 
       { 使用ポートをラッパーアプリ用に保存 }
