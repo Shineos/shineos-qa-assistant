@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
-#define MyAppVersion "1.0.76"
+#define MyAppVersion "1.0.77"
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "open-webui.exe"
@@ -45,6 +45,11 @@ VersionInfoDescription={#MyAppName}
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
+
+; --- インストール高速化オプション（v1.0.77・既定OFF） ---
+; 完了後に検査対象外を自動で解除するため、常時のセキュリティ設定は変更しない
+[Tasks]
+Name: "defender"; Description: "インストール中のみ Windows Defender の検査対象外にする（高速化・完了後に自動で戻ります）"; Flags: unchecked
 
 ; --- セットアップ中のみ使用するファイル（{tmp} に展開） ----------------------
 ; 長い処理（Python/Ollama/モデルDL/venv）はファイルコピー前に実行するため、
@@ -132,6 +137,8 @@ var
   SameVerCompleted: Boolean;   { 同一バージョン完了済み（サイレント再実行時に 11 を返す） }
   DiskOk: Boolean;             { ディスク空き容量チェック結果（15GB 未満で False） }
   DiskFreeGb: Integer;         { 検出した空き容量（GB・表示用） }
+  DefenderOn: Integer;         { Defender 一時除外タスクの選択（1 = 有効。v1.0.77） }
+  SkipVerify: Boolean;         { /SKIPVERIFY=1 指定時（導入検証を省略。v1.0.77） }
 
 const
   PREFLIGHT_INI = 'preflight.ini';
@@ -450,7 +457,7 @@ begin
       '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\run_all.ps1') + '"' +
       ' -AppDir "' + AppDir + '" -TmpDir "' + ExpandConstant('{tmp}') + '"' +
       ' -Model "' + SelectedModel + '" -PythonVersion "{#PythonVersion}" -OpenWebuiVersion "{#OpenWebuiVersion}"' +
-' -ProgressIni "' + PercentFile + '"',
+      ' -ProgressIni "' + PercentFile + '" -DefenderExclusion ' + IntToStr(DefenderOn),
       '', SW_HIDE, ewNoWait, RC);
 
     Ticks0 := Win32GetTickCount;
@@ -530,6 +537,21 @@ begin
     ExitProcess(CustomExitCode);
 end;
 
+{ コマンドラインのカスタムパラメータ（/SKIPVERIFY=1 など）の値を取得する }
+function CmdParamValue(const Name: String): String;
+var
+  I: Integer;
+  P: String;
+begin
+  Result := '';
+  for I := 1 to ParamCount do
+  begin
+    P := ParamStr(I);
+    if Lowercase(Copy(P, 1, Length(Name) + 2)) = Lowercase('/' + Name + '=') then
+      Result := Copy(P, Length(Name) + 3, MaxInt);
+  end;
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   AppDir: String;
@@ -571,6 +593,12 @@ begin
       SelectedModel := 'qwen2.5:1.5b'
     else
       SelectedModel := 'qwen2.5:3b';
+    { Defender 一時除外タスク（v1.0.77・既定OFF）と /SKIPVERIFY=1 の取得 }
+    if WizardIsTaskSelected('defender') then
+      DefenderOn := 1
+    else
+      DefenderOn := 0;
+    SkipVerify := (CmdParamValue('SKIPVERIFY') = '1');
     Result := RunLongSteps(AppDir);
   end;
 end;
@@ -709,17 +737,28 @@ begin
                  'インストール後、アプリ画面（Open WebUI）から資料を追加できます。' + #13#10 +
                  'ログ: ' + AppDir + '\logs\setup_knowledge.log', mbInformation, MB_OK);
 
-        { 導入検証スモークテスト（v1.0.52）: RAG回答・ガードレール・モデル一覧・
-          パッチ状態を自動検証する（2問のAI回答を含むため約1〜2分） }
-        ProgressPage.SetText('動作検証（スモークテスト）を実行しています...', '社内文書からの回答とガードレールを確認中（約1〜2分）');
-        Exec('cmd.exe',
-          '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\smoke_test.py" --base-url "http://localhost:' + IntToStr(SelectedPort) + '" >> "' + AppDir + '\logs\smoke_test.log" 2>&1"',
-          '', SW_HIDE, ewWaitUntilTerminated, RC);
-        if RC <> 0 then
-          MsgBox('導入検証（スモークテスト）で不合格項目がありました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
-                 'アプリは起動できますが、正しく動作しない場合があります。' + #13#10 +
-                 '詳細ログ: ' + AppDir + '\logs\smoke_test.log' + #13#10 + #13#10 +
-                 'お手数ですが https://shineos.com/contact/ までご連絡ください。', mbInformation, MB_OK);
+        { 導入検証スモークテスト（v1.0.52）: パッチ適用・ナレッジ網羅性・RAG回答・
+          ガードレールを検証する（v1.0.77: --quick で資料作成テストを除外し短縮。
+          /SKIPVERIFY=1 指定時は検証を省略する） }
+        if SkipVerify then
+        begin
+          ProgressPage.SetText('動作検証をスキップしています（/SKIPVERIFY 指定）...', '');
+          Exec('cmd.exe',
+            '/c echo [info] smoke_test skipped by /SKIPVERIFY parameter >> "' + AppDir + '\logs\smoke_test.log" 2>&1',
+            '', SW_HIDE, ewWaitUntilTerminated, RC);
+        end
+        else
+        begin
+          ProgressPage.SetText('動作検証（スモークテスト）を実行しています...', '社内文書からの回答とガードレールを確認中（約1分）');
+          Exec('cmd.exe',
+            '/c ""' + AppDir + '\venv\Scripts\python.exe" "' + AppDir + '\scripts\smoke_test.py" --base-url "http://localhost:' + IntToStr(SelectedPort) + '" --quick >> "' + AppDir + '\logs\smoke_test.log" 2>&1"',
+            '', SW_HIDE, ewWaitUntilTerminated, RC);
+          if RC <> 0 then
+            MsgBox('導入検証（スモークテスト）で不合格項目がありました（コード: ' + IntToStr(RC) + '）。' + #13#10 +
+                   'アプリは起動できますが、正しく動作しない場合があります。' + #13#10 +
+                   '詳細ログ: ' + AppDir + '\logs\smoke_test.log' + #13#10 + #13#10 +
+                   'お手数ですが https://shineos.com/contact/ までご連絡ください。', mbInformation, MB_OK);
+        end;
       end;
 
       { 使用ポートをラッパーアプリ用に保存 }
