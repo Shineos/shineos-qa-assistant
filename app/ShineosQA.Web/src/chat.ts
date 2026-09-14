@@ -11,7 +11,9 @@ const SVG_CLIP = svgWrap('<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.
 const SVG_GLOBE = svgWrap('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>');
 const SVG_DOC = svgWrap('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/>');
 const SVG_ZAP = svgWrap('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>');
-const SVG_TARGET = svgWrap('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>');
+// 標準モデルのアイコン: 同心円だけの図形は「読み込み中スピナー」と紛らわしいので
+// 十字線付きの照準（crosshair）型にして区別させる
+const SVG_TARGET = svgWrap('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>');
 const SVG_TROPHY = svgWrap('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>');
 
 /** モデル階級 → 表示情報（送信フォームのセレクター用） */
@@ -299,9 +301,13 @@ export class ChatView {
     const label = document.getElementById('model-btn-label');
     if (!label) return;
     const c = MODEL_CHOICES.find(x => x.tier === this.selTier);
-    label.textContent = c ? c.label.replace(/^(⚡|🎯) /, '') : 'モデル';
+    label.textContent = c ? c.label.replace(/^(⚡|🎯|🏆) /, '') : 'モデル';
     const btn = document.getElementById('model-btn');
-    if (btn) btn.title = c
+    if (!btn) return;
+    // ボタン内のアイコンも選択階級に合わせる（index.htmlの初期値は⚡）
+    const svg = btn.querySelector('svg');
+    if (svg && c) svg.outerHTML = c.icon;
+    btn.title = c
       ? `回答に使うAIモデル: ${c.label}（クリックで変更）`
       : '回答に使うAIモデルを選択';
   }
