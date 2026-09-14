@@ -1,0 +1,4 @@
+hit : n=19 ok=18/19 avg=11633ms med=11353ms min=5648ms max=18258ms p90=18ms
+guard : n=1 ok=0/1 avg=3966ms med=3966ms min=3966ms max=3966ms p90=0ms
+nohit : n=3 ok=3/3 avg=4088ms med=4061ms min=3962ms max=4242ms p90=2ms
+cache : n=2 ok=2/2

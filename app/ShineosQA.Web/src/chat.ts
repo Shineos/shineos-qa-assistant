@@ -1,0 +1,517 @@
+import { api, streamChat, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
+import { renderMarkdown } from './markdown';
+
+const esc = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// 絵文字は環境により表示が崩れるためインラインSVGで統一
+const svgWrap = (path: string) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
+const SVG_CLIP = svgWrap('<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>');
+const SVG_GLOBE = svgWrap('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>');
+const SVG_DOC = svgWrap('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/>');
+const SVG_ZAP = svgWrap('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>');
+const SVG_TARGET = svgWrap('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>');
+const SVG_TROPHY = svgWrap('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>');
+
+/** モデル階級 → 表示情報（送信フォームのセレクター用） */
+const MODEL_CHOICES = [
+  { id: 'chat-quick', tier: 'quick', label: '⚡ クイック 1.7B', desc: '高速・低負荷（8GB以上）', icon: SVG_ZAP },
+  { id: 'chat-standard', tier: 'standard', label: '🎯 標準 4B', desc: '高精度（16GB以上推奨）', icon: SVG_TARGET },
+  { id: 'chat-quality', tier: 'quality', label: '🏆 高品質 30B', desc: '最高精度・実験的（16GB以上・初回読込遅め）', icon: SVG_TROPHY },
+] as const;
+
+function fmtTime(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function fmtTimeSec(d: Date): string {
+  return `${fmtTime(d)}:${String(d.getSeconds()).padStart(2, '0')}`;
+}
+function fmtFull(d: Date): string {
+  return `${d.getFullYear()}年${String(d.getMonth() + 1).padStart(2, '0')}月${String(d.getDate()).padStart(2, '0')}日 ${fmtTimeSec(d)}`;
+}
+/// サーバの created_at（UTC "YYYY-MM-DD HH:MM:SS"）をローカル時刻へ
+function parseServerTime(s?: string): Date | null {
+  if (!s) return null;
+  const d = new Date(s.replace(' ', 'T') + 'Z');
+  return isNaN(d.getTime()) ? null : d;
+}
+function domainOf(u: string): string {
+  try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; }
+}
+
+/** 出典ビューア: 該当箇所をハイライトして文書全体（チャンク）を表示 */
+function openSourceModal(src: SourceInfo) {
+  const host = document.getElementById('modal-host')!;
+  host.innerHTML = '';
+  const ov = document.createElement('div');
+  ov.className = 'src-overlay';
+  const body = src.text && src.text.length > 0 ? src.text : src.snippet;
+  const needle = src.snippet.slice(0, Math.min(80, src.snippet.length));
+  let highlighted: string;
+  const idx = body.indexOf(needle);
+  if (idx >= 0) {
+    highlighted = esc(body.slice(0, idx)) + '<mark>' + esc(body.slice(idx, idx + src.snippet.length)) + '</mark>' + esc(body.slice(idx + src.snippet.length));
+  } else {
+    highlighted = esc(body) + (src.snippet ? '<hr><b>該当箇所:</b> ' + esc(src.snippet) : '');
+  }
+  ov.innerHTML = `
+    <div class="src-modal">
+      <div class="src-head"><span class="src-file">${SVG_DOC} ${esc(src.file)}</span><button class="icon-btn" data-close>✕ 閉じる</button></div>
+      <div class="src-body">${highlighted}</div>
+    </div>`;
+  ov.addEventListener('click', e => { if (e.target === ov) host.innerHTML = ''; });
+  ov.querySelector('[data-close]')!.addEventListener('click', () => { host.innerHTML = ''; });
+  host.appendChild(ov);
+}
+
+function sourceElement(s: SourceInfo): HTMLElement {  const row = document.createElement('div');
+  row.className = 'source' + (s.kind === 'web' ? ' web-source' : '');
+  row.tabIndex = 0;
+  if (s.kind === 'web' && s.url) {
+    // Web検索出典: タイトル＋URL＋プレビュー（クリックで新しいタブで開く）
+    row.innerHTML = `<span class="src-ic">${SVG_GLOBE}</span><div class="src-main"><b>${esc(s.file)}</b>
+      <div class="source-url">${esc(s.url)}</div>
+      <div class="source-snippet">${esc(s.snippet.slice(0, 110))}…</div></div>`;
+    row.addEventListener('click', () => window.open(s.url!, '_blank', 'noopener,noreferrer'));
+  } else {
+    row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>${esc(s.file)}</b><div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
+    row.addEventListener('click', () => openSourceModal(s));
+  }
+  return row;
+}
+
+export class ChatView {
+  private chatUuid = '';
+  private sending = false;
+  private webSearch = false;
+  private selTier = '';
+  private modelsById = new Map<string, ModelEntry>();
+  private modelMenu: HTMLElement | null = null;
+
+  constructor() {
+    const form = document.getElementById('chat-form') as HTMLFormElement;
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
+
+    form.addEventListener('submit', (e) => { e.preventDefault(); void this.send(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void this.send(); }
+    });
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+    });
+    document.getElementById('new-chat')!.addEventListener('click', () => this.newChat());
+    webBtn.addEventListener('click', () => {
+      this.webSearch = !this.webSearch;
+      webBtn.classList.toggle('active', this.webSearch);
+    });
+
+    // 📎 添付: ファイルをその場でナレッジ登録（ZCodeスタイル）
+    const attachBtn = document.getElementById('attach-btn') as HTMLButtonElement;
+    const attachInput = document.getElementById('attach-input') as HTMLInputElement;
+    attachBtn.addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', async () => {
+      const files = [...attachInput.files!];
+      attachInput.value = '';
+      if (files.length === 0) return;
+      this.setStatus(`📎 ${files.map(f => f.name).join(', ')} を登録中…（解析とベクトル化に時間がかかります）`);
+      try {
+        const r = await api.upload(files);
+        const ok = r.results.filter(x => x.ok).length;
+        const errs = r.results.filter(x => !x.ok).map(x => `${x.name}: ${x.message ?? x.error}`);
+        this.setStatus(`📎 ${ok}/${r.results.length}件を登録しました。すぐに質問できます${errs.length ? ' ／ 失敗: ' + errs.join(', ') : ''}`);
+      } catch (ex) {
+        this.setStatus(`📎 登録失敗: ${(ex as Error).message}`);
+      }
+    });
+    void api.getSettings().then(s => {
+      this.webSearch = s.web_search;
+      webBtn.classList.toggle('active', this.webSearch);
+    });
+
+    // モデルセレクター: 現在の階級を表示し、未導入モデルはその場でダウンロード可能
+    document.getElementById('model-btn')!.addEventListener('click', () => void this.toggleModelMenu());
+    void this.initModelPicker();
+    document.addEventListener('click', e => {
+      if (this.modelMenu && !(e.target as HTMLElement).closest('.model-wrap')) this.closeModelMenu();
+    });
+
+    // URLルーティング: /c/{uuid} で開く（リロード・共有で会話を復元）
+    window.addEventListener('popstate', () => this.routeFromUrl());
+    this.routeFromUrl();
+  }
+
+  /** 現在のチャットのURLパス（タブ復帰用） */
+  currentPath(): string {
+    return this.chatUuid ? `/c/${this.chatUuid}` : '/';
+  }
+
+  private routeFromUrl() {
+    const m = location.pathname.match(/^\/c\/([0-9a-zA-Z]+)/);
+    if (m) void this.openChat(m[1]);
+    else { this.chatUuid = ''; this.clearMessages(); }
+    void this.refreshList();
+  }
+
+  private nav(uuid: string) {
+    this.chatUuid = uuid;
+    if (location.pathname !== `/c/${uuid}`) history.pushState({}, '', uuid ? `/c/${uuid}` : '/');
+  }
+
+  private async refreshList(selectUuid = '') {
+    const chats: ChatSummary[] = await api.chats();
+    const list = document.getElementById('chat-list')!;
+    list.innerHTML = '';
+    for (const c of chats) {
+      const el = document.createElement('div');
+      el.className = 'chat-item' + (c.uuid === (selectUuid || this.chatUuid) ? ' active' : '');
+      const title = document.createElement('span');
+      title.textContent = c.title;
+      title.addEventListener('click', () => void this.openChat(c.uuid));
+      const del = document.createElement('button');
+      del.className = 'icon-btn';
+      del.textContent = '×';
+      del.title = '削除';
+      del.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await api.deleteChat(c.uuid);
+        if (c.uuid === this.chatUuid) { this.chatUuid = ''; history.pushState({}, '', '/'); this.clearMessages(); }
+        await this.refreshList();
+      });
+      el.append(title, del);
+      list.appendChild(el);
+    }
+  }
+
+  private newChat() {
+    this.chatUuid = '';
+    history.pushState({}, '', '/');
+    this.clearMessages();
+    void this.refreshList();
+    (document.getElementById('chat-input') as HTMLTextAreaElement).focus();
+  }
+
+  clearMessages() {
+    const m = document.getElementById('messages')!;
+    m.innerHTML = `<div class="empty"><div class="empty-icon">💬</div>
+      <h2>社内規定・業務マニュアルについて質問してください</h2>
+      <p>回答には出典（文書名・該当箇所）が付きます。ナレッジにない質問には「該当する記載がありません」と回答します。</p></div>`;
+  }
+
+  private async openChat(uuid: string) {
+    this.nav(uuid);
+    let detail;
+    try { detail = await api.chat(uuid); } catch { this.clearMessages(); return; }
+    const m = document.getElementById('messages')!;
+    m.innerHTML = '';
+    if (detail.messages.length === 0) { this.clearMessages(); }
+    for (const msg of detail.messages) {
+      let sources: SourceInfo[] = [];
+      try { sources = msg.sources_json ? JSON.parse(msg.sources_json) : []; } catch { /* ignore */ }
+      const t = parseServerTime(msg.created_at);
+      this.appendMessage(msg.role, msg.content, sources, t ?? undefined);
+    }
+    void this.refreshList(uuid);
+    m.scrollTop = m.scrollHeight;
+  }
+
+  private appendMessage(role: string, content: string, sources: SourceInfo[] = [], time?: Date): HTMLElement {
+    const m = document.getElementById('messages')!;
+    const empty = m.querySelector('.empty');
+    if (empty) empty.remove();
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ' + (role === 'user' ? 'user' : 'assistant');
+    const card = document.createElement('div');
+    card.className = 'msg-card';
+    const body = document.createElement('div');
+    body.className = 'msg-body';
+    body.innerHTML = renderMarkdown(content);
+    card.appendChild(body);
+    if (sources.length > 0) {
+      const src = document.createElement('details');
+      src.className = 'sources';
+      src.innerHTML = `<summary>${SVG_CLIP} 出典 (${sources.length})</summary>`;
+      for (const s of sources) src.appendChild(sourceElement(s));
+      card.appendChild(src);
+    }
+    wrap.appendChild(card);
+    // 時刻はカードの外（下）に表示。ホバーで年月日時刻
+    const tm = document.createElement('div');
+    tm.className = 'msg-time';
+    tm.textContent = time ? fmtTime(time) : '';
+    if (time) tm.title = fmtFull(time);
+    wrap.appendChild(tm);
+    m.appendChild(wrap);
+    m.scrollTop = m.scrollHeight;
+    return card;
+  }
+
+  /** 思考中インジケータ（カードなし・回答開始でカード表示に切替）。
+   *  refs: 今参照している資料/サイトの1行表示（ZCode方式） */
+  private createThinking(): { setPhase: (t: string) => void; setRefs: (kb: string[], web: string[]) => void; remove: () => void; el: HTMLElement } {
+    const m = document.getElementById('messages')!;
+    const empty = m.querySelector('.empty');
+    if (empty) empty.remove();
+    const wrap = document.createElement('div');
+    wrap.className = 'msg assistant thinking-block';
+    wrap.innerHTML = `<div class="thinking">
+        <div class="thinking-line"><span class="spinner"></span><span class="phase">考え中…</span><span class="elapsed"></span></div>
+        <div class="thinking-refs" hidden></div>
+      </div>`;
+    m.appendChild(wrap);
+    m.scrollTop = m.scrollHeight;
+    const refsEl = wrap.querySelector('.thinking-refs') as HTMLElement;
+    let kbRefs: string[] = [], webRefs: string[] = [];
+    const renderRefs = () => {
+      const lines: string[] = [];
+      if (kbRefs.length > 0) lines.push(`📄 ${kbRefs.join('、')}`);
+      if (webRefs.length > 0) lines.push(`🌐 ${webRefs.join('、')}`);
+      refsEl.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join('');
+      refsEl.hidden = lines.length === 0;
+    };
+    const t0 = Date.now();
+    const timer = window.setInterval(() => {
+      const el = wrap.querySelector('.elapsed') as HTMLElement;
+      if (el) el.textContent = Math.round((Date.now() - t0) / 1000) + '秒';
+    }, 1000);
+    return {
+      el: wrap,
+      setPhase: (t: string) => { (wrap.querySelector('.phase') as HTMLElement).textContent = t; },
+      setRefs: (kb, web) => { kbRefs = kb; webRefs = web; renderRefs(); },
+      remove: () => { window.clearInterval(timer); wrap.remove(); },
+    };
+  }
+
+  // ---- モデルセレクター（送信フォーム） ----
+
+  private async initModelPicker(): Promise<void> {
+    try {
+      const [st, { models }] = await Promise.all([api.status(), api.models()]);
+      this.selTier = st.engines.tier;
+      this.modelsById = new Map(models.map(m => [m.id, m]));
+      this.renderModelBtn();
+    } catch { /* サーバ停止時は無視 */ }
+  }
+
+  private renderModelBtn(): void {
+    const label = document.getElementById('model-btn-label');
+    if (!label) return;
+    const c = MODEL_CHOICES.find(x => x.tier === this.selTier);
+    label.textContent = c ? c.label.replace(/^(⚡|🎯) /, '') : 'モデル';
+    const btn = document.getElementById('model-btn');
+    if (btn) btn.title = c
+      ? `回答に使うAIモデル: ${c.label}（クリックで変更）`
+      : '回答に使うAIモデルを選択';
+  }
+
+  private closeModelMenu(): void {
+    this.modelMenu?.remove();
+    this.modelMenu = null;
+  }
+
+  private async toggleModelMenu(): Promise<void> {
+    if (this.modelMenu) { this.closeModelMenu(); return; }
+    // 開くたびに最新状態を取得（設定タブや他画面での変化を反映）
+    try {
+      const [st, { models }] = await Promise.all([api.status(), api.models()]);
+      this.selTier = st.engines.tier;
+      this.modelsById = new Map(models.map(m => [m.id, m]));
+    } catch { /* 取得失敗時は既知の情報で表示 */ }
+    this.renderModelBtn();
+
+    const wrap = document.querySelector('.model-wrap') as HTMLElement;
+    const menu = document.createElement('div');
+    menu.className = 'model-menu';
+    for (const c of MODEL_CHOICES) {
+      const m = this.modelsById.get(c.id);
+      const installed = m?.installed ?? false;
+      const active = this.selTier === c.tier && installed;
+      const opt = document.createElement('div');
+      opt.className = 'model-opt' + (active ? ' active' : '');
+      opt.innerHTML = `
+        <span class="model-ic">${c.icon}</span>
+        <div class="model-txt"><b>${esc(c.label)}</b><span class="muted">${esc(c.desc)}${m ? '・' + (m.sizeBytes / 1024 / 1024 / 1024).toFixed(1) + 'GB' : ''}</span></div>
+        <span class="model-state"></span>`;
+      const state = opt.querySelector('.model-state') as HTMLElement;
+      if (!installed) state.innerHTML = '<span class="badge-undl">未DL</span>';
+      if (active) {
+        state.insertAdjacentHTML('beforeend', '<span class="badge-inuse">使用中</span>');
+      } else if (installed) {
+        // 導入済み: 行のどこでもクリックで即切り替え（ボタンなし）
+        opt.classList.add('selectable');
+        opt.addEventListener('click', () => {
+          this.selTier = c.tier;
+          this.renderModelBtn();
+          this.closeModelMenu();
+          void api.saveSettings({ tier: c.tier });
+          this.setStatus(`回答モデルを ${c.label} に切り替えました（モデル読込中…）`);
+        });
+      } else {
+        state.insertAdjacentHTML('beforeend', '<button type="button" class="primary small dl-btn"><span class="spinner mini"></span><span class="pct">DL</span></button>');
+        const btn = state.querySelector('button') as HTMLButtonElement;
+        btn.addEventListener('click', async ev => {
+          ev.stopPropagation();
+          btn.disabled = true;
+          (btn.querySelector('.pct') as HTMLElement).textContent = '0%';
+          try {
+            void api.installModel(c.id).catch(err => console.error(err));
+            await this.pollModelDownload(c.id, btn, opt);
+            this.selTier = c.tier;
+            this.renderModelBtn();
+            this.closeModelMenu();
+            void api.saveSettings({ tier: c.tier }); // DL完了時点でエンジン読込開始
+            this.setStatus(`${c.label} のダウンロードが完了しました。次の質問から使用します`);
+          } catch (ex) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="pct">再試行</span>';
+            this.setStatus(`モデルのダウンロードに失敗しました: ${(ex as Error).message}`);
+          }
+        });
+      }
+      menu.appendChild(opt);
+    }
+    wrap.appendChild(menu);
+    this.modelMenu = menu;
+  }
+
+  /** モデルDLの進捗をスピナー内の%表示に反映（ウィザードと同じ進捗APIを利用） */
+  private async pollModelDownload(id: string, btn: HTMLButtonElement, opt: HTMLElement): Promise<void> {
+    const txt = opt.querySelector('.model-txt .muted') as HTMLElement;
+    const pct = () => btn.querySelector('.pct') as HTMLElement | null;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 800));
+      const p = await api.modelProgress();
+      if (p.currentId === id || p.state === 'idle') {
+        if (p.state === 'downloading' && p.total > 0) {
+          const per = Math.min(100, Math.round((p.bytes / p.total) * 100));
+          if (pct()) pct()!.textContent = `${per}%`;
+          if (txt) txt.textContent = `${(p.bytes / 1024 / 1024).toFixed(0)} / ${(p.total / 1024 / 1024).toFixed(0)} MB（${per}%）`;
+        } else if (p.state === 'verifying') {
+          if (pct()) pct()!.textContent = '検証中';
+        } else if (p.state === 'done' || p.state === 'idle') {
+          return;
+        } else if (p.state === 'error') {
+          throw new Error(p.error ?? 'ダウンロード失敗');
+        }
+      }
+    }
+  }
+
+  private setStatus(text: string, show = true) {
+    const el = document.getElementById('chat-status') as HTMLElement;
+    el.textContent = text;
+    el.hidden = !show || !text;
+  }
+
+  private async send() {
+    if (this.sending) return;
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    input.style.height = 'auto';
+    this.sending = true;
+    (document.getElementById('send-btn') as HTMLButtonElement).disabled = true;
+    this.setStatus('', false); // 前回質問の残置ステータスを消す
+    this.appendMessage('user', text, [], new Date());
+    const thinking = this.createThinking();
+    let acc = '';
+    let liveCard: HTMLElement | null = null;
+    let liveBody: HTMLElement | null = null;
+    const t0 = performance.now();
+
+    try {
+      await streamChat(
+        { chat_uuid: this.chatUuid || undefined, message: text, web_search: this.webSearch, model: this.selTier || undefined },
+        {
+          meta: (d) => {
+            if (!this.chatUuid && d.chat_uuid) { this.chatUuid = d.chat_uuid; history.replaceState({}, '', `/c/${this.chatUuid}`); }
+            thinking.setPhase('ナレッジを検索中…');
+          },
+          model: (d) => {
+            const label = d.tier === 'standard' ? '標準 4B' : 'クイック 1.7B';
+            thinking.setPhase(`🔄 ${label} へ切り替え中…（初回はモデルの読込に時間がかかります）`);
+          },
+          web: (d) => {
+            if (d.error) {
+              thinking.setPhase('⚠️ Web検索に失敗（ナレッジのみで回答）…');
+              this.setStatus('⚠️ Web検索に失敗しました。ナレッジのみで回答します。');
+            } else {
+              thinking.setPhase('🌐 Web検索を実行中…');
+              const domains = [...new Set(d.results.map(r => domainOf(r.url)))].slice(0, 3);
+              if (d.results.length > 3) domains.push(`ほか${d.results.length - 3}件`);
+              thinking.setRefs([], domains);
+            }
+          },
+          refs: (d) => {
+            thinking.setPhase('回答を生成中…');
+            const domains = [...new Set((d.web ?? []).map(u => domainOf(u)))].slice(0, 3);
+            thinking.setRefs(d.files ?? [], domains);
+          },
+          patch: (content) => {
+            // 出典行正規化などの最終版本文で差し替え
+            acc = content;
+            if (liveBody) liveBody.innerHTML = renderMarkdown(acc);
+          },
+          delta: (c) => {
+            if (!liveCard) {
+              thinking.remove();
+              const wrap = document.createElement('div');
+              wrap.className = 'msg assistant';
+              liveCard = document.createElement('div');
+              liveCard.className = 'msg-card';
+              liveBody = document.createElement('div');
+              liveBody.className = 'msg-body';
+              liveCard.appendChild(liveBody);
+              wrap.appendChild(liveCard);
+              document.getElementById('messages')!.appendChild(wrap);
+            }
+            acc += c;
+            liveBody!.innerHTML = renderMarkdown(acc);
+            const m = document.getElementById('messages')!;
+            m.scrollTop = m.scrollHeight;
+            this.setStatus('', false);
+          },
+          done: (d) => {
+            if (liveCard && liveBody) {
+              if (d.sources && d.sources.length > 0) {
+                const src = document.createElement('details');
+                src.className = 'sources';
+                src.innerHTML = `<summary>${SVG_CLIP} 出典 (${d.sources.length})${d.cached ? '・キャッシュ' : ''}</summary>`;
+                for (const s of d.sources) src.appendChild(sourceElement(s));
+                liveCard.appendChild(src);
+              }
+              // 時刻はカードの外（下）に追加。ホバーで年月日時刻
+              const now = new Date();
+              const tm = document.createElement('div');
+              tm.className = 'msg-time';
+              tm.textContent = fmtTime(now);
+              tm.title = fmtFull(now);
+              liveCard.parentElement!.appendChild(tm);
+            } else {
+              thinking.remove();
+              this.appendMessage('assistant', acc || '', d.sources ?? [], new Date());
+            }
+            const secs = ((performance.now() - t0) / 1000).toFixed(1);
+            this.setStatus(`⏱ ${secs}s${d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
+            void this.refreshList(this.chatUuid);
+          },
+          error: (e) => {
+            thinking.remove();
+            this.appendMessage('assistant', `⚠️ ${e.message}`, [], new Date());
+          },
+        },
+      );
+    } catch (ex) {
+      thinking.remove();
+      this.appendMessage('assistant', `⚠️ 接続エラー: ${(ex as Error).message}`, [], new Date());
+    } finally {
+      thinking.remove();
+      this.sending = false;
+      (document.getElementById('send-btn') as HTMLButtonElement).disabled = false;
+      input.focus();
+    }
+  }
+}
