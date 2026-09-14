@@ -241,11 +241,22 @@ public sealed class Program
         Logger? log = null;
         try
         {
+            EnsureDefaultConfig();
             cfg = AppConfig.Load(args);
+            // エンコーディング防御: UTF-8以外で保存されたconfig.jsonは置換文字(U+FFFD)を含む。
+            // 化けたパスで予期しない場所にディレクトリを作る前に検出して失敗させる（終了コード20）
+            if (cfg.DataDir.Contains('\uFFFD') || cfg.EngineDir.Contains('\uFFFD') || cfg.ModelsDir.Contains('\uFFFD'))
+                throw new InvalidDataException("config.json をUTF-8として読み取れません（エンコーディング不正）(SHINE_E_CONFIG_ENCODING)");
             var dataDir = Path.IsPathRooted(cfg.DataDir) ? cfg.DataDir : Path.Combine(AppContext.BaseDirectory, cfg.DataDir);
             Directory.CreateDirectory(dataDir);
             log = new Logger(Path.Combine(dataDir, "logs"));
             await RunAsync(cfg, log);
+        }
+        catch (InvalidDataException ex)
+        {
+            log?.Error($"config invalid: {ex.Message}");
+            Console.Error.WriteLine(ex.Message);
+            Environment.ExitCode = 20;
         }
         catch (Exception ex) when (IsPortInUse(ex))
         {
@@ -278,6 +289,36 @@ public sealed class Program
                 return true;
         }
         return false;
+    }
+
+    /// <summary>config.json が無い場合（インストール直後）にUTF-8で既定configを生成する。
+    /// パスは実行ディレクトリ基準の絶対パス（フォワードスラッシュ）。
+    /// 従来インストーラ(Inno ANSI書き出し)が生成していたが、日本語インストール先で
+    /// 文字化けしたパスが書かれゴミディレクトリが作られる障害があったためバックエンド生成に移管した</summary>
+    static void EnsureDefaultConfig()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "config.json");
+        if (File.Exists(path)) return;
+        var baseDir = AppContext.BaseDirectory.Replace('\\', '/').TrimEnd('/');
+        var json = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            port = 8300,
+            data_dir = baseDir + "/data",
+            engine_dir = baseDir + "/engine",
+            engine_variant = "cpu",
+            models_dir = baseDir + "/models",
+            standard_model = "Qwen3-4B-Instruct-2507-IQ4_XS.gguf",
+            quick_model = "Qwen3-1.7B-IQ4_XS.gguf",
+            quality_model = "Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
+            tier = "quick",
+            ctx_size = 2048
+        }, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        });
+        File.WriteAllText(path, json); // UTF-8（BOMなし）
+        Console.WriteLine("created default config.json (first run)");
     }
 
     static async Task RunAsync(AppConfig cfg, Logger log)

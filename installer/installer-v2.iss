@@ -165,30 +165,14 @@ begin
     ExitProcess(CustomExitCode);
 end;
 
-{ インストール先確定後にconfig.jsonを生成（絶対パスで data/engine/models を指定。
-  パス区切りはJSONエスケープ問題を避けるためフォワードスラッシュを使用）。
-  併せて install.completed マーカーを書く（サイレント再実行時の 11 判定に使用） }
+{ インストール完了後に install.completed マーカーを書く（サイレント再実行時の 11 判定に使用）。
+  config.json はここで書かない: InnoのSaveStringToFileはANSI書き出しのため日本語インストール先で
+  文字化けし、化けたパスのゴミディレクトリが作られる実障害があった。代わりにバックエンドが
+  初回起動時にUTF-8で絶対パス付きconfig.jsonを生成する（Program.cs EnsureDefaultConfig） }
 procedure CurStepChanged(CurStep: TSetupStep);
-var
-  Cfg, AppDir: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    AppDir := ExpandConstant('{app}');
-    StringChangeEx(AppDir, '\', '/', True);
-    Cfg := '{' + #13#10 +
-      '  "port": 8300,' + #13#10 +
-      '  "data_dir": "' + AppDir + '/data",' + #13#10 +
-      '  "engine_dir": "' + AppDir + '/engine",' + #13#10 +
-      '  "engine_variant": "cpu",' + #13#10 +
-      '  "models_dir": "' + AppDir + '/models",' + #13#10 +
-      '  "standard_model": "Qwen3-4B-Instruct-2507-IQ4_XS.gguf",' + #13#10 +
-      '  "quick_model": "Qwen3-1.7B-IQ4_XS.gguf",' + #13#10 +
-      '  "quality_model": "Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",' + #13#10 +
-      '  "tier": "quick",' + #13#10 +
-      '  "ctx_size": 2048' + #13#10 +
-      '}';
-    SaveStringToFile(ExpandConstant('{app}\config.json'), Cfg, False);
     SaveStringToFile(ExpandConstant('{app}\install.completed'), '{#MyAppVersion}', False);
   end;
 end;
