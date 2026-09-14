@@ -44,7 +44,7 @@ VersionInfoDescription={#MyAppName}
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "デスクトップにショートカットを作成"; Flags: unchecked
+Name: "desktopicon"; Description: "デスクトップにショートカットを作成"
 
 [Files]
 ; バックエンド（自己完結publish: .NETランタイム同梱・109MB）
@@ -62,6 +62,12 @@ Source: "launch.vbs";                         DestDir: "{app}"; Flags: ignorever
 Source: "..\spikes\phase0\models\Qwen3-1.7B-IQ4_XS.gguf";        DestDir: "{app}\models"; Flags: ignoreversion
 Source: "..\spikes\phase0\models\bge-m3-Q8_0.gguf";              DestDir: "{app}\models"; Flags: ignoreversion
 Source: "..\spikes\phase0\models\bge-reranker-v2-m3-Q8_0.gguf";  DestDir: "{app}\models"; Flags: ignoreversion
+
+; WebView2 デスクトップアプリ（ユーザーが使う画面。バックエンドと同じフォルダに配置）
+Source: "..\dist\ShineosQA.App\ShineosQA.exe";                  DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\ShineosQA.App\Microsoft.Web.WebView2.Core.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\ShineosQA.App\Microsoft.Web.WebView2.Wpf.dll";  DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\ShineosQA.App\WebView2Loader.dll";              DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\launch.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\app.ico"

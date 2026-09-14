@@ -1,5 +1,7 @@
 # 終了コード一覧（Exit Codes）
 
+> **⚠ 本書は v1（Ollama + Open WebUI 版）インストーラ向けのアーカイブです。** 現行の v2 のエラー・終了コードは [v2エラーコード一覧](error-codes-v2.md) を参照してください。
+
 本ドキュメントは、社内知恵袋（ShineosQA）のインストーラおよび同梱スクリプトが返す終了コードをまとめたものです。
 
 - **対象**: `ShineosQA-Setup-<version>.exe`（Inno Setup 6.7.3 製）および `{app}\scripts` 配下のスクリプト

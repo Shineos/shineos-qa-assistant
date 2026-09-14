@@ -349,12 +349,14 @@ export class ChatView {
           this.setStatus(`回答モデルを ${c.label} に切り替えました（モデル読込中…）`);
         });
       } else {
-        state.insertAdjacentHTML('beforeend', '<button type="button" class="primary small dl-btn"><span class="spinner mini"></span><span class="pct">DL</span></button>');
+        // 未DL: クリック前にスピナーは表示しない（テキストのみ）。クリックで無効化してスピナー＋進捗に切替
+        state.insertAdjacentHTML('beforeend', '<button type="button" class="primary small dl-btn"><span class="pct">ダウンロード</span></button>');
         const btn = state.querySelector('button') as HTMLButtonElement;
         btn.addEventListener('click', async ev => {
           ev.stopPropagation();
+          if (btn.disabled) return;
           btn.disabled = true;
-          (btn.querySelector('.pct') as HTMLElement).textContent = '0%';
+          btn.innerHTML = '<span class="spinner mini"></span><span class="pct">0%</span>';
           try {
             void api.installModel(c.id).catch(err => console.error(err));
             await this.pollModelDownload(c.id, btn, opt);

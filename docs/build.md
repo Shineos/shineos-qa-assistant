@@ -1,5 +1,7 @@
 # 社内知恵袋 — 構築ドキュメント
 
+> **⚠ 本書は v1（Ollama + Open WebUI 版）向けのアーカイブです。** 現行の v2 のビルド手順は [v2開発ガイド](dev-v2.md) を参照してください。
+
 > 作成: 2026-08-20 | Shineos Inc.
 > ステータス: 実装完了（Windows実機検証は未実施 — §8 参照）
 > 関連: [Zenn記事（ベースとなる技術構成）](https://zenn.dev/shineos/articles/local-llm-rag-web-search-with-ollama)

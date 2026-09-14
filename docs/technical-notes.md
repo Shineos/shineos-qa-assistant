@@ -1,5 +1,7 @@
 # 技術資料（テクニカルノート）
 
+> **⚠ 本書は v1（Ollama + Open WebUI 版）向けのアーカイブです。** 現行の v2（llama.cpp 直接実行・自作C#バックエンド）については [v2アーキテクチャ設計書](architecture-v2.md)・[v2開発ガイド](dev-v2.md) を参照してください。
+
 本ドキュメントは「社内知恵袋」の技術的な詳細をまとめた参照資料です。製品の紹介は [README.md](../README.md) / English: [README-EN.md](../README-EN.md)、バージョンごとの変更は [CHANGELOG.md](../CHANGELOG.md) を参照してください。
 
 ## メモリ使用量と他アプリへの影響
