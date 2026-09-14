@@ -29,3 +29,8 @@ app/ShineosQA.Backend/bin/
 app/ShineosQA.Backend/obj/
 tools/dotnet-sdk/
 output/
+
+# v2 test artifacts
+app/ShineosQA.Backend.Tests/bin/
+app/ShineosQA.Backend.Tests/obj/
+spikes/phase0/ui-smoke/out/

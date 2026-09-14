@@ -1,12 +1,13 @@
-﻿param([string]$Label = "run")
-# 品質シナリオテスト: scenarios.json の各ケースを /api/chat に流し、期待キーワード/拒否を判定。
+﻿param([string]$Label = "run", [string]$Scenarios = "scenarios.json")
+# 品質シナリオテスト: シナリオJSON（既定 scenarios.json、-Scenarios scenarios-100.json で100問）を
+# /api/chat に流し、期待キーワード/拒否を判定。
 # 出力: TSV（tag, pass, answer_chars, ms）＋ answers/<Label>-<tag>.txt
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $base = "http://127.0.0.1:8300"
 & curl.exe -s -X POST "$base/api/cache-clear" | Out-Null  # answer cache is not model-tagged: always regenerate
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$cases = [IO.File]::ReadAllText((Join-Path $dir "scenarios.json"), [Text.Encoding]::UTF8) | ConvertFrom-Json
+$cases = [IO.File]::ReadAllText((Join-Path $dir $Scenarios), [Text.Encoding]::UTF8) | ConvertFrom-Json
 $ansDir = Join-Path $dir "answers"
 if (-not (Test-Path $ansDir)) { [IO.Directory]::CreateDirectory($ansDir) | Out-Null }
 $utf8 = New-Object Text.UTF8Encoding($false)

@@ -186,15 +186,25 @@ public static class Api
             if (path.Contains("..") || !Directory.Exists(path))
                 return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "無効なパスです" });
             var count = 0;
+            var failures = new List<object>();
             foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
             {
                 var ext = Path.GetExtension(f).ToLowerInvariant();
                 if (!Ingest.SupportedExtensions.Contains(ext)) continue;
-                await using var s = File.OpenRead(f);
-                await ingest.IngestFileAsync(Path.GetFileName(f), s, req.HttpContext.RequestAborted);
-                count++;
+                try
+                {
+                    await using var s = File.OpenRead(f);
+                    await ingest.IngestFileAsync(Path.GetFileName(f), s, req.HttpContext.RequestAborted);
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    // 1ファイルの解析失敗（破損PDF等）でフォルダ全体の取り込みを止めない
+                    ctx.Log.Warn($"import skipped {Path.GetFileName(f)}: {ex.Message}");
+                    failures.Add(new { name = Path.GetFileName(f), error = ex.Message });
+                }
             }
-            return Results.Json(new { imported = count });
+            return Results.Json(new { imported = count, failed = failures });
         });
 
         app.MapDelete("/api/knowledge/{id}", (long id) =>

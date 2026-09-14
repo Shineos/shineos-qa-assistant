@@ -61,12 +61,24 @@ $env:DOTNET_ROOT = "D:\dev\shineos-local-ai\tools\dotnet-sdk"
 - **実機検証**: bge-m3を実DL（605MB・SHA一致 `950f4a8e…`）／ウィザード表示・消滅／UI操作による質問→回答（3,000円・3日とも正答＋出典）／キャッシュ即答／NO-HIT拒否／ナレッジ・設定タブ
 - 既知の修正履歴: 設定タブrefreshの二重実行によるDOM競合（シリアライズ化で解消）、API JSON camelCaseとTS型PascalCaseの不一致（全snake/camel統一）
 
-## 6. 既知の未完（フェーズ1残り→フェーズ2）
+## 6. テスト資産（2026-09-14 拡充）
+
+| 種別 | 場所 | 実行方法 | 現況 |
+|---|---|---|---|
+| 単体テスト（xUnit・32件） | `app/ShineosQA.Backend.Tests/` | `dotnet test`（ portable SDK は `DOTNET_ROOT=tools/dotnet-sdk`） | 32/32 合格。チャンカー/コサイン/スニペット/閾値不変条件/Db設定・マイグレーション/パラメータバインディング/Config解析（穿越拒否・破損JSON）をカバー |
+| Golden QA 118問 | `spikes/phase0/latency-cmp/scenarios-100.json` | アプリ稼働中に `scenario-test.ps1 -Scenarios scenarios-100.json`（コーパスは `golden-corpus/` を `/api/knowledge/import`） | 108/118（91.5%、quick 1.7B）。失敗分類と知見は RESULTS.md 第9ラウンド |
+| UIスモーク | `spikes/phase0/ui-smoke/ui-smoke.ps1` | インストール済みアプリに対して実行（起動→タブ切替→モデルメニュー開閉を実ウィンドウ操作で検証） | 7/7 合格 |
+| インストーラ失敗系 | `spikes/phase0/installer-tests.ps1` | `-Phase d1`（アップグレード）/ `d2`（モデル破損・復元付き）/ `d3`（対話アンインストール） | d1 PASS（exit=0・データ保持・2.0.1登録）、d2 PASS（エンジンロード失敗をログ記録・バックエンド生存・自動復元）、d3 はスクリプト済み（単一インスタンス保証あり。対話UIはクリーンな環境で実行のこと） |
+
+テスト時の注意:
+- `d2` はモデルファイルを一時破損させる（try/finally で必ず復元）
+- 対話アンインストールの自動化は残存 `unins000` インスタンスがあると排他ロックで破綻するため、必ず単一起動する（スクリプトが保証済み）
+
+## 7. 既知の未完（品質バックログ）
 
 - [ ] 8GB実機でのクイック階級（1.7B）検証
-- [ ] リランク入力のスニペット化（約-30%）
-- [ ] PDF本格パーサ（PdfPig等への置換）
-- [ ] WPFシェル（既存 `app/ShineosQA.App`）のポート差し替え
-- [ ] Windowsサービス化（NSSM流用）＋ウォームアップタスク
-- [ ] インストーラ統合（[error-codes-v2.md](error-codes-v2.md) の終了コード表に従う）
-- [ ] テストのCI化（golden QAをxUnitへ移植）
+- [ ] PDF本格パーサ（PdfPig等への置換。`year-end-policy.pdf` のようなスキャン/CID PDFは現在スキップされる）
+- [ ] Golden QA 失敗10件の改善（条件混同・罠質問ガード・横断recall。RESULTS.md 第9ラウンド参照）
+- [ ] モデル破損時にsupervisorの再試行が続く間ユーザー応答が遅延する問題の早期エラー化
+- [ ] Web検索のマルチエンジン化
+- [ ] テストのCI化（GitHub Actions で `dotnet test` を回す）

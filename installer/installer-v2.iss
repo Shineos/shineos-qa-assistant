@@ -12,7 +12,10 @@
 ; ============================================================================
 
 #define MyAppName "社内知恵袋"
+; バージョンはISCC /DMyAppVersion=x.y.z で上書き可能（アップグレード経路テスト等）
+#ifndef MyAppVersion
 #define MyAppVersion "2.0.0"
+#endif
 #define MyAppPublisher "Shineos Inc."
 #define MyAppURL "https://shineos.com"
 #define MyAppExeName "launch.vbs"
