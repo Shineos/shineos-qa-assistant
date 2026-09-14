@@ -1,10 +1,10 @@
-# 社内知恵袋（ShineosQA）v2
+# 社内知恵袋（ShineosQA）
 
 **Languages**: [日本語](README.md) | [English](README-EN.md)
 
 **社内規定・業務マニュアルをナレッジ化し、社内Q&Aをパソコン内だけで安全に実現する Windows アプリ**
 
-[Shineos Inc.](https://shineos.com) が提供する社内Q&Aツールです。v2 では Ollama + Open WebUI を廃止し、**llama.cpp を直接実行する自作の軽量バックエンド（C#）＋ TypeScript 製UI（WebView2）** に全面再設計しました。Python も Web サービスも常駐しないため、低スペックPCでも速く、閉じればメモリを完全に解放します。社内資料を外部に送信しない**完全オフライン運用**は v1 から変わりません。
+[Shineos Inc.](https://shineos.com) が提供する社内Q&Aツールです。**llama.cpp を直接実行する自作の軽量バックエンド（C#）＋ TypeScript 製UI（WebView2）** の構成で、Python も Web サービスも常駐しません。そのため低スペックPCでも速く、閉じればメモリを完全に解放します。社内資料を外部に送信しない**完全オフライン運用**が特徴です。
 
 [![Latest Release](https://img.shields.io/github/v/release/Shineos/shineos-qa-assistant?sort=semver&label=Latest%20Release)](https://github.com/Shineos/shineos-qa-assistant/releases/latest)
 
@@ -23,9 +23,9 @@
 | 完全オフライン運用 | 社内資料を外部に送信しない（機密資料の利用に最適） |
 | Web検索（既定 OFF） | ON にすると最新情報を参照（DuckDuckGo・APIキー不要）。**質問内容が外部に送信されるため社内情報の質問時は OFF に** |
 
-### v1（Ollama + Open WebUI 版）からの主な変更
+### 旧版（Ollama + Open WebUI 利用）からの主な変更
 
-| 項目 | v1 | v2 |
+| 項目 | 旧版 | 現行 |
 |------|----|----|
 | AIエンジン | Ollama（仲介層あり） | **llama.cpp を直接実行**（llama-server・仲介層なし） |
 | アプリ層 | Open WebUI + Python + ソースパッチ | **自作軽量バックエンド1実行ファイル**（SQLite 内蔵・パッチなし） |
@@ -98,17 +98,17 @@
 
 | ドキュメント | 内容 |
 |------|------|
-| [v2アーキテクチャ設計書](docs/architecture-v2.md) | v2 の設計方針・構成・技術選定 |
-| [v2開発ガイド](docs/dev-v2.md) | v2 のビルド・テスト・開発手順（開発者向け） |
-| [レイテンシ実証レポート](docs/latency-verification.md) | v2-fast構成の高速化実測（v1比較） |
-| [回帰テスト結果](docs/regression-test.md) | v1 との品質・速度比較 |
-| [エラーコード一覧（v2）](docs/error-codes-v2.md) | v2 の終了コード・エラー対応 |
+| [アーキテクチャ設計書](docs/architecture-v2.md) | 現行構成の設計方針・構成・技術選定 |
+| [開発ガイド](docs/dev-v2.md) | ビルド・テスト・開発手順（開発者向け） |
+| [レイテンシ実証レポート](docs/latency-verification.md) | 高速化構成の実測（旧版比較） |
+| [回帰テスト結果](docs/regression-test.md) | 旧版との品質・速度比較 |
+| [エラーコード一覧](docs/error-codes-v2.md) | 終了コード・エラー対応 |
 | [変更履歴](CHANGELOG.md) | バージョンごとの変更内容 |
 | [コード署名ポリシー](CODE_SIGNING.md) | 署名対象・ビルド/署名フロー・チーム役割（SignPath Foundation 要件） |
 | [プライバシーポリシー](PRIVACY.md) | データ収集なし・通信の内訳・データ保存先 |
 | [README-EN.md](README-EN.md) | English documentation |
 
-※ v1（Ollama + Open WebUI 版）時代のドキュメント（[ユーザーマニュアル](docs/user-guide.md)・[技術資料](docs/technical-notes.md)・[構築手順](docs/build.md)・[終了コード一覧](docs/exit-codes.md)）はアーカイブとして残しています。v2 では構成が異なるため、内容は v1 についての記述です。
+※ 旧版（Ollama + Open WebUI 利用）時代のドキュメント（[ユーザーマニュアル](docs/user-guide.md)・[技術資料](docs/technical-notes.md)・[構築手順](docs/build.md)・[終了コード一覧](docs/exit-codes.md)）はアーカイブとして残しています。内容は旧版についての記述です。
 
 ## ライセンス
 

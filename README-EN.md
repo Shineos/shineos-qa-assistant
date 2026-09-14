@@ -1,10 +1,10 @@
-# ShineosQA (社内知恵袋 / Company Knowledge Base) v2
+# ShineosQA (社内知恵袋 / Company Knowledge Base)
 
 **Languages**: [日本語](README.md) | [English](README-EN.md)
 
 **A Windows application that turns company regulations and business manuals into a searchable knowledge base, enabling internal Q&A entirely on your own PC.**
 
-ShineosQA is an internal Q&A tool provided by [Shineos Inc.](https://shineos.com). Version 2 removes Ollama and Open WebUI entirely and runs **llama.cpp directly behind a lightweight custom C# backend with a TypeScript UI in WebView2**. There is no Python runtime and no resident web service, so even low-spec PCs get fast answers — and closing the app releases all memory. As before, **company documents never leave the machine**.
+ShineosQA is an internal Q&A tool provided by [Shineos Inc.](https://shineos.com). It runs **llama.cpp directly behind a lightweight custom C# backend with a TypeScript UI in WebView2**, with no Python runtime and no resident web service — so even low-spec PCs get fast answers, and closing the app releases all memory. **Company documents never leave the machine**.
 
 [![Latest Release](https://img.shields.io/github/v/release/Shineos/shineos-qa-assistant?sort=semver&label=Latest%20Release)](https://github.com/Shineos/shineos-qa-assistant/releases/latest)
 
@@ -40,9 +40,9 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
 | Web search (OFF by default) | Optional DuckDuckGo lookup (no API key). **Queries would be sent externally, so keep it OFF for company questions** |
 
-### Key changes from v1 (Ollama + Open WebUI)
+### Key changes from the previous release (Ollama + Open WebUI)
 
-| Item | v1 | v2 |
+| Item | Previous | Current |
 |------|----|----|
 | AI engine | Ollama (with intermediary layers) | **llama.cpp executed directly** (llama-server, no intermediary) |
 | App layer | Open WebUI + Python + source patches | **One custom lightweight backend executable** (embedded SQLite, no patches) |
@@ -111,16 +111,16 @@ An 18-scenario quality test across 4 configurations found no degradation from th
 | Document | Contents |
 |------|------|
 | [README.md](README.md) | Japanese product page |
-| [v2 architecture (Japanese)](docs/architecture-v2.md) | v2 design goals, structure and technology choices |
-| [v2 dev guide (Japanese)](docs/dev-v2.md) | Build, test and development procedures for v2 |
-| [Latency verification (Japanese)](docs/latency-verification.md) | Measured speedups of the v2-fast configuration vs v1 |
-| [Regression test (Japanese)](docs/regression-test.md) | Quality/speed comparison against v1 |
-| [v2 error codes (Japanese)](docs/error-codes-v2.md) | Exit codes and error handling in v2 |
+| [Architecture design (Japanese)](docs/architecture-v2.md) | Design goals, structure and technology choices of the current architecture |
+| [Development guide (Japanese)](docs/dev-v2.md) | Build, test and development procedures |
+| [Latency verification (Japanese)](docs/latency-verification.md) | Measured speedups of the current fast configuration vs the previous release |
+| [Regression test (Japanese)](docs/regression-test.md) | Quality/speed comparison against the previous release |
+| [Error codes (Japanese)](docs/error-codes-v2.md) | Exit codes and error handling |
 | [CHANGELOG.md](CHANGELOG.md) | Version-by-version changes |
 | [Code Signing Policy](CODE_SIGNING.md) | What is signed, build/signing pipeline, team roles (SignPath Foundation requirements) |
 | [Privacy Policy](PRIVACY.md) | No telemetry, network access breakdown, local data storage |
 
-Documents from the v1 era (Ollama + Open WebUI) — [user guide](docs/user-guide.md), [technical notes](docs/technical-notes.md), [build docs](docs/build.md), [exit codes](docs/exit-codes.md) — are kept as archives describing the v1 stack.
+Documents from the previous release era (Ollama + Open WebUI) — [user guide](docs/user-guide.md), [technical notes](docs/technical-notes.md), [build docs](docs/build.md), [exit codes](docs/exit-codes.md) — are kept as archives describing that stack.
 
 ## Contact
 
