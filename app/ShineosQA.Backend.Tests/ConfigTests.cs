@@ -77,6 +77,21 @@ public class ConfigTests : IDisposable
     }
 
     [Fact]
+    public void Load_TuningKeys_AreApplied()
+    {
+        // 回帰: idle_unload_minutes / bg_friendly / threads はプロパティがあっても
+        // switchにマッピングがないと黙って無視されていた（idle解放テストで発見）
+        var p = WriteConfig("""{ "idle_unload_minutes": 5, "bg_friendly": false, "threads": 3 }""");
+        var cfg = AppConfig.Load(new[] { "--config", p });
+        Assert.Equal(5, cfg.IdleUnloadMinutes);
+        Assert.False(cfg.BgFriendly);
+        Assert.Equal(3, cfg.Threads);
+        // 既定値の確認（他テストの前提）
+        Assert.True(new AppConfig().BgFriendly);
+        Assert.Equal(60, new AppConfig().IdleUnloadMinutes);
+    }
+
+    [Fact]
     public void ModelFiles_TierDefaults_AreConsistent()
     {
         var cfg = new AppConfig();

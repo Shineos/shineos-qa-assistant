@@ -53,6 +53,7 @@ public static class Api
             web_search = bool.TryParse(db.GetSetting("web_search", cfg.WebSearch.ToString()), out var w) && w,
             tier = db.GetSetting("tier", "auto"),
             idle_unload_minutes = cfg.IdleUnloadMinutes,
+            bg_friendly = bool.TryParse(db.GetSetting("bg_friendly", cfg.BgFriendly.ToString()), out var b) && b,
         }));
 
         app.MapPost("/api/settings", async (HttpRequest req) =>
@@ -61,6 +62,14 @@ public static class Api
             foreach (var p in doc.RootElement.EnumerateObject())
             {
                 if (p.Name == "web_search") db.SetSetting("web_search", p.Value.GetBoolean().ToString());
+                if (p.Name == "bg_friendly")
+                {
+                    var v = p.Value.GetBoolean();
+                    db.SetSetting("bg_friendly", v.ToString());
+                    cfg.BgFriendly = v;
+                    // 稼働中エンジンを停止して次の質問で新しい優先度を反映させる
+                    sup.ApplyLlmPriority();
+                }
                 if (p.Name == "tier" && p.Value.GetString() is { } t && t is "auto" or "standard" or "quick" or "quality")
                 {
                     db.SetSetting("tier", t); cfg.Tier = t;
@@ -311,7 +320,8 @@ public sealed class Program
             quick_model = "Qwen3-1.7B-IQ4_XS.gguf",
             quality_model = "Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
             tier = "quick",
-            ctx_size = 2048
+            ctx_size = 2048,
+            bg_friendly = true
         }, new System.Text.Json.JsonSerializerOptions
         {
             WriteIndented = true,
@@ -329,6 +339,7 @@ public sealed class Program
         var savedTier = db.GetSetting("tier", "");
         if (savedTier is "auto" or "standard" or "quick") cfg.Tier = savedTier;
         else db.SetSetting("tier", cfg.Tier); // 初回はconfig.jsonの階級を永続化
+        if (bool.TryParse(db.GetSetting("bg_friendly", ""), out var savedBg)) cfg.BgFriendly = savedBg;
 
         var gw = new LlmGateway();
         var sup = new Supervisor(cfg, gw, log);

@@ -9,7 +9,7 @@ export interface StatusInfo {
   version: string; tier: string; chat_model: string; chunks: number; ram_gb: number;
   engines: { tier: string; chat_model: string; llm: string; embed: string; rank: string };
 }
-export interface Settings { web_search: boolean; tier: string; idle_unload_minutes: number }
+export interface Settings { web_search: boolean; tier: string; idle_unload_minutes: number; bg_friendly: boolean }
 
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

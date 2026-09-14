@@ -234,27 +234,60 @@ public sealed class Supervisor
         _idleTask = Task.Run(IdleLoopAsync);
     }
 
-    /// <summary>idleタイマー: 一定時間無操作でLLM子プロセスを停止（Ollama keep_alive相当）</summary>
+    /// <summary>idleタイマー: 一定時間無操作でLLM子プロセスを停止（Ollama keep_alive相当）。
+    /// さらに長く使わなければ rank（Q&A中のみ使用）→ embed（取り込み・キャッシュ照合で使用）も
+    /// 順に解放し、アプリを開いたままの常駐メモリを最小化する。次の質問・取り込みでは
+    /// ChatFlow/Ingest の自己修復呼び出し（StartEmbedAndRank）がオンデマンドで再起動する</summary>
     private async Task IdleLoopAsync()
     {
+        var llmIdle = TimeSpan.FromMinutes(Math.Max(1, _cfg.IdleUnloadMinutes));
+        DateTime? rankDueAt = null, embDueAt = null;
         while (true)
         {
             await Task.Delay(TimeSpan.FromMinutes(1));
-            EngineProc? toStop = null;
+            EngineProc? toStopLlm = null, toStopRank = null, toStopEmb = null;
             lock (_lock)
             {
-                if (_llm != null && !_llm.Proc.HasExited &&
-                    DateTime.UtcNow - _llmLastUsed > TimeSpan.FromMinutes(Math.Max(1, _cfg.IdleUnloadMinutes)))
+                var idle = DateTime.UtcNow - _llmLastUsed;
+                if (idle <= llmIdle)
                 {
-                    toStop = _llm; _llm = null; _idleTask = null;
+                    // 利用が再開されたら解放予定を取り消す
+                    rankDueAt = null; embDueAt = null;
+                }
+                else if (_llm != null && !_llm.Proc.HasExited)
+                {
+                    toStopLlm = _llm; _llm = null;
+                    rankDueAt ??= DateTime.UtcNow + TimeSpan.FromMinutes(5);
+                    embDueAt ??= DateTime.UtcNow + llmIdle;
+                }
+                if (rankDueAt is { } r && _rank != null && !_rank.Proc.HasExited && DateTime.UtcNow > r)
+                { toStopRank = _rank; _rank = null; rankDueAt = null; }
+                if (embDueAt is { } e && _emb != null && !_emb.Proc.HasExited && DateTime.UtcNow > e)
+                { toStopEmb = _emb; _emb = null; embDueAt = null; }
+                if (toStopLlm != null && _rank == null && _emb == null) _idleTask = null; // 全停止で監視終了
+            }
+            if (toStopLlm != null) { _log.Info($"idle unload: stopping llm engine (port {toStopLlm.Port})"); lock (_lock) DisposeEngine(toStopLlm); }
+            if (toStopRank != null) { _log.Info("idle unload: stopping rank engine"); lock (_lock) DisposeEngine(toStopRank); }
+            if (toStopEmb != null) { _log.Info("idle unload: stopping embed engine"); lock (_lock) DisposeEngine(toStopEmb); }
+            lock (_lock)
+            {
+                // 全エンジン停止で監視ループも終了（次のEnsureLlmが新しい監視を起動する）
+                if (_llm == null && _rank == null && _emb == null)
+                {
+                    _idleTask = null;
+                    return;
                 }
             }
-            if (toStop != null)
-            {
-                _log.Info($"idle unload: stopping llm engine (port {toStop.Port})");
-                lock (_lock) DisposeEngine(toStop);
-                return;
-            }
+        }
+    }
+
+    /// <summary>他アプリ優先設定の変更を稼働中LLMへ即時反映するため、稼働中なら停止する
+    /// （次の質問のEnsureLlmで新しい優先度で再起動される。未稼働なら何もしない）</summary>
+    public void ApplyLlmPriority()
+    {
+        lock (_lock)
+        {
+            if (_llm != null) { DisposeEngine(_llm); _llm = null; }
         }
     }
 
@@ -283,8 +316,11 @@ public sealed class Supervisor
         foreach (var a in args) psi.ArgumentList.Add(a);
         var p = Process.Start(psi)!;
         JobObject.Assign(p); // 親（バックエンド）死亡時に子も確実に終了（孤児化防止）
-            // LLMは通常優先（BelowNormalだとpp実測-24%）。embed/rankは常駐のため低優先のまま
-            p.PriorityClass = name == "llm" ? ProcessPriorityClass.Normal : ProcessPriorityClass.BelowNormal;
+            // 他アプリ優先モード（既定ON）: LLM生成もBelowNormalで実行し、利用者が同時に使う
+            // 他アプリ（ブラウザ・Office等）の操作を優先させる。OFFなら通常優先で最速（pp+24%程度）
+            p.PriorityClass = name == "llm"
+                ? (_cfg.BgFriendly ? ProcessPriorityClass.BelowNormal : ProcessPriorityClass.Normal)
+                : ProcessPriorityClass.BelowNormal;
         p.ErrorDataReceived += (_, e) => { if (e.Data != null) { var b = System.Text.Encoding.UTF8.GetBytes(e.Data + "\n"); logFs.Write(b, 0, b.Length); logFs.Flush(); } };
         p.BeginErrorReadLine();
         var ep = new EngineProc { Name = name, File = modelFile, Proc = p, Port = port, LogStream = logFs };

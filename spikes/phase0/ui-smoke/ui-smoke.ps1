@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$AppDir = "$env:LOCALAPPDATA\Programs\ShineosQA",
     [int]$TimeoutSec = 90
 )

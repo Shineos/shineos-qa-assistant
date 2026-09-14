@@ -42,6 +42,13 @@ export class SettingsView {
             <option value="quick" ${settings.tier === 'quick' ? 'selected' : ''}>クイック（Qwen3-1.7B・8GB機向）</option>
           </select>
         </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <b>他アプリ優先モード</b>
+            <span>AI処理を低優先度で実行し、他のアプリの操作を優先します（回答がやや遅くなります）。長時間使わない間はAIのメモリも自動的に解放します。</span>
+          </div>
+          <label class="switch"><input type="checkbox" id="set-bg" ${settings.bg_friendly ? 'checked' : ''} /><span class="slider"></span></label>
+        </div>
       </div>
       <div id="models-host"></div>
       <div class="settings-card">
@@ -55,6 +62,9 @@ export class SettingsView {
     document.getElementById('set-tier')!.addEventListener('change', async (e) => {
       await api.saveSettings({ tier: (e.target as HTMLSelectElement).value });
       await this.refresh();
+    });
+    document.getElementById('set-bg')!.addEventListener('change', async (e) => {
+      await api.saveSettings({ bg_friendly: (e.target as HTMLInputElement).checked });
     });
     // AIモデル管理セクション（初回DL・追加・削除）をカード内へ描画
     const modelsHost = document.getElementById('models-host')!;
