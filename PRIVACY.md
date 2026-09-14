@@ -1,8 +1,8 @@
 # プライバシーポリシー（Privacy Policy）
 
 - **制定日**: 2026-08-28
-- **最終改定日**: 2026-08-31
-- **適用対象**: 社内知恵袋（ShineosQA）Windows アプリケーション（以下「本製品」）
+- **最終改定日**: 2026-09-14（v2アーキテクチャ対応版）
+- **適用対象**: 社内知恵袋（ShineosQA）v2 Windows アプリケーション（以下「本製品」）
 
 ---
 
@@ -32,26 +32,24 @@
 
 | タイミング | 通信内容 |
 |---|---|
-| **インストール時のみ** | 必要なコンポーネントを公式ソースからダウンロードします。Ollama（`github.com`）、Python 3.12（`nuget.org`）、AIモデル qwen2.5 / bge-m3（Ollama公式レジストリ `registry.ollama.ai`）、Open WebUI・Pythonライブラリ（`pypi.org` / `download.pytorch.org`）。ダウンロード完了後は不要になります |
-| **通常利用時（既定）** | **外部通信なし**。AI処理・文書検索（RAG）・チャットはすべてお使いのPC内（`127.0.0.1`）で完結します。バージョンアップの確認も無効化されているため、外部への問い合わせは発生しません |
+| **インストール時** | インストーラはAIモデル・推論エンジンを**すべて同梱**しており、インストール中のダウンロードはありません（完全オフラインでインストール可能） |
+| **追加モデルの取得時（任意）** | 初期モデル（1.7B・埋め込み・リランカ）は同梱済みです。お客様が**画面から標準（4B）・高品質（30B）モデルの追加を明示的に行った場合のみ**、モデルファイルを `huggingface.co`（モデル配布元）からダウンロードし、SHA256検証後に保存します。質問や文書の内容は送信しません |
+| **通常利用時（既定）** | **外部通信なし**。AI処理・文書検索（RAG）・チャットはすべてお使いのPC内（`127.0.0.1`）で完結します。バージョンアップの確認も行わないため、外部への問い合わせは発生しません |
 | **Web検索 ON 時（任意・既定OFF）** | チャット入力欄のWeb検索ボタンを**お客様が明示的にONにした場合のみ**、入力した質問文が外部の検索サービス（DuckDuckGo・APIキー不要）へ送信され、検索結果のページを取得します。トグルはチャットごとの選択で、初回起動時ガイドでも注意を表示します。**社内情報に関する質問の際は OFF のまま**にしてください |
 
 ## 4. データの保存先
 
-すべてのデータはお使いのPC内にのみ保存されます。
+すべてのデータはお使いのPC内にのみ保存されます。既定のインストール先は
+`%LOCALAPPDATA%\Programs\ShineosQA`（ユーザーフォルダ内・管理者権限不要）です。
 
 | データ | 保存先 |
 |---|---|
-| 登録した社内文書（ナレッジ） | `C:\Program Files\ShineosQA\knowledge\` |
-| チャット履歴・設定 | `C:\Program Files\ShineosQA\data\webui.db` |
-| 検索用ベクトルデータベース | `C:\Program Files\ShineosQA\data\vector_db\` |
-| アップロードしたファイル | `C:\Program Files\ShineosQA\data\uploads\` |
-| チャットから生成した資料（PDF/PPTX/Word） | `C:\Program Files\ShineosQA\data\mcpo_output\`（資料作成ツールの一部は `%USERPROFILE%\shineos-qa-out\`、環境変数 `FILEGEN_OUT` で変更可） |
-| 動作ログ（インストール・実行・検証） | `C:\Program Files\ShineosQA\logs\` |
+| ナレッジ（文書テキスト・検索索引・ベクトル）・チャット履歴・設定 | `{インストール先}\data\knowledge.db`（SQLite単一ファイル） |
+| AIモデル本体（GGUF） | `{インストール先}\models\`（初期モデルは同梱・追加モデルもここに保存） |
+| 動作ログ（バックエンド・エンジン） | `{インストール先}\data\logs\` |
 | アプリのログ・初回起動フラグ・WebView2ブラウザデータ（キャッシュ等） | `%APPDATA%\ShineosQA\` |
-| AIモデル本体（qwen2.5・bge-m3） | Ollama のモデル保存先（システムアカウントプロファイル内を含む） |
 
-※ インストール先を変更した場合は、`C:\Program Files\ShineosQA` の部分が選択したフォルダになります。
+※ v1（旧バージョン）と異なり、`C:\Program Files` へのインストール・Windowsサービスの常駐・Ollama/Open WebUI の利用は行いません。
 
 ## 5. 第三者提供
 
@@ -61,15 +59,15 @@
 
 ## 6. データの保持と削除
 
-- チャット履歴・ナレッジは、お客様が削除するまでPC内に保持されます（Open WebUI の管理画面から削除可能）
-- **アンインストール時**: 「ナレッジ（社内文書・検索データ）を残すか」「Ollama 本体とAIモデル（数GB）を削除するか」を確認します。「すべて削除」を選んだ場合は、モデル・ログ・検索データを含めて掃除します
-- **アップグレード（バージョン更新）時**: 旧データは `data.backup-<日付>` に1世代バックアップされ、社内文書は引き継がれます
-- 削除した文書の検索索引が残る場合は、同梱の保守ツール（`purge_orphan_vectors.py`）で掃除できます
+- チャット履歴・ナレッジは、お客様が削除するまでPC内に保持されます（アプリ画面の履歴・ナレッジ管理から削除可能）
+- **アンインストール時**: アプリ本体・エンジン・同梱モデルは完全に削除します。ナレッジとチャット履歴（`data` フォルダ）を削除するか残すかは確認のうえ処理します（サイレントアンインストールでは残します）
+- **アップグレード（バージョン更新）時**: 設定・ナレッジ・追加DL済みモデルはそのまま引き継がれます
+- アプリを閉じると、AIエンジン・バックエンドは完全に停止しメモリを解放します（バックグラウンドでの常駐はありません）
 
 ## 7. セキュリティについて
 
-- 本製品のサービス（Open WebUI・Ollama）は**ローカルホスト（`127.0.0.1`）のみで待ち受け**、外部ネットワークからのアクセスはできません
-- インストールには管理者権限が必要です
+- 本製品のバックエンドは**ローカルホスト（`127.0.0.1:8300`）のみで待ち受け**、外部ネットワークからのアクセスはできません
+- インストールに管理者権限は不要です（ユーザー単位でインストールされます）
 - Web検索をOFFにした状態では、本製品はインターネットに一切接続しません
 
 ## 8. ポリシーの改定
@@ -87,8 +85,8 @@
 # Privacy Policy (English)
 
 - **Effective date**: 2026-08-28
-- **Last updated**: 2026-08-31
-- **Applies to**: 社内知恵袋 (ShineosQA) Windows application ("the Product")
+- **Last updated**: 2026-09-14 (v2 architecture)
+- **Applies to**: 社内知恵袋 (ShineosQA) v2 Windows application ("the Product")
 
 ## 1. Overview
 
@@ -102,21 +100,21 @@ The Product is a fully local company Q&A tool that turns internal documents into
 
 | When | What happens |
 |---|---|
-| **Installation only** | Components are downloaded from official sources: Ollama (`github.com`), Python 3.12 (`nuget.org`), AI models qwen2.5 / bge-m3 (official Ollama registry, `registry.ollama.ai`), Open WebUI and Python libraries (`pypi.org` / `download.pytorch.org`). No network access is needed afterwards. |
-| **Normal use (default)** | **No outbound connections.** AI processing, document search (RAG), and chat all run on `localhost` (`127.0.0.1`) on your PC. Version-update checks are disabled. |
-| **Optional web search (OFF by default)** | Only if you explicitly enable the per-chat web-search toggle, your question text is sent to an external search service (DuckDuckGo, no API key required) and result pages are fetched. The toggle is per chat and a warning is shown in the first-run guide. Keep it OFF when asking about internal information. |
+| **Installation** | The installer bundles the AI models and inference engine — **no downloads during installation** (fully offline install). |
+| **Optional extra models** | The starter models are bundled. Only if you explicitly choose to add the 4B or 30B model from the app is the model file downloaded from `huggingface.co` (verified by SHA256). No questions or documents are ever sent. |
+| **Normal use (default)** | **No outbound connections.** AI processing, document search (RAG), and chat all run on `localhost` (`127.0.0.1`) on your PC. No version-update checks are made. |
+| **Optional web search (OFF by default)** | Only if you explicitly enable the per-chat web-search toggle, your question text is sent to an external search service (DuckDuckGo, no API key required) and result pages are fetched. Keep it OFF when asking about internal information. |
 
 ## 4. Where your data is stored
 
-All data stays on your PC:
+All data stays on your PC. The default install location is `%LOCALAPPDATA%\Programs\ShineosQA` (per-user, no admin rights):
 
-- Registered documents (knowledge): `C:\Program Files\ShineosQA\knowledge\`
-- Chat history & settings: `C:\Program Files\ShineosQA\data\webui.db`
-- Search vector database: `C:\Program Files\ShineosQA\data\vector_db\`
-- Uploaded files: `C:\Program Files\ShineosQA\data\uploads\`
-- Generated documents (PDF/PPTX/Word): `C:\Program Files\ShineosQA\data\mcpo_output\` (some tools use `%USERPROFILE%\shineos-qa-out\`, configurable via `FILEGEN_OUT`)
-- Logs: `C:\Program Files\ShineosQA\logs\` and `%APPDATA%\ShineosQA\`
-- AI models (qwen2.5 / bge-m3): inside Ollama's model directory (which may include the system-profile location)
+- Knowledge (document text, search index, vectors), chat history & settings: `{install dir}\data\knowledge.db` (a single SQLite file)
+- AI models (GGUF): `{install dir}\models\`
+- Logs: `{install dir}\data\logs\`
+- App log, first-run flag, WebView2 browser data: `%APPDATA%\ShineosQA\`
+
+Unlike the old v1, the Product no longer installs into `C:\Program Files`, runs Windows services, or uses Ollama/Open WebUI.
 
 ## 5. Third-party sharing
 
@@ -124,15 +122,15 @@ None. The Product never shares or sells your data. The only exception is the opt
 
 ## 6. Retention and deletion
 
-- Chat history and knowledge remain on your PC until you delete them (removable from the Open WebUI admin screen).
-- **Uninstall**: you are asked whether to keep the knowledge documents and whether to delete Ollama and the AI models (several GB). Choosing full deletion also cleans models, logs, and search data.
-- **Upgrade**: old data is backed up to `data.backup-<date>` (one generation) and your documents are carried over.
-- A maintenance tool (`purge_orphan_vectors.py`) is provided to clean leftover search-index entries after document deletion.
+- Chat history and knowledge remain on your PC until you delete them (from the app's history and knowledge screens).
+- **Uninstall**: the application, engine and bundled models are fully removed. You are asked whether to also delete the knowledge and chat history (`data` folder); silent uninstalls keep it.
+- **Upgrade**: settings, knowledge, and downloaded models carry over.
+- Closing the app fully stops the AI engine and backend and releases all memory (nothing runs in the background).
 
 ## 7. Security
 
-- The Product's services (Open WebUI, Ollama) listen **only on localhost (`127.0.0.1`)** and are not reachable from the network.
-- Administrator rights are required to install.
+- The backend listens **only on localhost (`127.0.0.1:8300`)** and is not reachable from the network.
+- No administrator rights are required to install (per-user install).
 - With web search OFF, the Product makes no internet connection at all.
 
 ## 8. Policy updates

@@ -1,0 +1,12 @@
+SQLite is in the Public Domain
+--------------------------------
+
+All of the code and documentation in SQLite has been dedicated to the public
+domain by its authors (https://www.sqlite.org/copyright.html).
+
+The native SQLite library (e_sqlite3) bundled inside the SQLitePCLRaw.bundle_e_sqlite3
+package that is included in this product's backend is therefore free for any use,
+without attribution requirements.
+
+The Apache-2.0 licensed wrapper (SQLitePCLRaw) is covered by
+SQLitePCLRaw-LICENSE.txt and SQLitePCLRaw-NOTICE.txt in this directory.

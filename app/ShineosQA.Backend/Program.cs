@@ -220,16 +220,59 @@ public sealed class AppCtx
 
 public sealed class Program
 {
+    // 終了コード（docs/error-codes-v2.md §5・インストーラ終了コードと重複しない番号帯）:
+    //   0=正常停止 / 20=config.json破損 / 21=ポートバインド失敗 / 22=knowledge.db破損 / 30=想定外例外
     public static async Task Main(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        var cfg = AppConfig.Load(args);
+        AppConfig? cfg = null;
+        Logger? log = null;
+        try
+        {
+            cfg = AppConfig.Load(args);
+            var dataDir = Path.IsPathRooted(cfg.DataDir) ? cfg.DataDir : Path.Combine(AppContext.BaseDirectory, cfg.DataDir);
+            Directory.CreateDirectory(dataDir);
+            log = new Logger(Path.Combine(dataDir, "logs"));
+            await RunAsync(cfg, log);
+        }
+        catch (Exception ex) when (IsPortInUse(ex))
+        {
+            log?.Error($"port bind failed: {ex.Message}");
+            Environment.ExitCode = 21;
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            log?.Error($"knowledge.db error: {ex.Message}");
+            Environment.ExitCode = 22;
+        }
+        catch (Exception ex)
+        {
+            // 設定読込に失敗している（ログ初期化前）なら 20、それ以外の致命的例外は 30
+            log?.Error($"fatal: {ex}");
+            Environment.ExitCode = cfg is null ? 20 : 30;
+        }
+    }
+
+    static bool IsPortInUse(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is System.Net.Sockets.SocketException se &&
+                se.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse)
+                return true;
+            var msg = e.Message;
+            if (msg.Contains("already in use", StringComparison.OrdinalIgnoreCase) ||
+                msg.Contains("Only one usage of each socket address", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    static async Task RunAsync(AppConfig cfg, Logger log)
+    {
         // tierは設定DBで上書き
-        var dataDir = Path.IsPathRooted(cfg.DataDir) ? cfg.DataDir : Path.Combine(AppContext.BaseDirectory, cfg.DataDir);
-        Directory.CreateDirectory(dataDir);
-        var log = new Logger(Path.Combine(dataDir, "logs"));
         log.Info($"ShineosQA.Backend starting: tier={cfg.Tier} ram={AppConfig.TotalRamGb()}GB port={cfg.Port}");
-        var db = new Db(Path.Combine(dataDir, "knowledge.db"));
+        var db = new Db(Path.Combine(Path.IsPathRooted(cfg.DataDir) ? cfg.DataDir : Path.Combine(AppContext.BaseDirectory, cfg.DataDir), "knowledge.db"));
         var savedTier = db.GetSetting("tier", "");
         if (savedTier is "auto" or "standard" or "quick") cfg.Tier = savedTier;
         else db.SetSetting("tier", cfg.Tier); // 初回はconfig.jsonの階級を永続化
