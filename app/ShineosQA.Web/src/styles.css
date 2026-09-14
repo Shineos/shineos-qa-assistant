@@ -122,6 +122,7 @@ button.newchat:hover { background: var(--hover); }
 .model-state .primary.small { padding: 5px 12px; font-size: 12px; }
 .model-opt.selectable { cursor: pointer; }
 .badge-undl { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #b45309; border: 1px solid #fde68a; white-space: nowrap; }
+.badge-corrupt { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; white-space: nowrap; }
 .badge-inuse { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: var(--accent); border: 1px solid #a7f3d0; font-weight: 600; white-space: nowrap; }
 .spinner.mini { width: 12px; height: 12px; border-width: 2px; display: inline-block; flex-shrink: 0; }
 .dl-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 74px; justify-content: center; }

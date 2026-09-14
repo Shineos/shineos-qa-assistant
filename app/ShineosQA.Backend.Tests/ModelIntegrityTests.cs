@@ -35,13 +35,37 @@ public class ModelIntegrityTests : IDisposable
     }
 
     [Fact]
-    public void Verify_MismatchedHash_ThrowsModelHash()
+    public void Verify_MismatchedHash_ThrowsModelHash_AndRecordsBadVerdict()
     {
         var ex = Assert.Throws<InvalidDataException>(() =>
             ModelIntegrity.Verify(_model, _dataDir, new string('0', 64), new NoopLogger()));
         Assert.Contains("SHINE_E_MODEL_HASH", ex.Message);
-        // 不一致時は検証済みキャッシュを書かない（修復後に再検証させる）
-        Assert.False(File.Exists(Path.Combine(_dataDir, "model-verify.txt")));
+        // 破損判定もキャッシュされる（UIの破損バッジ表示に使う。ハッシュ計算なしで参照可能）
+        Assert.False(ModelIntegrity.CachedOk(_model, _dataDir));
+        Assert.Contains("|bad", File.ReadAllText(Path.Combine(_dataDir, "model-verify.txt")));
+    }
+
+    [Fact]
+    public void CachedOk_UnknownFile_ReturnsNull()
+    {
+        Assert.Null(ModelIntegrity.CachedOk(_model, _dataDir)); // 一度も検証していない
+    }
+
+    [Fact]
+    public void CachedOk_AfterGoodVerify_ReturnsTrue()
+    {
+        var sha = ShaOf(_model);
+        ModelIntegrity.Verify(_model, _dataDir, sha, new NoopLogger());
+        Assert.True(ModelIntegrity.CachedOk(_model, _dataDir));
+    }
+
+    [Fact]
+    public void CachedOk_AfterFileChange_ReturnsNullAgain()
+    {
+        var sha = ShaOf(_model);
+        ModelIntegrity.Verify(_model, _dataDir, sha, new NoopLogger());
+        File.WriteAllText(_model, "changed content changes mtime");
+        Assert.Null(ModelIntegrity.CachedOk(_model, _dataDir)); // 別バージョン扱い→要再検証
     }
 
     [Fact]
@@ -79,6 +103,18 @@ public class ModelIntegrityTests : IDisposable
         Assert.Equal(64, ModelManager.ShaForFile("Qwen3-1.7B-IQ4_XS.gguf")!.Length);
         Assert.NotNull(ModelManager.ShaForFile("bge-m3-Q8_0.gguf"));
         Assert.Null(ModelManager.ShaForFile("unknown-model.gguf"));
+    }
+
+    [Fact]
+    public void DownloadProgress_SerializesFields()
+    {
+        // /api/models/progress の回帰: フィールド宣言に戻ると System.Text.Json が {} を返し
+        // UIのDL進捗%が一切表示されなくなる（実障害として発見）
+        var p = new ModelManager.DownloadProgress { State = "downloading", CurrentId = "chat-quick", Bytes = 5, Total = 10 };
+        var json = System.Text.Json.JsonSerializer.Serialize(p);
+        Assert.Contains("downloading", json);
+        Assert.Contains("chat-quick", json);
+        Assert.Contains("Bytes", json);
     }
 
     private sealed class NoopLogger : ILogger

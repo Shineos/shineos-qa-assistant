@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Phase = "d1",
     [string]$AppDir = "$env:LOCALAPPDATA\Programs\ShineosQA",
     [string]$UpgradeExe = "D:\dev\shineos-local-ai\dist-test\ShineosQA-Setup-2.0.1.exe",
@@ -87,6 +87,9 @@ if ($Phase -eq 'd2') {
         Start-Process wscript.exe -ArgumentList ('"' + (Join-Path $AppDir 'launch.vbs') + '"')
         Start-Sleep -Seconds 6
         if (-not (Wait-Healthy)) { throw 'backend died with corrupted model (should stay up)' }
+        # 回答キャッシュを掃除する: 過去に成功した同一質問のキャッシュがヒットすると
+        # モデル破損でも正常回答が返り、テストが非決定的になる（キャッシュはLLM起動より前に評価される）
+        curl.exe -s -X POST http://127.0.0.1:8300/api/cache-clear | Out-Null
 
         # chat attempt: with the pre-start SHA check the SHINE_E_MODEL_HASH SSE error
         # must come back FAST (seconds). the old implementation hung 240s+ with no reply.
@@ -98,15 +101,43 @@ if ($Phase -eq 'd2') {
         curl.exe -s -N --max-time 120 -X POST http://127.0.0.1:8300/api/chat -H "Content-Type: application/json; charset=utf-8" --data-binary "@$tmp" -o $out | Out-Null
         $sw.Stop()
         $txt = [IO.File]::ReadAllText($out)
+        Write-Output ("  chat1: {0}ms len={1} head=[{2}]" -f $sw.ElapsedMilliseconds, $txt.Length, (($txt -replace '\s+',' ').Substring(0, [Math]::Min(100, $txt.Length))))
         Remove-Item $tmp, $out -Force
         $sseError = ($txt -match 'event: error') -and ($txt -match 'SHINE_E_MODEL_HASH')
 
         # pass criteria: 1) fast SHINE_E_MODEL_HASH SSE error (<60s) 2) backend alive
+        # 3) circuit breaker: 2 more failing chats trip the 3-fail breaker, then the 4th
+        #    chat must fail back FAST (no SHA re-hash / engine spawn wait)
         $alive = Wait-Healthy 5
+        $breakerFast = $false
+        $breakerMs = -1
+        if ($sseError -and $alive) {
+            $body2 = '{"chat_uuid":"corrupt-test-b","message":"もう一度日当は？"}'
+            $tmp = [IO.Path]::GetTempFileName()
+            [IO.File]::WriteAllText($tmp, $body2)
+            $out2 = [IO.Path]::GetTempFileName()
+            # 2連続失敗でブレーカー上限（起動時プリロード失敗1回込みで計3）に到達させる
+            foreach ($n in 2, 3) {
+                $swx = [System.Diagnostics.Stopwatch]::StartNew()
+                curl.exe -s -N --max-time 120 -X POST http://127.0.0.1:8300/api/chat -H "Content-Type: application/json; charset=utf-8" --data-binary "@$tmp" -o $out2 | Out-Null
+                $swx.Stop()
+                $tx = [IO.File]::ReadAllText($out2)
+                Write-Output ("  breaker-prep chat {0}: {1}ms error={2} len={3}" -f $n, $swx.ElapsedMilliseconds, ($tx -match 'event: error'), $tx.Length)
+            }
+            $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+            curl.exe -s -N --max-time 120 -X POST http://127.0.0.1:8300/api/chat -H "Content-Type: application/json; charset=utf-8" --data-binary "@$tmp" -o $out2 | Out-Null
+            $sw2.Stop()
+            $txt2 = [IO.File]::ReadAllText($out2)
+            Remove-Item $tmp, $out2 -Force -ErrorAction SilentlyContinue
+            $breakerMs = $sw2.ElapsedMilliseconds
+            Write-Output ("  breaker final chat: {0}ms error={1} len={2}" -f $breakerMs, ($txt2 -match 'event: error'), $txt2.Length)
+            $breakerFast = ($txt2 -match 'event: error') -and ($breakerMs -lt 8000)
+        }
         if (-not $sseError) { $verdict = 'FAIL corrupted model did not return a fast SHINE_E_MODEL_HASH SSE error' }
         elseif ($sw.ElapsedMilliseconds -gt 60000) { $verdict = ('FAIL SSE error too slow: ' + $sw.ElapsedMilliseconds + 'ms (expected < 60000)') }
         elseif (-not $alive) { $verdict = 'FAIL backend died during corrupted-model chat' }
-        else { $verdict = ('PASS d2 corrupted model -> SHINE_E_MODEL_HASH SSE error in ' + $sw.ElapsedMilliseconds + 'ms, backend alive, restore works') }
+        elseif (-not $breakerFast) { $verdict = 'FAIL circuit breaker did not fail fast on the 4th chat' }
+        else { $verdict = ('PASS d2 corrupted model -> SHINE_E_MODEL_HASH in ' + $sw.ElapsedMilliseconds + 'ms; breaker fast-fail on 4th chat in ' + $breakerMs + 'ms; backend alive; restore works') }
     }
     finally {
         # 必ず復元して再起動

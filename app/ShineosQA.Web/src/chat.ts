@@ -333,7 +333,8 @@ export class ChatView {
     for (const c of MODEL_CHOICES) {
       const m = this.modelsById.get(c.id);
       const installed = m?.installed ?? false;
-      const active = this.selTier === c.tier && installed;
+      const corrupted = installed && (m as { corrupted?: boolean } | undefined)?.corrupted === true;
+      const active = this.selTier === c.tier && installed && !corrupted;
       const opt = document.createElement('div');
       opt.className = 'model-opt' + (active ? ' active' : '');
       opt.innerHTML = `
@@ -342,7 +343,31 @@ export class ChatView {
         <span class="model-state"></span>`;
       const state = opt.querySelector('.model-state') as HTMLElement;
       if (!installed) state.innerHTML = '<span class="badge-undl">未DL</span>';
-      if (active) {
+      if (corrupted) {
+        // 破損検出: 再ダウンロードで修復できる（バックエンドが破損ファイルを置き換える）
+        state.innerHTML = '<span class="badge-corrupt">破損</span>';
+        state.insertAdjacentHTML('beforeend', '<button type="button" class="primary small dl-btn"><span class="pct">再ダウンロード</span></button>');
+        const btn = state.querySelector('button') as HTMLButtonElement;
+        btn.addEventListener('click', async ev => {
+          ev.stopPropagation();
+          if (btn.disabled) return;
+          btn.disabled = true;
+          btn.innerHTML = '<span class="spinner mini"></span><span class="pct">0%</span>';
+          try {
+            void api.installModel(c.id).catch(err => console.error(err));
+            await this.pollModelDownload(c.id, btn, opt);
+            this.selTier = c.tier;
+            this.renderModelBtn();
+            this.closeModelMenu();
+            void api.saveSettings({ tier: c.tier });
+            this.setStatus(`${c.label} を再ダウンロードして修復しました。次の質問から使用します`);
+          } catch (ex) {
+            btn.disabled = false;
+            btn.innerHTML = '<span class="pct">再試行</span>';
+            this.setStatus(`モデルの再ダウンロードに失敗しました: ${(ex as Error).message}`);
+          }
+        });
+      } else if (active) {
         state.insertAdjacentHTML('beforeend', '<span class="badge-inuse">使用中</span>');
       } else if (installed) {
         // 導入済み: 行のどこでもクリックで即切り替え（ボタンなし）

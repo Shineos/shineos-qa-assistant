@@ -47,6 +47,7 @@ export const api = {
 export interface ModelEntry {
   id: string; name: string; file: string; kind: string; sizeBytes: number; license: string;
   installed: boolean; required: boolean; minRamGb: number;
+  corrupted?: boolean; // 起動時SHA検証で破損判定済み（再ダウンロードで修復可）
 }
 
 /// POST /api/chat をSSE受信する。イベント: meta / model / web / delta / done / error

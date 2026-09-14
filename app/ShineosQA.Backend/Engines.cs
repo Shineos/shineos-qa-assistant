@@ -36,9 +36,38 @@ public static class ModelIntegrity
         if (!hash.Equals(expectedSha, StringComparison.OrdinalIgnoreCase))
         {
             log.Error($"model integrity check FAILED: {key} expected {expectedSha[..12]}… got {hash[..12]}… (SHINE_E_MODEL_HASH)");
+            // 破損判定もキャッシュする（UIが再ダウンロード案内を出すための材料。ハッシュ不要で参照できる）
+            WriteCache(dataDir, cachePath, key, fi, "bad");
             throw new InvalidDataException($"model file corrupted: {key} (再ダウンロードが必要です) (SHINE_E_MODEL_HASH)");
         }
         log.Info($"model integrity ok: {key} ({fi.Length / 1024 / 1024}MB, sha {hash[..12]}…)");
+        WriteCache(dataDir, cachePath, key, fi, "ok");
+    }
+
+    /// <summary>検証済みキャッシュの判定。true=検証済み正常 / false=破損判定済み / null=未検証（キャッシュなし）。
+    /// ハッシュ計算をしないため /api/models のような頻出呼び出しで使える</summary>
+    public static bool? CachedOk(string modelPath, string dataDir)
+    {
+        var fi = new FileInfo(modelPath);
+        var cachePath = Path.Combine(dataDir, "model-verify.txt");
+        var key = Path.GetFileName(modelPath);
+        try
+        {
+            foreach (var line in File.ReadAllLines(cachePath))
+            {
+                var parts = line.Split('|');
+                if (parts.Length == 4 && parts[0] == key &&
+                    long.TryParse(parts[1], out var len) && long.TryParse(parts[2], out var ticks) &&
+                    len == fi.Length && ticks == fi.LastWriteTimeUtc.Ticks)
+                    return parts[3] == "ok";
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static void WriteCache(string dataDir, string cachePath, string key, FileInfo fi, string verdict)
+    {
         try
         {
             Directory.CreateDirectory(dataDir);
@@ -50,7 +79,7 @@ public static class ModelIntegrity
                     if (line.Split('|') is { Length: 4 } p && p[0] != key) lines.Add(line);
             }
             catch { }
-            lines.Add($"{key}|{fi.Length}|{fi.LastWriteTimeUtc.Ticks}|ok");
+            lines.Add($"{key}|{fi.Length}|{fi.LastWriteTimeUtc.Ticks}|{verdict}");
             File.WriteAllLines(cachePath, lines);
         }
         catch { /* キャッシュ書込失敗は致命的ではない */ }

@@ -104,13 +104,14 @@ export class Models {
       info.innerHTML = `<b>${esc(m.name)}</b> <span class="muted">${esc(m.license)}・${(m.sizeBytes / 1024 / 1024 / 1024).toFixed(2)}GB</span>`;
       const st = document.createElement('span');
       st.className = (m.installed ? 'st-ready' : 'muted') + ' model-badge';
-      st.textContent = m.installed ? '導入済み' : (m.required ? '未導入（必須）' : '未導入');
+      st.textContent = m.installed ? (m.corrupted ? '破損' : '導入済み') : (m.required ? '未導入（必須）' : '未導入');
+      if (m.installed && m.corrupted) st.className = 'badge-corrupt model-badge';
       const act = document.createElement('div');
       act.className = 'model-actions';
-      if (!m.installed) {
+      if (!m.installed || m.corrupted) {
         const btn = document.createElement('button');
         btn.className = 'primary small dl-btn';
-        btn.innerHTML = '<span class="pct">ダウンロード</span>';
+        btn.innerHTML = `<span class="pct">${m.corrupted ? '再ダウンロード' : 'ダウンロード'}</span>`;
         btn.addEventListener('click', async () => {
           btn.disabled = true;
           // DL中はグルグル（スピナー）＋進捗%を表示

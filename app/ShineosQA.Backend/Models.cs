@@ -37,15 +37,18 @@ public sealed class ModelManager
     public static string? ShaForFile(string fileName) => Catalog.FirstOrDefault(c => c.File == fileName)?.Sha256;
 
     public sealed record ModelStatus(string Id, string Name, string File, string Kind, long SizeBytes, string License,
-        bool Installed, bool Required, int MinRamGb);
+        bool Installed, bool Required, int MinRamGb, bool Corrupted = false);
 
     public sealed class DownloadProgress
     {
-        public string State = "idle"; // idle | downloading | verifying | done | error
-        public string? CurrentId;
-        public long Bytes, Total;
-        public string? Error;
-        public DateTime StartedAt = DateTime.MinValue;
+        // プロパティでなければ System.Text.Json が /api/models/progress に空オブジェクト({})を
+        // 返してしまう（フィールドは既定でシリアライズされない）。UIのDL進捗%表示が動かなくなる
+        public string State { get; set; } = "idle"; // idle | downloading | verifying | done | error
+        public string? CurrentId { get; set; }
+        public long Bytes { get; set; }
+        public long Total { get; set; }
+        public string? Error { get; set; }
+        public DateTime StartedAt { get; set; } = DateTime.MinValue;
     }
 
     private readonly AppConfig _cfg;
@@ -56,9 +59,15 @@ public sealed class ModelManager
 
     public ModelManager(AppConfig cfg, ILogger log) { _cfg = cfg; _log = log; }
 
-    public List<ModelStatus> Status() => Catalog.Select(e => new ModelStatus(
-        e.Id, e.Name, e.File, e.Kind, e.SizeBytes, e.License,
-        File.Exists(Path.Combine(_cfg.ModelsDir, e.File)), e.Required, e.MinRamGb)).ToList();
+    public List<ModelStatus> Status() => Catalog.Select(e =>
+    {
+        var p = Path.Combine(_cfg.ModelsDir, e.File);
+        var installed = File.Exists(p);
+        // 破損判定は検証キャッシュのみで参照（ハッシュ計算なし）。エンジン起動時の検証で判明する
+        var corrupted = installed && ModelIntegrity.CachedOk(p, _cfg.DataDir) == false;
+        return new ModelStatus(e.Id, e.Name, e.File, e.Kind, e.SizeBytes, e.License,
+            installed, e.Required, e.MinRamGb, corrupted);
+    }).ToList();
 
     /// <summary>チャットモデルが1つも無い=初回起動ウィザードが必要</summary>
     public bool NeedsWizard => !Catalog.Any(e => e.Kind.StartsWith("chat_") && File.Exists(Path.Combine(_cfg.ModelsDir, e.File)));
@@ -70,7 +79,17 @@ public sealed class ModelManager
         {
             var entry = Catalog.FirstOrDefault(e => e.Id == id) ?? throw new KeyNotFoundException($"unknown model id: {id}");
             var dest = Path.Combine(_cfg.ModelsDir, entry.File);
-            if (File.Exists(dest)) return;
+            if (File.Exists(dest))
+            {
+                // 既存ファイルが正常なら何もしない。破損（SHA不一致）している場合は削除して
+                // 再ダウンロードする — 「再ダウンロードしてください」の案内が実際に修復を完了させるため
+                string existing;
+                using (var fs = File.OpenRead(dest))
+                    existing = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct));
+                if (existing.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase)) return;
+                _log.Warn($"existing model file is corrupted ({entry.File}, sha {existing[..12]}…) — re-downloading");
+                File.Delete(dest);
+            }
             Directory.CreateDirectory(_cfg.ModelsDir);
             Exception? lastErr = null;
             foreach (var url in new[] { entry.UrlPrimary, entry.UrlMirror })
