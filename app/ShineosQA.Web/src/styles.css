@@ -17,7 +17,6 @@ body { font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-se
 /* ── ヘッダー ───────────────────────── */
 .topbar { display: flex; align-items: center; gap: 24px; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
 .brand { font-weight: 700; font-size: 16px; }
-.ver { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 4px; }
 .tabs { display: flex; gap: 4px; }
 .tab { border: none; background: transparent; padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--muted); }
 .tab:hover { background: var(--hover); }
