@@ -349,6 +349,15 @@ namespace ShineosQA
         [DllImport("iphlpapi.dll", SetLastError = true)]
         static extern uint GetExtendedTcpTable(IntPtr tcpTable, ref int tableSize, bool order, int ipVersion, int tableClass, int reserved);
 
+        // URLを既定のブラウザで開くWin32 API（引数は定数のみを渡す）
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        static extern IntPtr ShellExecute(IntPtr hwnd, string verb, string file, string parameters, string directory, int showCmd);
+
+        void OpenInDefaultBrowser()
+        {
+            ShellExecute(IntPtr.Zero, "open", "https://shineos.com/", null, null, 5 /* SW_SHOW */);
+        }
+
         bool WaitForHealth(int timeoutSeconds)
         {
             var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
@@ -403,6 +412,22 @@ namespace ShineosQA
             {
                 var wvEnv = await CoreWebView2Environment.CreateAsync(null, wvDataDir);
                 await webView.EnsureCoreWebView2Async(wvEnv);
+                // ヘッダーの「powered by Shineos」リンクは既定のブラウザで開く。
+                // 開けるURLは定数の公式サイトのみ（ページ側からの差し込みは受け付けない）。
+                // ホワイトリスト外の target=_blank は WebView2 既定の挙動に任せる
+                webView.CoreWebView2.NewWindowRequested += (s, e) =>
+                {
+                    try
+                    {
+                        string host = new Uri(e.Uri).Host;
+                        if (host == "shineos.com" || host == "www.shineos.com")
+                        {
+                            e.Handled = true;
+                            OpenInDefaultBrowser();
+                        }
+                    }
+                    catch (Exception ex) { Log("open external link failed: " + ex.Message); }
+                };
             }
             catch (Exception ex)
             {
