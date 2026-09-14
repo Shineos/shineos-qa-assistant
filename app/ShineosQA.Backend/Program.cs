@@ -120,6 +120,8 @@ public static class Api
             try
             {
                 await ctx.Models.InstallAsync(id, req.HttpContext.RequestAborted);
+                // 再ダウンロードで破損が修復された可能性があるため、LLM起動失敗のサーキットブレーカーを解放
+                ctx.Sup.ResetLlmFailure();
                 return Results.Ok(new { ok = true });
             }
             catch (Exception ex)

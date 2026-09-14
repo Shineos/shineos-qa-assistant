@@ -324,6 +324,11 @@ public sealed class ChatFlow
             _log.Error($"model/engine file missing: {ex.FileName}");
             await Sse(ctx, "error", new { code = "SHINE_E_MODEL_NOT_FOUND", message = "AIモデルが未インストールです。設定からモデルをダウンロードしてください。", detail = ex.FileName });
         }
+        catch (InvalidDataException ex) when (ex.Message.Contains("SHINE_E_MODEL_HASH"))
+        {
+            _log.Error($"model corrupted: {ex.Message}");
+            await Sse(ctx, "error", new { code = "SHINE_E_MODEL_HASH", message = "AIモデルのファイルが破損しています。設定画面からモデルを再ダウンロードしてください。", detail = ex.Message });
+        }
         catch (InvalidOperationException ex) when (ex.Message.Contains("SHINE_E_ENGINE_DOWN"))
         {
             _log.Error($"engine down: {ex.Message}");

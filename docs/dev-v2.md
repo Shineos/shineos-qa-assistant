@@ -79,6 +79,6 @@ $env:DOTNET_ROOT = "D:\dev\shineos-local-ai\tools\dotnet-sdk"
 - [ ] 8GB実機でのクイック階級（1.7B）検証
 - [ ] PDF本格パーサ（PdfPig等への置換。`year-end-policy.pdf` のようなスキャン/CID PDFは現在スキップされる）
 - [ ] Golden QA 失敗10件の改善（条件混同・罠質問ガード・横断recall。RESULTS.md 第9ラウンド参照）
-- [ ] モデル破損時にsupervisorの再試行が続く間ユーザー応答が遅延する問題の早期エラー化
+- [x] モデル破損時にsupervisorの再試行が続く間ユーザー応答が遅延する問題の早期エラー化 → **対応済み（RESULTS.md 第10ラウンド）**: 起動前SHA256検証（永続キャッシュ付き）＋ヘルス待ち瞬死検知＋OOM誤診阻止＋サーキットブレーカーで240秒無応答→2.5秒エラー化
 - [ ] Web検索のマルチエンジン化
 - [ ] テストのCI化（GitHub Actions で `dotnet test` を回す）

@@ -58,8 +58,9 @@ v2 は Windowsサービスではなく、アプリ起動時に `launch.vbs` か�
 { "event": "error", "data": { "code": "SHINE_E_MODEL_NOT_FOUND", "message": "AIモデルが未インストールです。…", "detail": "…" } }
 ```
 
-実装済みコード: `SHINE_E_MODEL_NOT_FOUND`（モデル未DL）、`SHINE_E_ENGINE_DOWN`（エンジン起動失敗）、
-`SHINE_E_INTERNAL`（内部エラー）。取り込み系は `SHINE_E_DOC_PARSE_FAILED`（未対応形式など）。
+実装済みコード: `SHINE_E_MODEL_NOT_FOUND`（モデル未DL）、`SHINE_E_MODEL_HASH`（モデル破損・起動前SHA256検証で検出、
+再ダウンロードを案内。実測: 破損GGUFで2.5秒で応答）、`SHINE_E_ENGINE_DOWN`（エンジン起動失敗・連続3回失敗の
+サーキットブレーカー込み）、`SHINE_E_INTERNAL`（内部エラー）。取り込み系は `SHINE_E_DOC_PARSE_FAILED`（未対応形式など）。
 文字列コードは数値終了コードと名前空間が異なるため重複しない。
 NO-HIT（ナレッジ外質問）は**エラーではなく**正常応答「該当する記載がありません」。
 

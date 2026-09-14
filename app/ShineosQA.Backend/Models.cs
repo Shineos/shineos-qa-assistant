@@ -33,6 +33,9 @@ public sealed class ModelManager
             "36c21449a36760933709aa8fe6ffafe946961a6dc9174b6ad10ba6000e649121", "Apache-2.0", false, 16),
     };
 
+    /// <summary>ファイル名からカタログのSHA256を引く（起動前整合性検証用）。カタログ外はnull</summary>
+    public static string? ShaForFile(string fileName) => Catalog.FirstOrDefault(c => c.File == fileName)?.Sha256;
+
     public sealed record ModelStatus(string Id, string Name, string File, string Kind, long SizeBytes, string License,
         bool Installed, bool Required, int MinRamGb);
 

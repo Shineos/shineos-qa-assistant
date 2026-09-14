@@ -88,24 +88,25 @@ if ($Phase -eq 'd2') {
         Start-Sleep -Seconds 6
         if (-not (Wait-Healthy)) { throw 'backend died with corrupted model (should stay up)' }
 
-        # チャットを試みる: エンジン起動失敗の伝播を確認（リトライ中は応答遅延が既知の改善課題）
+        # chat attempt: with the pre-start SHA check the SHINE_E_MODEL_HASH SSE error
+        # must come back FAST (seconds). the old implementation hung 240s+ with no reply.
         $body = '{"chat_uuid":"corrupt-test","message":"日当はいくらですか"}'
         $tmp = [IO.Path]::GetTempFileName()
         [IO.File]::WriteAllText($tmp, $body)
         $out = [IO.Path]::GetTempFileName()
-        curl.exe -s -N --max-time 180 -X POST http://127.0.0.1:8300/api/chat -H "Content-Type: application/json; charset=utf-8" --data-binary "@$tmp" -o $out | Out-Null
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        curl.exe -s -N --max-time 120 -X POST http://127.0.0.1:8300/api/chat -H "Content-Type: application/json; charset=utf-8" --data-binary "@$tmp" -o $out | Out-Null
+        $sw.Stop()
         $txt = [IO.File]::ReadAllText($out)
         Remove-Item $tmp, $out -Force
-        $sseError = $txt -match 'event: error'
+        $sseError = ($txt -match 'event: error') -and ($txt -match 'SHINE_E_MODEL_HASH')
 
-        # 合格条件: ①バックエンド生存 ②エンジンログにロード失敗が記録（沈黙破損でない）
-        $engineLog = Join-Path $AppDir 'data\logs\engine-llm.log'
-        $engineLog = Join-Path $AppDir 'data\logs\engine-llm.log'
-        $loadFail = (Test-Path $engineLog) -and ((Get-Content $engineLog -Raw -ErrorAction SilentlyContinue) -match 'failed to load model')
+        # pass criteria: 1) fast SHINE_E_MODEL_HASH SSE error (<60s) 2) backend alive
         $alive = Wait-Healthy 5
-        if (-not $loadFail) { $verdict = 'FAIL engine log has no load-failure record (silent corruption?)' }
+        if (-not $sseError) { $verdict = 'FAIL corrupted model did not return a fast SHINE_E_MODEL_HASH SSE error' }
+        elseif ($sw.ElapsedMilliseconds -gt 60000) { $verdict = ('FAIL SSE error too slow: ' + $sw.ElapsedMilliseconds + 'ms (expected < 60000)') }
         elseif (-not $alive) { $verdict = 'FAIL backend died during corrupted-model chat' }
-        else { $verdict = ('PASS d2 corrupted model: load failure logged, backend alive (sseError=' + $sseError + '; retry latency is a known improvement item)') }
+        else { $verdict = ('PASS d2 corrupted model -> SHINE_E_MODEL_HASH SSE error in ' + $sw.ElapsedMilliseconds + 'ms, backend alive, restore works') }
     }
     finally {
         # 必ず復元して再起動

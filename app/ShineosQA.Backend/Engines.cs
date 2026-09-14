@@ -1,7 +1,61 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace ShineosQA.Backend;
+
+/// <summary>モデルGGUFの起動前整合性検証（SHA256・キャッシュ永続付き）。
+/// 設計書 error-codes-v2.md §4.2 の SHINE_E_MODEL_HASH 実装。
+/// 検証結果は {data}/model-verify.txt に「ファイル|長さ|mtime|ok」で永続化し、
+/// ファイルが変わらない限り再ハッシュしない（大容量モデルの起動遅延防止）。
+/// ファイル破損（バイト反転等）は mtime が変わるため必ず再検証にかかる</summary>
+public static class ModelIntegrity
+{
+    public static void Verify(string modelPath, string dataDir, string? expectedSha, ILogger log)
+    {
+        if (string.IsNullOrEmpty(expectedSha)) return; // カタログ外のモデル（ユーザー任意指定）は検証できない
+        var fi = new FileInfo(modelPath);
+        var cachePath = Path.Combine(dataDir, "model-verify.txt");
+        var key = Path.GetFileName(modelPath);
+        try
+        {
+            foreach (var line in File.ReadAllLines(cachePath))
+            {
+                var parts = line.Split('|');
+                if (parts.Length == 4 && parts[0] == key &&
+                    long.TryParse(parts[1], out var len) && long.TryParse(parts[2], out var ticks) &&
+                    len == fi.Length && ticks == fi.LastWriteTimeUtc.Ticks && parts[3] == "ok")
+                    return; // 同一バージョン検証済み
+            }
+        }
+        catch { /* キャッシュ不在・破損は初回検証として扱う */ }
+
+        string hash;
+        using (var fs = File.OpenRead(modelPath))
+            hash = Convert.ToHexString(SHA256.HashData(fs));
+        if (!hash.Equals(expectedSha, StringComparison.OrdinalIgnoreCase))
+        {
+            log.Error($"model integrity check FAILED: {key} expected {expectedSha[..12]}… got {hash[..12]}… (SHINE_E_MODEL_HASH)");
+            throw new InvalidDataException($"model file corrupted: {key} (再ダウンロードが必要です) (SHINE_E_MODEL_HASH)");
+        }
+        log.Info($"model integrity ok: {key} ({fi.Length / 1024 / 1024}MB, sha {hash[..12]}…)");
+        try
+        {
+            Directory.CreateDirectory(dataDir);
+            // 他モデルの検証済みエントリは残し、同ファイルの旧エントリ（別バージョン）のみ置換する
+            var lines = new List<string>();
+            try
+            {
+                foreach (var line in File.ReadAllLines(cachePath))
+                    if (line.Split('|') is { Length: 4 } p && p[0] != key) lines.Add(line);
+            }
+            catch { }
+            lines.Add($"{key}|{fi.Length}|{fi.LastWriteTimeUtc.Ticks}|ok");
+            File.WriteAllLines(cachePath, lines);
+        }
+        catch { /* キャッシュ書込失敗は致命的ではない */ }
+    }
+}
 
 /// <summary>llama-server 子プロセス管理（スーパーバイザ）。設計: architecture-v2.md §5.1/§7
 /// 耐障害: Job Object(kill-on-close)で孤児化防止・ログStreamの確実な破棄・OOM時の階級フォールバック</summary>
@@ -15,6 +69,8 @@ public sealed class Supervisor
     private DateTime _llmLastUsed = DateTime.UtcNow;
     private Task? _idleTask;
     private readonly ILogger _log;
+    private int _llmStartFails;      // 連続起動失敗（サーキットブレーカー）
+    private string _llmFailReason = "";
 
     public Supervisor(AppConfig cfg, LlmGateway gw, ILogger log) { _cfg = cfg; _gw = gw; _log = log; }
 
@@ -46,11 +102,15 @@ public sealed class Supervisor
     }
 
     /// <summary>LLMエンジン確保（idle unload後の再起動・OOM時の階級フォールバック込み）。
-    /// 起動中エンジンのモデルが現在の階級と不一致（起動プリロードとtier切替の競合）なら入れ替える</summary>
+    /// 起動中エンジンのモデルが現在の階級と不一致（起動プリロードとtier切替の競合）なら入れ替える。
+    /// 連続起動失敗時はサーキットブレーカーが即時エラーを返す（破損モデル等の決定的失敗で
+    /// チャットのたびに2分×回の待ちが積み重なるのを防ぐ。実測: 破損GGUFで240秒無応答）</summary>
     public void EnsureLlm()
     {
         lock (_lock)
         {
+            if (_llmStartFails >= 3)
+                throw new InvalidOperationException($"{_llmFailReason} — 連続{_llmStartFails}回失敗のため再試行を停止しました (SHINE_E_ENGINE_DOWN)");
             if (_llm != null)
             {
                 if (!_llm.Proc.HasExited && _llm.File == _cfg.ChatModelFile)
@@ -61,22 +121,37 @@ public sealed class Supervisor
             try
             {
                 _llm = StartLlmLocked();
+                _llmStartFails = 0;
             }
             catch (Exception ex)
             {
-                // RAM不足等で起動失敗時は段階的に下位モデルへフォールバック（quality→standard→quick）
+                _llmStartFails++;
+                _llmFailReason = ex.Message;
+                // モデル破損（SHA不一致）は決定的失敗: 下位階級へフォールバックしても同じ破損を引く
+                // 可能性が高く、再試行の意味がないため即座に利用者へエラーを届ける
+                if (ex is InvalidDataException) throw;
+                // RAM不足（OOM）想定の失敗のみ段階的に下位モデルへフォールバック（quality→standard→quick）。
+                // フォールバック先が現在同一ファイル（quick階級で失敗等）なら再試行しない
                 var fb = _cfg.EffectiveTier == "quality" && File.Exists(Path.Combine(_cfg.ModelsDir, _cfg.StandardModel)) ? "standard"
                     : File.Exists(Path.Combine(_cfg.ModelsDir, _cfg.QuickModel)) ? "quick"
                     : null;
-                if (fb is null) throw;
-                _log.Warn($"LLM start failed ({ex.Message}) — OOM fallback: switching to {fb} tier ({_cfg.ChatModelFile}→{(fb == "quick" ? _cfg.QuickModel : _cfg.StandardModel)})");
+                var fbFile = fb == "quick" ? _cfg.QuickModel : _cfg.StandardModel;
+                if (fb is null || fbFile == _cfg.ChatModelFile) throw;
+                _log.Warn($"LLM start failed ({ex.Message}) — OOM fallback: switching to {fb} tier ({_cfg.ChatModelFile}→{fbFile})");
                 _cfg.Tier = fb;
                 _llm = StartLlmLocked();
+                _llmStartFails = 0;
             }
             _llmLastUsed = DateTime.UtcNow;
             StartIdleWatcher();
             WarmupAsync(); // 初回推論ウォームアップ（計算グラフ構築＋システムプロンプトの接頭キャッシュ）
         }
+    }
+
+    /// <summary>LLM起動失敗の連続カウントをリセット（モデル再ダウンロード完了・階級切替時に呼ぶ）</summary>
+    public void ResetLlmFailure()
+    {
+        lock (_lock) { _llmStartFails = 0; _llmFailReason = ""; }
     }
 
     /// <summary>LLM起動直後にダミー1トークン生成を流し、初回質問のTTFBを短縮する（非同期・失敗は記録のみ）</summary>
@@ -105,6 +180,7 @@ public sealed class Supervisor
             if (tier is not ("quick" or "standard" or "quality") || _cfg.EffectiveTier == tier) return false;
             if (_llm != null) { DisposeEngine(_llm); _llm = null; }
             _cfg.Tier = tier;
+            _llmStartFails = 0; // 階級切替で別モデルになるため失敗カウントはリセット
             return true;
         }
     }
@@ -159,6 +235,10 @@ public sealed class Supervisor
         if (!File.Exists(exe)) throw new FileNotFoundException($"engine not found: {exe} (SHINE_E_ENGINE_DOWN)");
         var model = Path.Combine(_cfg.ModelsDir, modelFile);
         if (!File.Exists(model)) throw new FileNotFoundException($"model not found: {model} (SHINE_E_MODEL_NOT_FOUND)");
+        // 起動前整合性検証（SHA256・永続キャッシュ付き）: 破損GGUFを起動するとllama-serverは
+        // 瞬時に異常終了し、ヘルス待ちの無駄とリトライループを生む。検証は数秒で終わり、
+        // 決定的失敗を即座にSHINE_E_MODEL_HASHとして利用者に届けられる
+        ModelIntegrity.Verify(model, _cfg.DataDir, ModelManager.ShaForFile(modelFile), _log);
         // 起動引数は構成ファイル由来のみでシェルは経由しない（ArgumentList）。パスの正当性も明示検証する
         foreach (var (launchPath, what) in new[] { (exe, "engine"), (model, "model") })
             if (launchPath.Contains("..") || launchPath.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
@@ -179,7 +259,7 @@ public sealed class Supervisor
         p.ErrorDataReceived += (_, e) => { if (e.Data != null) { var b = System.Text.Encoding.UTF8.GetBytes(e.Data + "\n"); logFs.Write(b, 0, b.Length); logFs.Flush(); } };
         p.BeginErrorReadLine();
         var ep = new EngineProc { Name = name, File = modelFile, Proc = p, Port = port, LogStream = logFs };
-        if (!WaitHealthy(port, 120))
+        if (!WaitHealthy(port, 120, p))
         {
             DisposeEngine(ep);
             throw new InvalidOperationException($"llama-server '{name}' did not become healthy on port {port} (SHINE_E_ENGINE_DOWN)");
@@ -203,11 +283,18 @@ public sealed class Supervisor
         try { ep.LogStream.Dispose(); } catch { } // ログファイルロック解放（再起動失敗の原因だった）
     }
 
-    private bool WaitHealthy(int port, int seconds)
+    /// <summary>エンジンのヘルス待ち。起動直後にプロセスが異常終了した場合（破損モデル等）は
+    /// 残り時間に関係なく即座にfalseを返す（死んだプロセスのために2分間待つ無駄を排除）</summary>
+    private bool WaitHealthy(int port, int seconds, Process? watched = null)
     {
         var deadline = DateTime.UtcNow.AddSeconds(seconds);
         while (DateTime.UtcNow < deadline)
         {
+            if (watched is { } w && w.HasExited)
+            {
+                _log.Warn($"engine on port {port} exited during startup (code {w.ExitCode}) — skipping remaining health wait");
+                return false;
+            }
             try
             {
                 using var r = _http.GetAsync($"http://127.0.0.1:{port}/health", HttpCompletionOption.ResponseHeadersRead).Result;
