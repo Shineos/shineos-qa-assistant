@@ -250,6 +250,12 @@ public sealed class Program
         Logger? log = null;
         try
         {
+            // MSIX（WindowsApps）検知: パッケージインストール先は読み取り専用のため、
+            // 書き込み先（data/models/config）を LocalState へ、読み取り専用（engine/同梱モデル）はパッケージ内を指す
+            if (IsRunningFromMsix())
+            {
+                ApplyMsixPaths();
+            }
             EnsureDefaultConfig();
             cfg = AppConfig.Load(args);
             // エンコーディング防御: UTF-8以外で保存されたconfig.jsonは置換文字(U+FFFD)を含む。
@@ -259,6 +265,7 @@ public sealed class Program
             var dataDir = Path.IsPathRooted(cfg.DataDir) ? cfg.DataDir : Path.Combine(AppContext.BaseDirectory, cfg.DataDir);
             Directory.CreateDirectory(dataDir);
             log = new Logger(Path.Combine(dataDir, "logs"));
+            if (IsRunningFromMsix()) CopyBundledModels(cfg);
             await RunAsync(cfg, log);
         }
         catch (InvalidDataException ex)
@@ -300,22 +307,83 @@ public sealed class Program
         return false;
     }
 
+    /// <summary>MSIX（WindowsApps）から実行されているか。パッケージインストール先は読み取り専用のため
+    /// 書き込み先を LocalState へ切り替える必要がある</summary>
+    static bool IsRunningFromMsix()
+    {
+        return AppContext.BaseDirectory.Contains("WindowsApps", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>MSIX環境でのパス切替: config.json を LocalState に置き、読み取り専用のengine/モデルはパッケージ内を指す。
+    /// 書き込み先（data/models）は LocalState に変更し、同梱モデルは初回起動時に LocalState 側へコピーする</summary>
+    static void ApplyMsixPaths()
+    {
+        var pkgDir = AppContext.BaseDirectory; // C:\Program Files\WindowsApps\<pkg>\
+        var localState = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Packages",
+            GetPackageName(pkgDir),
+            "LocalState");
+        MsixLocalState = localState;
+        MsixPkgDir = pkgDir;
+        // config.json を LocalState にリダイレクト（EnsureDefaultConfigが localState 側に書く）
+        // engine と同梱モデルはパッケージ内（読み取り専用で問題ない）
+        Console.WriteLine($"MSIX detected: pkg={pkgDir}, localState={localState}");
+    }
+
+    static string? MsixLocalState;
+    static string? MsixPkgDir;
+
+    static string GetPackageName(string pkgDir)
+    {
+        // C:\Program Files\WindowsApps\ShineosQA_2.0.3.0_x64__n5zmjbd5e3v64\ → ShineosQA_n5zmjbd5e3v64
+        var name = Path.GetFileName(Path.GetDirectoryName(pkgDir)?.TrimEnd(Path.DirectorySeparatorChar) ?? "");
+        // バージョンとアーキテクチャ部分を除去
+        var parts = name.Split('_');
+        return parts.Length >= 2 ? parts[0] + "_" + parts[^1] : name;
+    }
+
+    /// <summary>MSIX: 同梱モデルをパッケージ内（読み取り専用）から LocalState\models へコピー。
+    /// config.json の models_dir が LocalState 側を指すため、初回起動時に必須</summary>
+    static void CopyBundledModels(AppConfig cfg)
+    {
+        if (MsixPkgDir is null || MsixLocalState is null) return;
+        var srcDir = Path.Combine(MsixPkgDir, "models");
+        var dstDir = Path.Combine(MsixLocalState, "models");
+        if (!Directory.Exists(srcDir)) return;
+        Directory.CreateDirectory(dstDir);
+        foreach (var f in Directory.GetFiles(srcDir, "*.gguf"))
+        {
+            var dst = Path.Combine(dstDir, Path.GetFileName(f));
+            if (!File.Exists(dst))
+            {
+                File.Copy(f, dst, overwrite: false);
+                Console.WriteLine($"copied bundled model: {Path.GetFileName(f)} ({new FileInfo(f).Length / 1024 / 1024}MB)");
+            }
+        }
+    }
+
     /// <summary>config.json が無い場合（インストール直後）にUTF-8で既定configを生成する。
     /// パスは実行ディレクトリ基準の絶対パス（フォワードスラッシュ）。
-    /// 従来インストーラ(Inno ANSI書き出し)が生成していたが、日本語インストール先で
-    /// 文字化けしたパスが書かれゴミディレクトリが作られる障害があったためバックエンド生成に移管した</summary>
+    /// MSIX実行時は config.json を LocalState に置き、data/models も LocalState 側、engine はパッケージ内を指す</summary>
     static void EnsureDefaultConfig()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "config.json");
+        var isMsix = MsixLocalState is not null;
+        var configDir = isMsix ? MsixLocalState! : AppContext.BaseDirectory;
+        var path = Path.Combine(configDir, "config.json");
         if (File.Exists(path)) return;
         var baseDir = AppContext.BaseDirectory.Replace('\\', '/').TrimEnd('/');
+        var localDir = isMsix ? MsixLocalState!.Replace('\\', '/').TrimEnd('/') : baseDir;
+        var engineDir = isMsix ? baseDir + "/engine" : baseDir + "/engine"; // engineは常にパッケージ/exe内（読み取り専用）
+        var modelsDir = isMsix ? localDir + "/models" : baseDir + "/models"; // 追加DLがあるため書き込み可能な場所
+        var dataDir = isMsix ? localDir + "/data" : baseDir + "/data";
         var json = System.Text.Json.JsonSerializer.Serialize(new
         {
             port = 8300,
-            data_dir = baseDir + "/data",
-            engine_dir = baseDir + "/engine",
+            data_dir = dataDir,
+            engine_dir = engineDir,
             engine_variant = "cpu",
-            models_dir = baseDir + "/models",
+            models_dir = modelsDir,
             standard_model = "Qwen3-4B-Instruct-2507-IQ4_XS.gguf",
             quick_model = "Qwen3-1.7B-IQ4_XS.gguf",
             quality_model = "Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
@@ -328,7 +396,7 @@ public sealed class Program
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         });
         File.WriteAllText(path, json); // UTF-8（BOMなし）
-        Console.WriteLine("created default config.json (first run)");
+        Console.WriteLine($"created default config.json at {path} (first run, msix={isMsix})");
     }
 
     static async Task RunAsync(AppConfig cfg, Logger log)

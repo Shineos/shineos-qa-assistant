@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 社内知恵袋 MSIX マニフェスト（Win32 フルトラスト・デスクトップブリッジ形式）
+     Store提出時は Partner Center の「パッケージID」(Name/Publisher) に差し替える。
+     ローカル検証用の既定 Publisher="CN=Shineos Inc." はビルドスクリプトが自己署名証明書のSubjectと一致させる -->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+  <Identity Name="ShineosQA"
+            Version="2.0.3.0"
+            ProcessorArchitecture="x64"
+            Publisher="CN=Shineos Inc."/>
+  <Properties>
+    <DisplayName>社内知恵袋</DisplayName>
+    <PublisherDisplayName>Shineos Inc.</PublisherDisplayName>
+    <Logo>assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust"/>
+  </Capabilities>
+  <Applications>
+    <Application Id="ShineosQA" Executable="ShineosQA.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="社内知恵袋"
+                          Description="社内規定・業務マニュアルから根拠付きで回答する社内Q&Aツール"
+                          BackgroundColor="#10A37F"
+                          Square150x150Logo="assets\Square150x150Logo.png"
+                          Square44x44Logo="assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+</Package>

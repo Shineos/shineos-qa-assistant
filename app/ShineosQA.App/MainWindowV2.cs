@@ -365,22 +365,34 @@ namespace ShineosQA
         string KbSeenPath() { return Path.Combine(userDataDir, "kb_guide_seen.txt"); }
         bool pendingKnowledgeTab;
 
-        /// <summary>今回のインストール（install.completedの更新時刻）に対して案内未表示ならtrue</summary>
+        /// <summary>「今回のインストール」を一意に識別するキー。
+        /// Innoインストールでは install.completed の更新時刻、MSIX ではラッパーexeのバージョン
+        /// （MSIXにマーカーは無いため。バージョンが変わる＝更新で、案内が再度表示される）</summary>
+        string KbInstallKey()
+        {
+            try
+            {
+                if (File.Exists(KbMarkerPath())) return "t:" + File.GetLastWriteTimeUtc(KbMarkerPath()).Ticks;
+            }
+            catch { }
+            return "v:" + System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        }
+
+        /// <summary>今回のインストールに対して案内未表示ならtrue</summary>
         bool ShouldShowKnowledgeGuide()
         {
             try
             {
-                if (!File.Exists(KbMarkerPath())) return false; // dev実行等マーカーなしでは出さない
-                var ticks = File.GetLastWriteTimeUtc(KbMarkerPath()).Ticks.ToString();
+                var key = KbInstallKey();
                 var seen = File.Exists(KbSeenPath()) ? File.ReadAllText(KbSeenPath()).Trim() : "";
-                return seen != ticks;
+                return seen != key;
             }
             catch { return false; }
         }
 
         void MarkKnowledgeGuideSeen()
         {
-            try { File.WriteAllText(KbSeenPath(), File.GetLastWriteTimeUtc(KbMarkerPath()).Ticks.ToString()); } catch { }
+            try { File.WriteAllText(KbSeenPath(), KbInstallKey()); } catch { }
         }
 
         void MaybeShowKnowledgeGuide()
@@ -516,11 +528,36 @@ namespace ShineosQA
             return false;
         }
 
+        /// <summary>バックエンドを非表示で起動する（起動引数・作業ディレクトリは固定値のみ）。
+        /// MSIXでは本exeがパッケージのエントリのため、vbsランチャに代わる自己起動経路</summary>
+        void StartBackendHidden()
+        {
+            try
+            {
+                string exe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ShineosQA.Backend.exe");
+                if (!File.Exists(exe)) { Log("backend exe not found: " + exe); return; }
+                var r = StartProcessHidden(exe, "--config config.json", AppDomain.CurrentDomain.BaseDirectory);
+                Log("started backend (ShellExecute result=" + r + ")");
+            }
+            catch (Exception ex) { Log("start backend failed: " + ex.Message); }
+        }
+
+        static IntPtr StartProcessHidden(string file, string parameters, string directory)
+        {
+            return ShellExecute(IntPtr.Zero, "open", file, parameters, directory, 0 /* SW_HIDE */);
+        }
+
         async Task Startup()
         {
             ShowLoading("社内知恵袋 を起動しています...");
 
-            // バックエンドは launch.vbs が起動済み。ヘルスを待つ（初回モデル準備込みで最大120秒）
+            // バックエンドは通常 launch.vbs が起動済み。未起動ならラッパー自身が起動する
+            // （MSIXパッケージでは launch.vbs を経由せず本exeが直接エントリになるため必須。
+            //   3秒待っても応答が無い場合のみ起動し、既存起動との二重起動を避ける）
+            if (!await Task.Run(() => WaitForHealth(3)))
+            {
+                StartBackendHidden();
+            }
             bool running = await Task.Run(() => WaitForHealth(120));
             if (!running)
             {
