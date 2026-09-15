@@ -274,12 +274,30 @@ jobs:
           Set-Content -Path "$part/join-and-run.bat" -Value "@echo off`r`ncopy /b $ver.part* ShineosQA-Setup-$ver.exe`r`nShineosQA-Setup-$ver.exe" -Encoding ASCII
           gh release upload "$env:GITHUB_REF_NAME" "$part/*" --clobber
           if ($LASTEXITCODE -ne 0) { throw "gh release upload (exe parts) failed" }
-          # MSIX: 2GiB以下なら直接添付（圧縮率が高いため通常2GiB以下）
+          # MSIX: 2GiB以下なら直接、超過なら分割添付
           $msixFile = Get-ChildItem "dist/ShineosQA-*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($msixFile -and $msixFile.Length -lt 2GB) {
             gh release upload "$env:GITHUB_REF_NAME" $msixFile.FullName --clobber
-            Write-Output "MSIX uploaded directly: $($msixFile.Name) ($([math]::Round($msixFile.Length/1GB,2)) GB)"
+            Write-Output "MSIX uploaded directly: $($msixFile.Name)"
           } elseif ($msixFile) {
-            Write-Output "MSIX exceeds 2GiB ($([math]::Round($msixFile.Length/1GB,2)) GB) - download from Actions artifact"
+            $msixPart = "$($msixFile.FullName).part"
+            New-Item -ItemType Directory -Force -Path $msixPart | Out-Null
+            $msixFs = [IO.File]::OpenRead($msixFile.FullName)
+            $msixBuf = New-Object byte[] (1GB)
+            $mi = 0
+            for (;;) {
+              $mr = $msixFs.Read($msixBuf, 0, $msixBuf.Length)
+              if ($mr -le 0) { break }
+              $mi++
+              $mOut = New-Object byte[] $mr
+              [Array]::Copy($msixBuf, $mOut, $mr)
+              [IO.File]::WriteAllBytes("$msixPart/msix-$ver.part$('{0:d2}' -f $mi)", $mOut)
+            }
+            $msixFs.Close()
+            $msixName = $msixFile.Name
+            Set-Content -Path "$msixPart/msix-join.bat" -Value "@echo off`r`ncopy /b msix-$ver.part* $msixName`r`necho MSIX created: $msixName`r`npause" -Encoding ASCII
+            gh release upload "$env:GITHUB_REF_NAME" "$msixPart/*" --clobber
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload (msix parts) failed" }
+            Write-Output "MSIX split into $mi parts and uploaded"
           }
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- exe: 2GiB超のため分割添付（join-and-run.batで結合）`n- MSIX: Store提出用（Microsoft再署名）・Actions成果物からDL可"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- EXE: 分割添付（join-and-run.batで結合）＋Actions成果物`n- MSIX: 分割添付（msix-join.batで結合）＋Actions成果物（Store提出用）"
