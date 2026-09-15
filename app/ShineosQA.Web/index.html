@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>社内知恵袋</title>
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="brand-name">📖 社内知恵袋</span><a class="brand-sub" href="https://shineos.com" target="_blank" rel="noopener">powered by Shineos</a></div>
+      <nav class="tabs">
+        <button data-tab="chat" class="tab active">チャット</button>
+        <button data-tab="knowledge" class="tab">ナレッジ</button>
+        <button data-tab="settings" class="tab">設定</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- チャット -->
+      <section id="tab-chat" class="tabpane active">
+        <aside class="sidebar">
+          <button id="new-chat" class="newchat">＋ 新規チャット</button>
+          <div id="chat-list" class="chat-list"></div>
+        </aside>
+        <div class="chat-main">
+          <div id="messages" class="messages">
+            <div class="empty">
+              <div class="empty-icon">💬</div>
+              <h2>社内規定・業務マニュアルについて質問してください</h2>
+              <p>回答には出典（文書名・該当箇所）が付きます。ナレッジにない質問には「該当する記載がありません」と回答します。</p>
+            </div>
+          </div>
+          <div id="chat-status" class="chat-status" hidden></div>
+          <form id="chat-form" class="composer">
+            <textarea id="chat-input" rows="1" placeholder="質問を入力してください（Enterで送信 / Shift+Enterで改行）"></textarea>
+            <input type="file" id="attach-input" multiple accept=".pdf,.docx,.md,.txt" hidden />
+            <div class="composer-bar">
+              <span class="model-wrap">
+                <button type="button" id="model-btn" class="tool-btn" title="回答に使うAIモデルを選択（未導入のモデルはここからダウンロードできます）">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  <span id="model-btn-label">モデル</span>
+                </button>
+              </span>
+              <button type="button" id="attach-btn" class="tool-btn" title="ナレッジにファイルを添付（PDF / Word / Markdown / テキストをその場で登録）">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                <span>添付</span>
+              </button>
+              <button type="button" id="web-btn" class="tool-btn" title="Web検索（ONにすると質問が外部の検索サービスへ送信されます）">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                <span>Web検索</span>
+              </button>
+              <span class="spacer"></span>
+              <button type="submit" id="send-btn" class="send-btn" title="送信">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ナレッジ -->
+      <section id="tab-knowledge" class="tabpane">
+        <div class="pane-inner">
+          <h2>ナレッジ管理</h2>
+          <div id="dropzone" class="dropzone">
+            ここに PDF / Word / Markdown / テキスト をドラッグ＆ドロップ
+            または <label class="filelabel">ファイルを選択<input type="file" id="file-input" multiple accept=".pdf,.docx,.md,.txt" hidden /></label>
+          </div>
+          <div id="ingest-status" class="muted"></div>
+          <table class="table" id="files-table">
+            <thead><tr><th>ファイル</th><th>状態</th><th>チャンク数</th><th>登録日時</th><th></th></tr></thead>
+            <tbody id="files-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 設定 -->
+      <section id="tab-settings" class="tabpane">
+        <div class="pane-inner">
+          <h2>設定</h2>
+          <div id="settings-body"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="modal-host"></div>
+  <script>
+    window.__bootErrs = [];
+    window.addEventListener('error', e => window.__bootErrs.push('err: ' + e.message + ' @line' + e.lineno + ' ' + (e.filename || '')));
+    window.addEventListener('unhandledrejection', e => window.__bootErrs.push('rej: ' + ((e.reason && e.reason.stack) || e.reason)));
+  </script>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

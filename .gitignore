@@ -17,3 +17,20 @@ __pycache__/
 # ZCode プラン
 .zcode/
 .mimosa/
+
+# フェーズ0スパイク: 大型バイナリ（llama.cppエンジン・GGUFモデル）は除外
+spikes/phase0/engine/
+spikes/phase0/models/
+
+# v2開発アーティファクト
+app/ShineosQA.Web/node_modules/
+app/ShineosQA.Web/dist/
+app/ShineosQA.Backend/bin/
+app/ShineosQA.Backend/obj/
+tools/dotnet-sdk/
+output/
+
+# v2 test artifacts
+app/ShineosQA.Backend.Tests/bin/
+app/ShineosQA.Backend.Tests/obj/
+spikes/phase0/ui-smoke/out/

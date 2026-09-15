@@ -1,0 +1,1 @@
+{"code":"SHINE_E_INTERNAL","message":"\u5185\u90E8\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F\u3002","detail":"The type initializer for \u0027ShineosQA.Backend.JobObject\u0027 threw an exception."}

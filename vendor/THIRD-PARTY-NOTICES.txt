@@ -1,53 +1,72 @@
-社内知恵袋 - Third Party Notices
+社内知恵袋 v2 - Third Party Notices
 ========================================
 
-本製品（インストーラ）は、以下のオープンソースコンポーネントを同梱・自動導入します。
-各コンポーネントのライセンス全文は、それぞれの配布元で確認できます。
-本製品の UI（ヘッダー2行目）に "powered by Open WebUI" と表示しているのは、主要コンポーネントである
-Open WebUI の帰属（attribution）を明示するためです。
+本製品（インストーラ）は、以下のオープンソース・AIモデルコンポーネントを同梱します。
+各ライセンス全文は、インストール先の licenses フォルダ（{app}\licenses）および本リポジトリの
+vendor/licenses/ に格納しています。v2 では Ollama・Open WebUI・Python は使用していません。
 
-1. NSSM (nssm.exe)
-   - ライセンス: Public Domain
-   - 出典: https://nssm.cc/
-   - 用途: Windowsサービス管理（同梱）
-
-2. Ollama
+1. llama.cpp (llama-server.exe + 依存DLL)
    - ライセンス: MIT License
-   - 出典: https://github.com/ollama/ollama
-   - 用途: ローカルLLM実行エンジン（インストール時に自動導入）
+   - 出典: https://github.com/ggml-org/llama.cpp （公式プリビルド配布）
+   - 用途: ローカルLLM・埋め込み・リランクの推論エンジン（同梱）
+   - ライセンス文: licenses/llama.cpp-LICENSE.txt
 
-3. Open WebUI
-   - ライセンス: Open WebUI License（BSD-3-Clause を基礎としブランド保護条項を含む）
-     Copyright (c) 2023 - 2025 Open WebUI
-     全文: https://github.com/open-webui/open-webui/blob/main/LICENSE
-   - 出典: https://github.com/open-webui/open-webui
-   - 用途: チャットUI・RAG・Web検索（pipで自動導入）
-   - 帰属: 本製品の UI（ヘッダー2行目）・ドキュメントに「powered by Open WebUI」と明示
+2. Qwen3 (Qwen3-1.7B / Qwen3-4B-Instruct-2507 / Qwen3-30B-A3B-Instruct-2507 のGGUF量子化版)
+   - ライセンス: Apache License 2.0（商用利用可）
+   - 権利者: Alibaba Cloud / Tongyi Lab
+   - 出典: https://huggingface.co/Qwen
+   - 用途: 回答生成モデル（1.7Bを同梱。4B・30Bはアプリ内からダウンロード）
+   - 備考: 量子化(IQ4_XS/UD-Q3_K_XL)は unsloth (https://huggingface.co/unsloth) による
+     公開GGUFを利用。派生物の再配布は Apache 2.0 が許諾
+   - ライセンス文: licenses/Qwen3-LICENSE.txt
 
-4. Qwen2.5 (qwen2.5:3b / qwen2.5:1.5b / qwen2.5:7b)
-   - ライセンス: Tongyi Qianwen LICENSE（Apache 2.0 ベース・商用利用可。
-     一部サイズはライセンス種別が異なるため配布元で確認してください）
-   - 出典: https://ollama.com/library/qwen2.5 / https://huggingface.co/Qwen
-   - 用途: LLMモデル（インストール時に公式レジストリからダウンロード）
-
-5. BAAI bge-m3
+3. BAAI bge-m3（GGUF量子化版 bge-m3-Q8_0.gguf）
    - ライセンス: MIT License
-   - 出典: https://ollama.com/library/bge-m3 / https://huggingface.co/BAAI/bge-m3
-   - 用途: RAG文書検索用の埋め込みモデル（インストール時にダウンロード）
+   - 権利者: BAAI (Beijing Academy of Artificial Intelligence)
+   - 出典: https://huggingface.co/BAAI/bge-m3 （GGUF変換: gpustack）
+   - 用途: RAG文書検索用の埋め込みモデル（同梱）
+   - ライセンス文: licenses/bge-m3-LICENSE.txt
 
-6. Python (3.12)
-   - ライセンス: Python Software Foundation License
-   - 出典: https://www.python.org/
-   - 用途: Open WebUI の実行環境（インストール時に自動導入）
+4. BAAI bge-reranker-v2-m3（GGUF量子化版 bge-reranker-v2-m3-Q8_0.gguf）
+   - ライセンス: Apache License 2.0
+   - 権利者: BAAI (Beijing Academy of Artificial Intelligence)
+   - 出典: https://huggingface.co/BAAI/bge-reranker-v2-m3 （GGUF変換: gpustack）
+   - 用途: 検索候補のリランキングモデル（同梱）
+   - ライセンス文: licenses/bge-reranker-v2-m3-LICENSE.txt
 
-7. PyTorch (CPU版)
-   - ライセンス: BSD-3-Clause License
-   - 出典: https://pytorch.org/
-   - 用途: Open WebUI の依存（pipで自動導入）
+5. Microsoft.Data.Sqlite（自己完結publishに含まれる .NET ライブラリ）
+   - ライセンス: MIT License
+   - 権利者: .NET Foundation and Contributors
+   - 出典: https://github.com/dotnet/efcore （NuGet: Microsoft.Data.Sqlite）
+   - 用途: ナレッジDB（SQLite）へのアクセス
+   - ライセンス文: licenses/Microsoft.Data.Sqlite-LICENSE.txt
 
-8. Microsoft.Web.WebView2 SDK (1.0.4129)
+6. SQLitePCLRaw.bundle_e_sqlite3（ネイティブSQLiteバインディング）
+   - ライセンス: Apache License 2.0
+   - 出典: https://github.com/ericsink/SQLitePCL.raw
+   - 用途: SQLiteネイティブライブラリの読み込み
+   - ライセンス文: licenses/SQLitePCLRaw-LICENSE.txt / licenses/SQLitePCLRaw-NOTICE.txt
+
+7. SQLite（ネイティブライブラリ e_sqlite3）
+   - ライセンス: Public Domain（著作権放棄・帰属表示不要）
+   - 出典: https://www.sqlite.org/copyright.html
+   - 用途: 組み込みデータベース本体
+   - 参考: licenses/sqlite-publicdomain.txt
+
+8. Microsoft .NET Runtime（自己完結publishに含まれるランタイム）
+   - ライセンス: MIT License
+   - 権利者: .NET Foundation and Contributors
+   - 出典: https://github.com/dotnet/runtime
+   - 用途: バックエンドの実行環境（自己完結・別途インストール不要）
+
+9. Microsoft.Web.WebView2 SDK
    - ライセンス: Microsoft Software License Terms（WebView2 SDK）
    - 出典: https://www.nuget.org/packages/Microsoft.Web.WebView2
    - 用途: デスクトップアプリ「社内知恵袋」の画面表示（同梱）
+   - 備考: WebView2 ランタイム本体はMicrosoftが配布・更新するシステムコンポーネント
 
-本製品のコード（Inno Setupスクリプト・PowerShell・バッチ・C#）は MIT License で提供します。
+v1（Ollama + Open WebUI 版）が同梱していた NSSM・Ollama・Open WebUI・Python・PyTorch は、
+v2 では一切使用・同梠していません。
+
+本製品のコード（C#バックエンド・TypeScript UI・インストーラスクリプト・WPFシェル）は
+MIT License で提供します。

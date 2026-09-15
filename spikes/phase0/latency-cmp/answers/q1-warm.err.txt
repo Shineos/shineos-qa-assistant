@@ -1,0 +1,1 @@
+{"code":"SHINE_E_INTERNAL","message":"\u5185\u90E8\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F\u3002","detail":"The process cannot access the file \u0027D:\\dev\\shineos-local-ai\\output\\backend-dev-data\\logs\\engine-llm.log\u0027 because it is being used by another process."}

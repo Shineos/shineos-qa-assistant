@@ -97,8 +97,9 @@ Source: "..\assets\app.ico";               DestDir: "{app}\assets"; Flags: ignor
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}";     Flags: ignoreversion
 ; WebView2 ラッパーアプリ（URL入力不要・閉じたらサービス停止）
 Source: "..\dist\ShineosQA.App\*";    DestDir: "{app}\app";   Flags: ignoreversion recursesubdirs
-; ナレッジ（社内文書）: このフォルダに PDF/Markdown を置くとインストール時に自動登録される
-Source: "..\knowledge\*";             DestDir: "{app}\knowledge"; Flags: ignoreversion recursesubdirs
+; ナレッジ（社内文書サンプル）: v1アーカイブ。サンプル一式はテスト用フォルダへ移動した
+; （実データではないことがリポジトリルートでは不明瞭だったため: spikes/phase0/testdocs/knowledge-sample）
+Source: "..\spikes\phase0\testdocs\knowledge-sample\*"; DestDir: "{app}\knowledge"; Flags: ignoreversion recursesubdirs; Excludes: "README.md"
 
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\app\ShineosQA.exe"; IconFilename: "{app}\assets\app.ico"

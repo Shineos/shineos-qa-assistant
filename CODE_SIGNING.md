@@ -16,7 +16,11 @@ This document is the code signing policy of **ShineosQA (社内知恵袋)** as r
 |---|---|
 | `ShineosQA-Setup-<version>.exe` | The Windows installer (Inno Setup) published on [GitHub Releases](https://github.com/Shineos/shineos-qa-assistant/releases) |
 
-No other binaries are distributed by this project.
+The installer bundles every PE binary that the product ships (v2 architecture): the self-contained
+C# backend (`ShineosQA.Backend.exe`), the WebView2 desktop shell (`ShineosQA.exe`), and the llama.cpp
+engine (`llama-server.exe` + DLLs). Signing the installer therefore covers all of them. For the
+Microsoft Store submission, the store re-signs the ingested package with Microsoft certificates;
+the SignPath signature remains on the GitHub Releases artifact.
 
 ## Build and signing process
 
@@ -40,13 +44,17 @@ No other binaries are distributed by this project.
 
 ## Components and licensing of the signed artifact
 
-The signed installer contains only project-owned code (MIT) and the following bundled components:
+The signed installer (v2) bundles project-owned code (MIT) plus:
 
-- **NSSM** (nssm.exe) — public domain
-- **WebView2Loader.dll** — Microsoft redistributable (Microsoft Software License Terms)
-- Project assets and scripts (MIT)
+- **llama.cpp** prebuilt engine (`llama-server.exe` + DLLs) — MIT
+- **Qwen3** GGUF models (1.7B bundled; 4B / 30B downloaded in-app from huggingface.co) — Apache 2.0
+- **BAAI bge-m3** (MIT) and **bge-reranker-v2-m3** (Apache 2.0) GGUF models
+- **Microsoft.Data.Sqlite** (MIT), **SQLitePCLRaw** (Apache 2.0, NOTICE included), **SQLite** (public domain), **.NET runtime** (MIT, self-contained)
+- **WebView2 SDK** DLLs — Microsoft Software License Terms
 
-All major runtime components (**Ollama**, **Open WebUI**, **Python**, **PyTorch**, and AI models **Qwen2.5 / bge-m3**) are **not bundled** in the signed artifact; they are downloaded at installation time from their official distribution sources (github.com, pypi.org, nuget.org, ollama.com registry). License details: [vendor/THIRD-PARTY-NOTICES.txt](vendor/THIRD-PARTY-NOTICES.txt).
+Full license texts are bundled at `{app}\licenses` in the installer and tracked in
+[vendor/THIRD-PARTY-NOTICES.txt](vendor/THIRD-PARTY-NOTICES.txt). v1-era components
+(Ollama, Open WebUI, Python, PyTorch, NSSM) are no longer used or bundled.
 
 ## Credits
 
