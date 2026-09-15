@@ -300,4 +300,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "gh release upload (msix parts) failed" }
             Write-Output "MSIX split into $mi parts and uploaded"
           }
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- EXE: 分割添付（join-and-run.batで結合）＋Actions成果物`n- MSIX: 分割添付（msix-join.batで結合）＋Actions成果物（Store提出用）"
+          # リリースノートに単一ファイルDL先（Actions成果物）のリンクを追記
+          $runUrl = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          $notesFile = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          gh release view "$env:GITHUB_REF_NAME" --json body --jq '.body' | Out-File $notesFile -Encoding utf8
+          Add-Content $notesFile -Value "`n---`n## 単一ファイルのダウンロード`n`n以下のActions成果物から単一ファイルを直接ダウンロードできます（GitHubログイン必要・90日保持）:`n`n- **EXE**: [ShineosQA-Setup-$ver]($runUrl) （Inno Setup版・2.2GB）`n- **MSIX**: [ShineosQA-MSIX-$ver]($runUrl) （Store提出用・2.2GB）`n"
+          gh release edit "$env:GITHUB_REF_NAME" --notes-file $notesFile
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- EXE: 分割添付 + [Actions成果物]($runUrl)`n- MSIX: 分割添付 + [Actions成果物]($runUrl)（Store提出用）"
