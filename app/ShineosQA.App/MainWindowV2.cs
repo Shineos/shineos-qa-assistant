@@ -34,6 +34,7 @@ namespace ShineosQA
         readonly WebView2 webView = new WebView2();
         readonly Grid loadingPanel;
         readonly Grid guidePanel;
+        Grid kbGuidePanel; // C#5相当のcscのためNull許容参照型は使えない（ctorで必ず初期化）
         readonly System.Windows.Shapes.Path spinner;
         readonly TextBlock overlayTitle;
         readonly TextBlock overlayMessage;
@@ -220,13 +221,98 @@ namespace ShineosQA
                     try { File.WriteAllText(firstRunFile, "1"); } catch { }
                 }
                 HideGuide();
+                MaybeShowKnowledgeGuide(); // ウェルカム直後は同じ流れでナレッジ登録案内へ
             };
             guideCenter.Children.Add(guideButton);
             guidePanel.Children.Add(guideCenter);
 
+            // インストール（更新）直後の「ナレッジ登録案内」。インストールマーカーの時刻で
+            // 新しいインストールを検知し、1回だけ表示する（チェックで今回のインストールでは非表示）
+            kbGuidePanel = new Grid { Background = Brushes.White, Visibility = Visibility.Collapsed };
+            var kbCenter = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 560,
+                Margin = new Thickness(40, 0, 40, 0)
+            };
+            kbCenter.Children.Add(new TextBlock
+            {
+                Text = "ナレッジを登録しましょう",
+                FontSize = 24,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x1A, 0x1A, 0x1A)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 8)
+            });
+            kbCenter.Children.Add(new TextBlock
+            {
+                Text = "社内の規定・マニュアルを登録すると、その文書に基づいて根拠付きで回答できます。\n" +
+                       "PDF・Word・Markdown・テキストに対応。ナレッジタブにドラッグ＆ドロップするだけです。\n" +
+                       "登録しなくても、同梱のサンプル質問で動作確認はできます。",
+                FontSize = 14,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 24)
+            });
+            var kbCheckbox = new CheckBox
+            {
+                Content = "次回から表示しない",
+                FontSize = 13,
+                IsChecked = true,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 10, 0, 0),
+                Foreground = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44))
+            };
+            var kbButtons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 24, 0, 0)
+            };
+            var kbPrimary = new Button
+            {
+                Content = "ナレッジ登録へ進む",
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                Padding = new Thickness(28, 9, 28, 9),
+                Margin = new Thickness(0, 0, 12, 0),
+                Background = new SolidColorBrush(Color.FromRgb(0x10, 0xA3, 0x7F)),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+            var kbLater = new Button
+            {
+                Content = "あとで",
+                FontSize = 15,
+                Padding = new Thickness(28, 9, 28, 9),
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC))
+            };
+            kbPrimary.Click += (s, e) =>
+            {
+                if (kbCheckbox.IsChecked == true) MarkKnowledgeGuideSeen();
+                HideKnowledgeGuide();
+                pendingKnowledgeTab = true;
+                TryNavigateToKnowledgeTab(); // WebViewロード済みなら即遷移、未ロードならNavigationCompletedで
+            };
+            kbLater.Click += (s, e) =>
+            {
+                if (kbCheckbox.IsChecked == true) MarkKnowledgeGuideSeen();
+                HideKnowledgeGuide();
+            };
+            kbButtons.Children.Add(kbPrimary);
+            kbButtons.Children.Add(kbLater);
+            kbCenter.Children.Add(kbCheckbox);
+            kbCenter.Children.Add(kbButtons);
+            kbGuidePanel.Children.Add(kbCenter);
+
             webView.Visibility = Visibility.Collapsed;
             root.Children.Add(loadingPanel);
             root.Children.Add(guidePanel);
+            root.Children.Add(kbGuidePanel);
             root.Children.Add(webView);
             Content = root;
 
@@ -271,6 +357,58 @@ namespace ShineosQA
         {
             guidePanel.Visibility = Visibility.Collapsed;
             webView.Visibility = Visibility.Visible;
+        }
+
+        // ---- ナレッジ登録案内（インストール/更新のたび1回） ----
+
+        string KbMarkerPath() { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "install.completed"); }
+        string KbSeenPath() { return Path.Combine(userDataDir, "kb_guide_seen.txt"); }
+        bool pendingKnowledgeTab;
+
+        /// <summary>今回のインストール（install.completedの更新時刻）に対して案内未表示ならtrue</summary>
+        bool ShouldShowKnowledgeGuide()
+        {
+            try
+            {
+                if (!File.Exists(KbMarkerPath())) return false; // dev実行等マーカーなしでは出さない
+                var ticks = File.GetLastWriteTimeUtc(KbMarkerPath()).Ticks.ToString();
+                var seen = File.Exists(KbSeenPath()) ? File.ReadAllText(KbSeenPath()).Trim() : "";
+                return seen != ticks;
+            }
+            catch { return false; }
+        }
+
+        void MarkKnowledgeGuideSeen()
+        {
+            try { File.WriteAllText(KbSeenPath(), File.GetLastWriteTimeUtc(KbMarkerPath()).Ticks.ToString()); } catch { }
+        }
+
+        void MaybeShowKnowledgeGuide()
+        {
+            if (!ShouldShowKnowledgeGuide()) return;
+            Log("showing knowledge registration guide");
+            loadingPanel.Visibility = Visibility.Collapsed;
+            guidePanel.Visibility = Visibility.Collapsed;
+            kbGuidePanel.Visibility = Visibility.Visible;
+            webView.Visibility = Visibility.Collapsed;
+        }
+
+        void HideKnowledgeGuide()
+        {
+            kbGuidePanel.Visibility = Visibility.Collapsed;
+            webView.Visibility = Visibility.Visible;
+        }
+
+        /// <summary>Web UIのナレッジタブへ切替（WebViewロード済みの場合のみ実行）</summary>
+        async void TryNavigateToKnowledgeTab()
+        {
+            try
+            {
+                if (webView.CoreWebView2 == null) return; // 未ロードなら NavigationCompleted で再試行
+                await webView.ExecuteScriptAsync("var t=document.querySelector('[data-tab=\"knowledge\"]'); if(t) t.click();");
+                pendingKnowledgeTab = false;
+            }
+            catch (Exception ex) { Log("navigate knowledge tab failed: " + ex.Message); }
         }
 
         void AddGuideStep(StackPanel parent, string number, string title, string desc)
@@ -400,9 +538,9 @@ namespace ShineosQA
             }
             Log("backend healthy on port " + Port);
 
-            // 初回起動時は「はじめにガイド」を表示
-            if (File.Exists(firstRunFile)) HideLoading();
-            else ShowGuide();
+            // 初回起動時は「はじめにガイド」、インストール直後は「ナレッジ登録案内」を表示
+            if (File.Exists(firstRunFile)) { HideLoading(); MaybeShowKnowledgeGuide(); }
+            else ShowGuide(); // ウェルカムの「はじめる」から MaybeShowKnowledgeGuide へ続く
 
             // WebView2 のユーザーデータフォルダは %APPDATA% 配下に明示指定する
             // （インストール先直下は書き込み不可の場合があるため）
@@ -427,6 +565,11 @@ namespace ShineosQA
                         }
                     }
                     catch (Exception ex) { Log("open external link failed: " + ex.Message); }
+                };
+                // ナレッジ登録案内の「進む」をWebViewロード前に押した場合、ロード完了後にタブ遷移する
+                webView.CoreWebView2.NavigationCompleted += (s, e) =>
+                {
+                    if (pendingKnowledgeTab) TryNavigateToKnowledgeTab();
                 };
             }
             catch (Exception ex)
