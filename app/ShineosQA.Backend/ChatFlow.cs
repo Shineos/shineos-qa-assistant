@@ -218,6 +218,8 @@ public sealed class ChatFlow
             }
 
             // 5) リランク → ガード（入力はスニペット化して高速化: 約-30%、精度は関連文中心で維持）
+            // 注意: 160字への圧縮は実測で品質を落とした（Golden QA 108→101/118。タクシー22時・会議室等の
+            // 事実が窓外に切れた）。240字が実測上の最適点
             var qTokForSnip = qTokens;
             var docs = hits.Select(h => Rag.Snippet(h.Rec.Text, qTokForSnip, 240)).ToList();
             var sources = new List<SourceInfo>();
