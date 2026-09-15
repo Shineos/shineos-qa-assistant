@@ -1,17 +1,16 @@
-# 社内知恵袋 - 自動ビルド・コード署名・GitHub Releases 配布
+# 社内知恵袋 v2 - 自動ビルド（llama.cpp直接実行アーキテクチャ）
 #
-# - v* タグを push すると: Windows 上で Inno Setup ビルド → SignPath でコード署名 →
-#   署名済み ShineosQA-Setup-<version>.exe をリリースに自動添付
-# - workflow_dispatch で: ビルド・署名のみ（アーティファクト確認用）
+# - v* タグを push すると: Windows ランナー上で
+#     Web UI (npm) → バックエンド自己完結publish (dotnet) → WebView2ラッパー (csc)
+#     → llama.cppエンジンDL → モデルGGUF 3点DL (SHA256検証) → Inno Setup 6 で
+#     完全オフラインexe（モデル同梱・約2.1GB）を生成し、Actions成果物 + Release に添付
+# - exeはGitHub Releaseの1アセット上限(2GiB)を超えるため分割添付+結合batを同梱
+#   （Actions成果物からは単一exeをDL可能）
+# - SignPath署名は Secrets 設定後に別ステップで追加する（本ワークフローでは未署名）
 #
-# 必要な設定（リポジトリ Settings > Secrets and variables > Actions）:
-#   Secrets:  SIGNPATH_ORG_ID / SIGNPATH_API_TOKEN
-#   Variables: SIGNPATH_PROJECT_SLUG / SIGNPATH_SIGNING_POLICY_SLUG
-#             （SignPathコンソールで確認したスラッグに置き換えること）
-#
-# 注意: Inno Setup は 6.7.3（最終6系）を使用する。
-#   7系は API が変更され、かつ「Non-commercial use only」のため商用利用に
-#   ライセンスが必要になる可能性がある。6系は商用利用が無償。
+# CIで調達する資産（ローカル開発資産の代替）:
+#   - WebView2 DLL: NuGet Microsoft.Web.WebView2 から抽出
+#   - エンジン/モデル: 配布元からDL（URL・SHA256は app/ShineosQA.Backend/Models.cs と同一値）
 name: build-release
 
 on:
@@ -22,7 +21,16 @@ on:
 
 permissions:
   contents: write
-  actions: read
+
+env:
+  LLAMA_RELEASE_URL: https://github.com/ggml-org/llama.cpp/releases/download/b10936/llama-b10936-bin-win-cpu-x64.zip
+  WEBVIEW2_NUGET: https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.4129.0
+  MODEL_QUICK_URL: https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-IQ4_XS.gguf
+  MODEL_QUICK_SHA: a02e41d3208e97a7cb224297e8d3abb22e5bb8d664362c6be4f48948a3797eec
+  MODEL_EMBED_URL: https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q8_0.gguf
+  MODEL_EMBED_SHA: 950f4a8e5e19477a6d3c26d2f162233c20002c601f75e4b002e3239997821167
+  MODEL_RANK_URL: https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q8_0.gguf
+  MODEL_RANK_SHA: a43c7c9b11a4c1517e5bf95151960e1621d1b72f7a493364b01e386cf1aaa1d3
 
 jobs:
   build:
@@ -30,88 +38,158 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 配布スクリプトの構文検証（compileall は再帰的に全 .py を検査し、
-      # 構文エラーがあれば非ゼロで終了する）
-      - name: Python syntax check
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Derive version from tag
+        id: ver
         shell: pwsh
         run: |
-          python --version
-          python -m compileall -q scripts tools
-          if ($LASTEXITCODE -ne 0) { throw "Python syntax check failed (exit $LASTEXITCODE)" }
+          $v = if ($env:GITHUB_REF -match '^refs/tags/v(\d+\.\d+\.\d+)$') { $Matches[1] } else { '0.0.0-dev' }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "building ShineosQA $v"
 
+      # ---- 1) Web UI ----
+      - name: Build Web UI
+        shell: pwsh
+        run: |
+          cd app/ShineosQA.Web
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "web build failed" }
+
+      # ---- 2) バックエンド（自己完結publish。csprojがWeb distをwwwrootとして取り込む） ----
+      - name: Publish backend
+        shell: pwsh
+        run: |
+          dotnet publish app/ShineosQA.Backend -c Release -r win-x64 --self-contained true -o output/backend-pub
+          if ($LASTEXITCODE -ne 0) { throw "backend publish failed" }
+          if (-not (Test-Path 'output/backend-pub/ShineosQA.Backend.dll')) { throw "backend dll missing" }
+
+      # ---- 3) WebView2 ラッパー（.NET Framework csc + NuGet抽出DLL） ----
+      - name: Build WebView2 wrapper
+        shell: pwsh
+        run: |
+          $dst = 'dist/ShineosQA.App'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          $tmp = Join-Path $env:RUNNER_TEMP 'wv2.zip'
+          curl.exe -L --fail --retry 3 -o $tmp $env:WEBVIEW2_NUGET
+          if ($LASTEXITCODE -ne 0) { throw "webview2 nuget download failed" }
+          $pkg = Join-Path $env:RUNNER_TEMP 'wv2'
+          Expand-Archive $tmp -DestinationPath $pkg -Force
+          Copy-Item "$pkg/lib/net462/Microsoft.Web.WebView2.Core.dll" $dst -Force
+          Copy-Item "$pkg/lib/net462/Microsoft.Web.WebView2.Wpf.dll" $dst -Force
+          Copy-Item "$pkg/runtimes/win-x64/native/WebView2Loader.dll" $dst -Force
+          pwsh -NoProfile -ExecutionPolicy Bypass -File app/ShineosQA.App/build-v2.ps1
+          if ($LASTEXITCODE -ne 0) { throw "wrapper build failed" }
+          if (-not (Test-Path "$dst/ShineosQA.exe")) { throw "ShineosQA.exe missing" }
+
+      # ---- 4) llama.cpp エンジン（公式プリビルドCPU版 b10936） ----
+      - name: Download llama.cpp engine
+        shell: pwsh
+        run: |
+          $dst = 'spikes/phase0/engine/cpu'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          $tmp = Join-Path $env:RUNNER_TEMP 'llama.zip'
+          curl.exe -L --fail --retry 3 -o $tmp $env:LLAMA_RELEASE_URL
+          if ($LASTEXITCODE -ne 0) { throw "llama.cpp download failed" }
+          Expand-Archive $tmp -DestinationPath $dst -Force
+          if (-not (Test-Path "$dst/llama-server.exe")) { throw "llama-server.exe missing after extract" }
+
+      # ---- 5) モデルGGUF 3点（SHA256検証付き・計約2.2GB） ----
+      - name: Download models
+        shell: pwsh
+        run: |
+          $dst = 'spikes/phase0/models'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          foreach ($m in @(
+            @{ u = $env:MODEL_QUICK_URL; s = $env:MODEL_QUICK_SHA; f = 'Qwen3-1.7B-IQ4_XS.gguf' },
+            @{ u = $env:MODEL_EMBED_URL; s = $env:MODEL_EMBED_SHA; f = 'bge-m3-Q8_0.gguf' },
+            @{ u = $env:MODEL_RANK_URL;  s = $env:MODEL_RANK_SHA;  f = 'bge-reranker-v2-m3-Q8_0.gguf' }
+          )) {
+            $p = Join-Path $dst $m.f
+            curl.exe -L --fail --retry 3 -o $p $m.u
+            if ($LASTEXITCODE -ne 0) { throw "model download failed: $($m.f)" }
+            $h = (Get-FileHash $p -Algorithm SHA256).Hash.ToLower()
+            if ($h -ne $m.s.ToLower()) { throw "sha256 mismatch for $($m.f): got $h" }
+            Write-Host "$($m.f) verified ok"
+          }
+
+      # ---- 6) Inno Setup 6.7.3（公式リリースから直接導入。7系はNon-commercialのため不使用） ----
       - name: Install Inno Setup 6.7.3
         shell: pwsh
         run: |
           $iscc = 'C:\InnoSetup\ISCC.exe'
           if (-not (Test-Path $iscc)) {
-            # 公式GitHubリリースから直接取得（download.php はスタブHTMLを返すため不使用）
             curl.exe -L --fail --retry 3 -o "$env:TEMP\innosetup.exe" https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
             if ($LASTEXITCODE -ne 0) { throw "Inno Setup download failed" }
-            $size = (Get-Item "$env:TEMP\innosetup.exe").Length
-            if ($size -lt 5MB) { throw "Inno Setup download looks invalid (${size} bytes)" }
-            # /DIR でインストール先を固定（既定の導入先はバージョンで異なるため）
             $p = Start-Process -FilePath "$env:TEMP\innosetup.exe" `
               -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/DIR=C:\InnoSetup') `
               -Wait -PassThru
             if ($p.ExitCode -ne 0) { throw "Inno Setup installer exit code: $($p.ExitCode)" }
           }
-          if (-not (Test-Path $iscc)) {
-            # 想定外の導入先でも探索
-            $iscc = Get-ChildItem 'C:\Program Files', 'C:\Program Files (x86)', "$env:LOCALAPPDATA\Programs" `
-                      -Directory -Filter 'Inno Setup*' -ErrorAction SilentlyContinue |
-                    ForEach-Object { Join-Path $_.FullName 'ISCC.exe' } |
-                    Where-Object { Test-Path $_ } | Select-Object -First 1
-          }
-          if (-not $iscc) { throw "ISCC.exe not found" }
-          Write-Output "ISCC: $iscc"
-          Write-Output "ISCC_PATH=$iscc" >> $env:GITHUB_ENV
-
-      # WebView2 ラッパーアプリ（dist\ShineosQA.App）は .gitignore で除外されているため、
-      # CI のクリーンな checkout には存在しない。installer.iss が参照するため先にビルドする
-      # （過去の失敗: v1.0.28 で "No files found matching ...dist\ShineosQA.App\*" が発生）
-      - name: Build WebView2 wrapper app
-        shell: pwsh
-        run: |
-          & .\app\ShineosQA.App\build.ps1
-          if ($LASTEXITCODE -ne 0) { throw "WebView2 app build failed (exit $LASTEXITCODE)" }
-          Get-ChildItem dist\ShineosQA.App | Select-Object Name, Length
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
 
       - name: Build installer
+        id: build
         shell: pwsh
         run: |
-          & $env:ISCC_PATH installer\installer.iss
-          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
-          Get-ChildItem dist | Select-Object Name, Length
+          $ver = '${{ steps.ver.outputs.version }}'
+          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=$ver" 'installer/installer-v2.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          $exe = "dist/ShineosQA-Setup-$ver.exe"
+          if (-not (Test-Path $exe)) { throw "installer exe not found: $exe" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "hash=$hash" >> $env:GITHUB_OUTPUT
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## ShineosQA-Setup-$ver.exe`n`n- SHA256: \`$hash\``n- Size: $([math]::Round((Get-Item $exe).Length/1GB,2)) GB"
 
-      # ---- SignPath コード署名（REST API 直接方式） ----
-      # GitHubコネクタ（Trusted Build System）は組織設定が必須でAPIから設定不可のため、
-      # SignPath REST API に直接署名リクエストを送る方式を使用（2026-08-21 実証済み）
-      - name: Sign with SignPath (direct API)
-        shell: pwsh
-        env:
-          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
-          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-        run: |
-          $exe = Get-ChildItem dist -Filter *.exe | Select-Object -First 1
-          if (-not $exe) { throw 'no exe found in dist' }
-          & .\scripts\sign_with_signpath.ps1 -ArtifactPath $exe.FullName -OutputPath "dist\signed-tmp.exe"
-          if ($LASTEXITCODE -ne 0) { throw "SignPath signing failed (exit $LASTEXITCODE)" }
-          Move-Item -Force "dist\signed-tmp.exe" $exe.FullName
-          Get-ChildItem dist | Select-Object Name, Length
-
-      - name: Upload artifact (manual build)
-        if: github.event_name == 'workflow_dispatch'
+      # ---- 7) Actions成果物（単一exe・ここからDL） ----
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShineosQA-Setup
-          path: dist/*.exe
+          name: ShineosQA-Setup-${{ steps.ver.outputs.version }}
+          path: dist/ShineosQA-Setup-${{ steps.ver.outputs.version }}.exe
           if-no-files-found: error
+          compression-level: 0
 
-      - name: Create GitHub Release
+      # ---- 8) Release添付（exe >2GiB のため1GB分割+結合bat） ----
+      - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.exe
-          generate_release_notes: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          $exe = "dist/ShineosQA-Setup-$ver.exe"
+          $hash = '${{ steps.build.outputs.hash }}'
+          gh release view "$env:GITHUB_REF_NAME" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create "$env:GITHUB_REF_NAME" --title "ShineosQA v$ver" --generate-notes --notes "SHA256: $hash"
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+          } else {
+            gh release edit "$env:GITHUB_REF_NAME" --notes "SHA256: $hash"
+          }
+          $part = "$exe.part"
+          New-Item -ItemType Directory -Force -Path $part | Out-Null
+          $fs = [IO.File]::OpenRead($exe)
+          $buf = New-Object byte[] (1GB)
+          $i = 0
+          for (;;) {
+            $r = $fs.Read($buf, 0, $buf.Length)
+            if ($r -le 0) { break }
+            $i++
+            $out = New-Object byte[] $r
+            [Array]::Copy($buf, $out, $r)
+            [IO.File]::WriteAllBytes("$part/$ver.part$('{0:d2}' -f $i)", $out)
+          }
+          $fs.Close()
+          Set-Content -Path "$part/join-and-run.bat" -Value "@echo off`r`ncopy /b $ver.part* ShineosQA-Setup-$ver.exe`r`nShineosQA-Setup-$ver.exe" -Encoding ASCII
+          gh release upload "$env:GITHUB_REF_NAME" "$part/*" --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- exeは2GiB超のため分割添付（join-and-run.batで結合して実行）。単一exeはActions成果物からDL可"
