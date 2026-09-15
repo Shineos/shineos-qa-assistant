@@ -24,7 +24,7 @@ permissions:
 
 env:
   LLAMA_RELEASE_URL: https://github.com/ggml-org/llama.cpp/releases/download/b10936/llama-b10936-bin-win-cpu-x64.zip
-  WEBVIEW2_NUGET: https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.4129.0
+  WEBVIEW2_NUGET: https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4129.50/microsoft.web.webview2.1.0.4129.50.nupkg
   MODEL_QUICK_URL: https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-IQ4_XS.gguf
   MODEL_QUICK_SHA: a02e41d3208e97a7cb224297e8d3abb22e5bb8d664362c6be4f48948a3797eec
   MODEL_EMBED_URL: https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q8_0.gguf
