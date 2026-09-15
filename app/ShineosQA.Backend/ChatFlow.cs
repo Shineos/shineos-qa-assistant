@@ -60,6 +60,47 @@ public sealed class ChatFlow
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
+    /// <summary>会話文脈から独立した検索クエリをLLMに生成させる（Web検索フォローアップ改善・A案）。
+    /// 例: 「今日の天気は」→「こちらは神奈川県ですよ」→「神奈川県 天気 予報」</summary>
+    private async Task<string> GenerateSearchQueryAsync(
+        List<(string role, string content)> history, string currentMessage, CancellationToken ct)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("以下の会話の文脈を踏まえ、ユーザーが今知りたいことを表す検索クエリを1行で出力してください。");
+            sb.Append("検索クエリ以外の説明は不要です。\n\n");
+            sb.Append("--- 会話 ---\n");
+            foreach (var (role, content) in history)
+                sb.Append($"{(role == "user" ? "ユーザー" : "アシスタント")}: {content}\n");
+            sb.Append($"ユーザー: {currentMessage}\n");
+            sb.Append("--- 検索クエリ: ");
+
+            var result = new System.Text.StringBuilder();
+            await _gw.ChatStreamAsync(_cfg.EnginePortLlm,
+                new List<(string, string)> { ("system", sb.ToString()) },
+                0.0, 60, delta =>
+                {
+                    result.Append(delta);
+                    return Task.CompletedTask;
+                }, ct);
+            var query = result.ToString().Trim().Trim('"', '「', '」', '\n', '\r');
+            // 生成失敗・空・長すぎる場合はフォールバック（前の質問+現在）
+            if (string.IsNullOrEmpty(query) || query.Length > 100)
+            {
+                var prevUser = history.LastOrDefault(h => h.role == "user").content ?? "";
+                return $"{prevUser} {currentMessage}".Trim();
+            }
+            return query;
+        }
+        catch (Exception ex)
+        {
+            _log.Warn($"search query generation failed: {ex.Message}");
+            var prev = history.LastOrDefault(h => h.role == "user").content ?? "";
+            return $"{prev} {currentMessage}".Trim();
+        }
+    }
+
     /// <summary>指示語（前方照応）を含むか: 「それ/この/その/前の/さっき/上記/さよう」等</summary>
     private static bool RegexHasAnaphora(string s) =>
         s.Contains("それ") || s.Contains("この") || s.Contains("その") || s.Contains("前の") ||
@@ -189,6 +230,9 @@ public sealed class ChatFlow
             _sup.EnsureLlm(); // idle unload後の再確保（キャッシュヒット時は不要のためここで確保）
 
             // 3) Web検索（任意）— 失敗・0件はSSEで可視化し、回答にも反映
+            // フォローアップ質問（指示語含む・短文）では、生のメッセージではなく
+            // LLMに会話文脈から独立した検索クエリを生成させる（A案）
+            // 例: 「今日の天気は」→「こちらは神奈川県ですよ」→「神奈川県 天気 予報」を生成
             string? webContext = null;
             List<WebSearch.WebResult>? webResults = null;
             bool webFailed = false;
@@ -196,7 +240,14 @@ public sealed class ChatFlow
             {
                 try
                 {
-                    webResults = await _web.SearchAsync(message, 4, ctx.RequestAborted);
+                    string webQuery = message;
+                    bool isFollowUp = prevUser.Length > 0 && (message.Length < 12 || RegexHasAnaphora(message));
+                    if (isFollowUp)
+                    {
+                        webQuery = await GenerateSearchQueryAsync(history, message, ctx.RequestAborted);
+                        _log.Info($"web search query rewritten: \"{message}\" -> \"{webQuery}\"");
+                    }
+                    webResults = await _web.SearchAsync(webQuery, 4, ctx.RequestAborted);
                     if (webResults.Count == 0) webFailed = true;
                     else webContext = WebSearch.ToContext(webResults);
                 }
