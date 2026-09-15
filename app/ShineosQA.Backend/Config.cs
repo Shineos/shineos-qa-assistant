@@ -14,7 +14,7 @@ public sealed class AppConfig
     public string QuickModel { get; set; } = "Qwen3-1.7B-IQ4_XS.gguf";
     public string QualityModel { get; set; } = "Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf"; // 任意の高品質階級（16GB以上）
     public string EmbedModel { get; set; } = "bge-m3-Q8_0.gguf";
-    public string RankModel { get; set; } = "bge-reranker-v2-m3-Q8_0.gguf";
+    public string RankModel { get; set; } = "bge-reranker-v2-m3-Q8_0.gguf"; // Q8必須: Q3_K_Mはガード分離が狭くなり誤回答が増える（RESULTS 第13ラウンド実測）
     public string Tier { get; set; } = "auto"; // auto | standard | quick
     public bool WebSearch { get; set; } = false; // 既定OFF（社外送信なし）
     public int EnginePortLlm { get; set; } = 8301;
