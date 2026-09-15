@@ -372,6 +372,8 @@ public sealed class Program
         var configDir = isMsix ? MsixLocalState! : AppContext.BaseDirectory;
         var path = Path.Combine(configDir, "config.json");
         if (File.Exists(path)) return;
+        // LocalState等の親ディレクトリが未作成の場合（MSIX初回起動・手動テスト）に作成する
+        Directory.CreateDirectory(configDir);
         var baseDir = AppContext.BaseDirectory.Replace('\\', '/').TrimEnd('/');
         var localDir = isMsix ? MsixLocalState!.Replace('\\', '/').TrimEnd('/') : baseDir;
         var engineDir = isMsix ? baseDir + "/engine" : baseDir + "/engine"; // engineは常にパッケージ/exe内（読み取り専用）
