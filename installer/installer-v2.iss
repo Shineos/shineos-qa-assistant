@@ -43,6 +43,8 @@ WizardStyle=modern
 OutputDir=..\dist
 #ifdef LiteBuild
 OutputBaseFilename=ShineosQA-Setup-{#MyAppVersion}-lite
+#else
+OutputBaseFilename=ShineosQA-Setup-{#MyAppVersion}
 #endif
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
