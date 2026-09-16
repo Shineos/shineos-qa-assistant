@@ -231,13 +231,14 @@
 | アセット | ファイル | 状態 |
 |---|---|---|
 | Storeロゴ 300x300 PNG | `assets/store-logo-300.png` | ✓ 生成済み |
-| スクリーンショット1 メイン画面 | `assets/screenshots/app-01-main.png`（1500x1000・要件1366x768以上を満たす） | ✓ |
-| スクリーンショット2 出典付き回答 | `assets/screenshots/app-02-chat.png` | ✓ |
-| スクリーンショット3 ナレッジ管理 | `assets/screenshots/app-03-knowledge.png` | ✓ |
-| スクリーンショット4 モデル選択 | `assets/screenshots/app-04-models.png` | ✓ |
+| スクリーンショット1 初回モデルDL（Store版の特徴・listing文の「初回起動時にモデル取得」と整合） | `assets/screenshots/app-00-model-download.png`（1481x987・要件1366x768以上を満たす） | ✓ 2026-09-16追加 |
+| スクリーンショット2 メイン画面 | `assets/screenshots/app-01-main.png`（1500x1000・要件1366x768以上を満たす） | ✓ |
+| スクリーンショット3 出典付き回答 | `assets/screenshots/app-02-chat.png` | ✓ |
+| スクリーンショット4 ナレッジ管理 | `assets/screenshots/app-03-knowledge.png` | ✓ |
+| スクリーンショット5 モデル選択 | `assets/screenshots/app-04-models.png` | ✓ |
 | MSIXパッケージ内ロゴ（150/44/50px） | CIが `store-logo-300.png` から自動生成 | ✓ |
 
-追加推奨（任意）: 1枚以上のスクリーンショットに**日本語のキャプション**を重ねる（ストア内で内容が伝わりクリック率が上がる）。
+※ 1枚目（モデルDL画面）は日本語UIのまま掲載してよい（対象市場が日本のため。多言語展開時にキャプションのローカライズを検討）。
 
 ---
 

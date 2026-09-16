@@ -56,13 +56,13 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 
 - Windows 10 / 11 (64-bit) — **no GPU required** (CPU only)
 - 8 GB RAM or more (16 GB+ lets you use the 🏆Quality 30B model)
-- Free disk space: ~3 GB for the initial install (⚡Quick bundled). Adding 🎯Standard 4B takes ~2.5 GB more; 🏆Quality 30B ~14 GB
-- Internet connection **during installation only** (and later, only when downloading additional models)
+- Free disk space: full installer ~3 GB for the initial install (⚡Quick bundled). Microsoft Store build: ~0.2 GB install + ~2.3 GB first-launch model download. Adding 🎯Standard 4B takes ~2.5 GB more; 🏆Quality 30B ~14 GB
+- Internet connection is only needed to fetch AI models (the full installer bundles them, so installation itself is fully offline; the Store build fetches them on first launch)
 - Answers take a few to ~15 seconds (all processing is local). The product specializes in regulations/manuals Q&A; general-knowledge questions are declined with "not found in the knowledge base"
 
 ## Download & Install
 
-Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; ~2.2 GB download with the starter models bundled, fully offline install). **Microsoft Store distribution is in preparation** — the Store build uses a small installer (~47 MB) and downloads the AI models (~2.3 GB) in the app on first launch.
+Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; ~2.2 GB download with the starter models bundled, fully offline install). **Microsoft Store distribution is in preparation** — the Store build uses a small installer (~47 MB) and downloads the AI models (~2.3 GB) in the app on first launch (see the first screenshot in the [gallery](#screenshots) below).
 
 1. ⚡Quick (Qwen3-1.7B, IQ4_XS quantization) is **bundled with the installer**, so the app is ready immediately after setup
 2. 🎯Standard (4B) and 🏆Quality (30B) can be downloaded later from the model menu or the settings tab — only if you need them
@@ -83,6 +83,7 @@ Silent installation (`/VERYSILENT`) is supported.
 
 | Screen | Description |
 |------|------|
+| [![First-launch model download](assets/screenshots/app-00-model-download.png)](assets/screenshots/app-00-model-download.png) | **First-launch model download (Microsoft Store build)** — a welcome wizard lets you pick ⚡Quick (1.7B) or 🎯Standard (4B), then downloads the required models (~2.3 GB for Quick) with a progress bar. Fully offline afterwards (the full installer bundles the models, so this step does not apply) |
 | [![Main screen](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **Main screen** — opens from the desktop icon in ~2 seconds, no URL entry needed |
 | [![Cited answer](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **Answer with citation** — the answer is shown together with its sources, and past Q&A can be reopened from the history |
 | [![Knowledge management](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **Knowledge management** — register and review company documents (PDF / Word / Markdown / text) by drag & drop |

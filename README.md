@@ -40,13 +40,13 @@
 
 - Windows 10 / 11（64bit）・**GPU不要**（CPUのみで動作）
 - メモリ 8GB 以上（16GB 以上なら🏆高品質30Bも選択可）
-- 空き容量: 初期インストール約 3GB（⚡クイック同梱）。🎯標準4Bの追加は約2.5GB、🏆高品質30Bは約14GB
-- 初回インストール時のみインターネット接続（モデルを後から追加する場合もそのときのみ）
+- 空き容量: フル版インストーラは初期インストール約3GB（⚡クイック同梱）。Microsoft Store版はインストール約0.2GB＋初回起動時のモデル取得約2.3GB。🎯標準4Bの追加は約2.5GB、🏆高品質30Bは約14GB
+- インターネット接続はAIモデルの取得時にのみ必要（フル版はモデル同梠のためインストール自体はオフライン完結。Store版は初回起動時にモデルを取得）
 - ※ 回答まで数秒〜十数秒ほどかかります（完全社内処理のため）。社内規定・業務マニュアルのQ&Aに特化しており、一般知識の質問には「該当なし」とお答えします
 
 ## ダウンロードとインストール
 
-[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから最新の `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール・**モデル同梱で約2.2GB・完全オフラインでインストール可能**）。**Microsoft Store での配布も準備中**です（Store版は小型インストーラ（約47MB）で、初回起動時にAIモデル約2.3GBをアプリ内からダウンロードします）。
+[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから最新の `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール・**モデル同梱で約2.2GB・完全オフラインでインストール可能**）。**Microsoft Store での配布も準備中**です（Store版は小型インストーラ（約47MB）で、初回起動時にAIモデル約2.3GBをアプリ内からダウンロードします — 下の[画面ギャラリー](#画面ギャラリー)1枚目参照）。
 
 1. ⚡クイック（Qwen3-1.7B・IQ4_XS量子化）が**最初から同梱**されているため、インストール直後からすぐ使えます
 2. 🎯標準（4B）・🏆高品質（30B）は、アプリ画面のモデルボタンまたは設定タブから必要な分だけ後からDL
@@ -67,6 +67,7 @@
 
 | 画面 | 内容 |
 |------|------|
+| [![初回モデルDL](assets/screenshots/app-00-model-download.png)](assets/screenshots/app-00-model-download.png) | **初回起動時のモデルダウンロード（Microsoft Store版）**。インストール後に「ようこそ」ウィザードが表示され、⚡クイック（1.7B）／🎯標準（4B）を選ぶと必須モデル〜選択モデルのダウンロード（クイックで約2.3GB・進捗表示付き）が始まります。完了後は完全オフラインで利用可能（フル版インストーラはモデル同梠のためこの手順なし） |
 | [![メイン画面](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **メイン画面**。デスクトップのアイコンから起動すると約2秒で開きます（URL入力不要） |
 | [![出典付き回答](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **出典付きの回答**。回答の根拠（文書名・該当箇所）が一緒に表示され、左の履歴から過去のQ&Aを再表示できます |
 | [![ナレッジ管理](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **ナレッジ管理**。社内文書（PDF・Word・Markdown・テキスト）をドラッグ＆ドロップで登録・確認 |
