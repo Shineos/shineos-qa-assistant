@@ -1,0 +1,11 @@
+# R2アップロード用Worker（Cron駆動・GitHub Release → R2マルチパート）
+# 注意: R2権限のみのAPIトークンでは `wrangler deploy` は失敗する
+# （wranglerが使う /workers/services API がトークン認証を拒否するため）。
+# デプロイは docs/r2-upload-worker.md のレガシー REST PUT（/workers/scripts/{name}）を使う。
+name = "r2-uploader"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "shineos-downloads"
