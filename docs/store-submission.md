@@ -99,7 +99,7 @@
 
 | フォーム項目 | 入力値 |
 |---|---|
-| パッケージURL（Package URL・必須） | `https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-2.1.0-lite.exe`（**lite版**・モデル非同梱・46,796,695バイト・SHA256 `a41362f2…`・2026-09-16配信検証済み HTTP 200・**提出後のバイナリ変更は不可**） |
+| パッケージURL（Package URL・必須） | `https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-2.1.0-lite.exe`（**lite版**・モデル非同梱・46,760,479バイト・SHA256 `418fea23…`・**v2.1.0タグのCI公式ビルド**・2026-09-16配信検証済み HTTP 200・**提出後のバイナリ変更は不可**） |
 | アーキテクチャ（Architecture・必須） | `x64` |
 | 言語（Languages・必須） | `日本語`（`ja`）（英語圏listingを登録する場合は英語も追加可） |
 | アプリの種類（App type・必須） | `EXE` |
