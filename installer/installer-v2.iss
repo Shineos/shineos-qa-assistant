@@ -41,7 +41,9 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 OutputDir=..\dist
-OutputBaseFilename=ShineosQA-Setup-{#MyAppVersion}
+#ifdef LiteBuild
+OutputBaseFilename=ShineosQA-Setup-{#MyAppVersion}-lite
+#endif
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName}
@@ -63,12 +65,17 @@ Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignorevers
 Source: "..\vendor\licenses\*";               DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "..\assets\app.ico";                  DestDir: "{app}\assets"; Flags: ignoreversion
 Source: "launch.vbs";                         DestDir: "{app}"; Flags: ignoreversion
-; 既定モデル一式を同梱（インストール直後に使える・完全オフライン）:
-; クイック1.7B(IQ4_XS・約0.94GB) + 埋め込みbge-m3 + リランカbge-reranker-v2-m3
+; 既定モデルの同梱は構成で切替:
+;   既定（full）: モデル3点を同梱（インストール直後に使える・完全オフライン・約2.2GB）
+;   /DLiteBuild : モデル非同梱（約200MB・Store提出用。初回起動時にアプリ内ウィザードで
+;                 必須モデル〜選択チャットモデル〜リランカを約2.3GB DL — installerサイズ上限対策。
+;                 アプリ側は Models.cs / wizard.ts の初回DLフローが既存実装）
 ; 標準4B・高品質30Bはアプリ内からオンデマンドDL
+#ifndef LiteBuild
 Source: "..\spikes\phase0\models\Qwen3-1.7B-IQ4_XS.gguf";        DestDir: "{app}\models"; Flags: ignoreversion
 Source: "..\spikes\phase0\models\bge-m3-Q8_0.gguf";              DestDir: "{app}\models"; Flags: ignoreversion
 Source: "..\spikes\phase0\models\bge-reranker-v2-m3-Q8_0.gguf";  DestDir: "{app}\models"; Flags: ignoreversion
+#endif
 
 ; WebView2 デスクトップアプリ（ユーザーが使う画面。バックエンドと同じフォルダに配置）
 Source: "..\dist\ShineosQA.App\ShineosQA.exe";                  DestDir: "{app}"; Flags: ignoreversion

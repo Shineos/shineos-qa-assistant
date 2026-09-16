@@ -32,8 +32,8 @@
 
 | タイミング | 通信内容 |
 |---|---|
-| **インストール時** | インストーラはAIモデル・推論エンジンを**すべて同梱**しており、インストール中のダウンロードはありません（完全オフラインでインストール可能） |
-| **追加モデルの取得時（任意）** | 初期モデル（1.7B・埋め込み・リランカ）は同梱済みです。お客様が**画面から標準（4B）・高品質（30B）モデルの追加を明示的に行った場合のみ**、モデルファイルを `huggingface.co`（モデル配布元）からダウンロードし、SHA256検証後に保存します。質問や文書の内容は送信しません |
+| **インストール時** | インストーラ自体はダウンロードを行いません（完全オフラインでインストール可能）。Microsoft Store版のライトインストーラの場合、**初回起動時**に下記のモデル取得が発生します |
+| **モデルの取得時（初回起動・任意）** | アプリの初回起動ウィザード、または標準（4B）・高品質（30B）モデルの追加を**画面から明示的に行った場合のみ**、モデルファイルを `huggingface.co`（モデル配布元）からダウンロードし、SHA256検証後に保存します。質問や文書の内容は送信しません |
 | **通常利用時（既定）** | **外部通信なし**。AI処理・文書検索（RAG）・チャットはすべてお使いのPC内（`127.0.0.1`）で完結します。バージョンアップの確認も行わないため、外部への問い合わせは発生しません |
 | **Web検索 ON 時（任意・既定OFF）** | チャット入力欄のWeb検索ボタンを**お客様が明示的にONにした場合のみ**、入力した質問文が外部の検索サービス（DuckDuckGo・APIキー不要）へ送信され、検索結果のページを取得します。トグルはチャットごとの選択で、初回起動時ガイドでも注意を表示します。**社内情報に関する質問の際は OFF のまま**にしてください |
 
@@ -100,8 +100,8 @@ The Product is a fully local company Q&A tool that turns internal documents into
 
 | When | What happens |
 |---|---|
-| **Installation** | The installer bundles the AI models and inference engine — **no downloads during installation** (fully offline install). |
-| **Optional extra models** | The starter models are bundled. Only if you explicitly choose to add the 4B or 30B model from the app is the model file downloaded from `huggingface.co` (verified by SHA256). No questions or documents are ever sent. |
+| **Installation** | The installer itself downloads nothing (fully offline install). The Microsoft Store "lite" installer fetches the models on **first launch** as described below. |
+| **Model download (first launch / optional)** | Only when the first-launch wizard runs, or when you explicitly choose to add the 4B or 30B model from the app, is the model file downloaded from `huggingface.co` (verified by SHA256). No questions or documents are ever sent. |
 | **Normal use (default)** | **No outbound connections.** AI processing, document search (RAG), and chat all run on `localhost` (`127.0.0.1`) on your PC. No version-update checks are made. |
 | **Optional web search (OFF by default)** | Only if you explicitly enable the per-chat web-search toggle, your question text is sent to an external search service (DuckDuckGo, no API key required) and result pages are fetched. Keep it OFF when asking about internal information. |
 

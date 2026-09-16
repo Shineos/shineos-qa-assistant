@@ -46,7 +46,7 @@
 
 ## ダウンロードとインストール
 
-[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから最新の `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール・初期モデル同梱でダウンロード約2.2GB）。**Microsoft Store での配布も準備中**です（公開後は SmartScreen 警告なしでインストールできるようになります）。
+[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから最新の `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール・**モデル同梱で約2.2GB・完全オフラインでインストール可能**）。**Microsoft Store での配布も準備中**です（Store版は小型インストーラ（約47MB）で、初回起動時にAIモデル約2.3GBをアプリ内からダウンロードします）。
 
 1. ⚡クイック（Qwen3-1.7B・IQ4_XS量子化）が**最初から同梱**されているため、インストール直後からすぐ使えます
 2. 🎯標準（4B）・🏆高品質（30B）は、アプリ画面のモデルボタンまたは設定タブから必要な分だけ後からDL

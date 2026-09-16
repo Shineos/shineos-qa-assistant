@@ -2,6 +2,16 @@
 
 本プロジェクトのバージョンごとの変更内容です。日本語の紹介ページは [README.md](README.md) / English page: [README-EN.md](README-EN.md) を参照してください。
 
+## 2026-09-16（v2.1.0・Store提出用ライトインストーラ＋R2パッケージ配信）
+
+### v2.1.0 — ライトインストーラ（モデル非同梱）構成の追加
+
+- **インストーラの2構成化**: `installer-v2.iss` にモデル同梱を条件化。既定（フル版）は従来どおりモデル3点同梠の完全オフライン・約2.2GB。**`/DLiteBuild` で lite版（約47MB・モデル非同梠）**をビルド。CI（release.yml）は両方を生成し、lite版をActions成果物にも添付
+- **背景: Store提出のパッケージサイズ上限**。Microsoft StoreのURL形式EXE/MSI提出はパッケージサイズ上限（約2GB）でフル版2.23GBが「パッケージ サイズの制限を超えました」エラーで拒否されるため、lite版をStore提出用とする。MSI化も検証済みで不可（WiXでビルドした2.24GBのMSIに「Windows Installerは2GB超パッケージ非対応」警告 WIX1158）
+- **lite版の初回起動フローは既存実装をそのまま使用**（アプリ本体の変更なし）: チャットモデル未導入時 `needs_wizard=true` → 初回ウィザードで必須埋め込み→選択チャットモデル→リランカの順に約2.3GBをDL（SHA256検証・ミラー代替・再開対応）。実機検証: liteアップグレード→models退避でウィザード発火→埋め込みモデル634,553,760バイトをDL→SHA256カタログ値と一致→モデル復帰で `needs_wizard=false`
+- **パッケージ配信（Cloudflare R2）**: バケット `shineos-downloads`（r2.dev公開URL）に lite版 `ShineosQA-Setup-2.1.0-lite.exe`（SHA256 `a41362f2…`・46,796,695バイト）とフル版 v2.0.5 を配置。大容量フル版は「Cron駆動Worker + R2バインディング」で配置（手順: [docs/r2-upload-worker.md](docs/r2-upload-worker.md)）
+- **ドキュメント整備**: [docs/store-submission.md](docs/store-submission.md) をStore公開マスタードキュメントとして全面改訂（lite版フォーム値・日英listing文・審査メモに初回DLを明記・サイレントパラメーター・リターンコード⇔標準シナリオ対応・終了コード説明ページ https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/error-codes.html）。README両言語と PRIVACY.md の通信タイミングを lite版挙動に更新
+
 ## 2026-09-15（v2.0.1・インストール直後のナレッジ登録案内）
 
 ### v2.0.1 — ナレッジ登録案内ダイアログ

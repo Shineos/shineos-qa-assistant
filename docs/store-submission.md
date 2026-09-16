@@ -40,7 +40,7 @@
 - [ ] プライバシーポリシーを公開URLで閲覧できる（§2・§10）
 - [ ] 提出形式を決定（§3。推奨: MSIX）
 - [ ] MSIX: Identity（Name/Publisher）をPartner Centerの予約名・Publisher IDに差し替えて再ビルド（§6）
-- [x] EXE: 単一exeをR2へ配置済み・配信検証済み（§5のURL・2026-09-16）
+- [x] EXE: **lite版**（モデル非同梱・47MB）をR2へ配置済み・配信検証済み（§5のURL・2026-09-16）。フル版（2.23GB）はURL形式のサイズ上限に抵触するため直接配布専用
 - [ ] 掲載文（日・英）・画像・キーワードを入力（§7・§8）
 - [ ] 年齢区分アンケート回答済み（§9）
 - [ ] データ収集宣言「収集しない」（§10）
@@ -93,27 +93,56 @@
 
 ## 5. パッケージ情報 — EXE提出
 
-| 項目 | 値 |
+### 5.1 Partner Centerフォーム入力値（Packages ページ）
+
+フォームの項目名と入力値の対応。公式の項目定義: [MSI/EXEアプリのパッケージ アップロード](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/upload-app-packages)
+
+| フォーム項目 | 入力値 |
 |---|---|
-| インストーラ形式 | EXE（Inno Setup） |
-| ファイル名 | `ShineosQA-Setup-2.0.5.exe`（約2.2GB・モデル同梱） |
-| パッケージURL | `https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-2.0.5.exe`（**配信中・検証済み**: HTTP 200 / Content-Length 2,234,458,796 / GitHub公式分割アセットとバイト一致 / リリース公表SHA256 `03e8354a…` と同一バイナリ・**提出後のバイナリ変更は不可**） |
-| サイレントインストールコマンド（宣言用） | `ShineosQA-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART` |
-| サイレントアンインストールコマンド | `unins000.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART` |
+| パッケージURL（Package URL・必須） | `https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-2.1.0-lite.exe`（**lite版**・モデル非同梱・46,796,695バイト・SHA256 `a41362f2…`・2026-09-16配信検証済み HTTP 200・**提出後のバイナリ変更は不可**） |
+| アーキテクチャ（Architecture・必須） | `x64` |
+| 言語（Languages・必須） | `日本語`（`ja`）（英語圏listingを登録する場合は英語も追加可） |
+| アプリの種類（App type・必須） | `EXE` |
+| **サイレント インストーラーの パラメーター**（Installer parameters・EXEは必須） | **`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`** ※exe名を含まないスイッチのみを入力する |
+| インストーラー処理（Installer handling・任意だが強く推奨） | §5.3のリターンコード→標準シナリオ対応表どおりに入力 |
 
-### EXEリターンコード値（申請フォーム「EXE リターン コード値」に転記）
+**lite版の設計**（2026-09-16決定）: モデル同梱フル版（2.23GB）はURL形式EXE/MSIのパッケージサイズ上限（約2GB・MSIは加えてWindows Installer自体の2GB上限）に抵触するため、Store提出用はモデル非同梱のlite版（47MB）とする。**インストーラ自体はダウンロードを行わない**（スタンドアロン要件を満たす）。AIモデル（埋め込み640MB＋リランカ636MB＋クイック1.7B・計約2.3GB）は**初回起動時にアプリ内ウィザードからダウンロード**する（実装・検証済み: 2026-09-16実機で`needs_wizard=true`→埋め込みモデルDL→SHA256一致を確認）。フル版はGitHub Releases/R2からの直接配布用に維持（完全オフライン導入の用途）。
 
-一次情報: [error-codes-v2.md §2](error-codes-v2.md)。実測済みのものに ✓:
+### 5.2 サイレント パラメーターの内訳（Inno Setup・[error-codes-v2.md §5](error-codes-v2.md) が一次情報）
 
-| コード | 意味 | 実測 |
-|---|---|---|
-| 0 | 正常終了（インストール完了・アンインストール完了） | ✓ |
-| 1, 2, 3, 4, 5 | Inno Setup標準（初期化失敗／開始前キャンセル／準備中エラー／処理中エラー／処理中キャンセル） | 4=Program Files書込拒否で実測 |
-| 11 | 同一バージョン完了済みでのサイレント再実行（何もせず即終了） | ✓ |
-| 12 | ディスク空き容量不足（4GB未満） | コード実装済み |
-| 13, 14 | 予約（v1互換。v2では返さない） | — |
+| スイッチ | 効果 |
+|---|---|
+| `/VERYSILENT` | ウィザード・進捗ダイアログを含むUIをすべて非表示にして無人インストール |
+| `/SUPPRESSMSGBOXES` | メッセージボックス（確認・エラー警告）を抑制 |
+| `/NORESTART` | 再起動を要求しない（本製品は全経路で再起動不要） |
 
-注意: 空欄なく申請フォームに入力できるよう全コードを記載する。
+参考 — 実行時のフルコマンド（手動テスト・Intune等での展開時に使用。フォームには**入力しない**）:
+
+```
+インストール:   ShineosQA-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART [/LOG="<path>"]
+アンインストール: unins000.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+### 5.3 EXEリターンコード値（フォーム「インストーラー処理（Installer handling）」に転記）
+
+一次情報: [error-codes-v2.md §2](error-codes-v2.md)。実測済みのものに ✓。
+フォームは標準シナリオごとにコードを登録するため、対応するシナリオ列を付記:
+
+| コード | 意味 | Store標準シナリオ（フォームの選択肢） | 実測 |
+|---|---|---|---|
+| **0** | 正常終了（インストール完了・アンインストール完了） | インストールに成功しました（Installation successful） | ✓ |
+| 1 | Inno標準: 初期化失敗 | その他のインストール エラー（ドキュメントURL=error-codes-v2.md） | — |
+| 2 | Inno標準: 開始前にユーザーキャンセル | ユーザーによるインストールのキャンセル（Installation cancelled by user） | — |
+| 3 | Inno標準: 準備中エラー | その他のインストール エラー | — |
+| 4 | Inno標準: 処理中エラー | その他のインストール エラー | ✓（Program Files書込拒否で実測） |
+| 5 | Inno標準: 処理中にユーザーキャンセル | ユーザーによるインストールのキャンセル | — |
+| **11** | 同一バージョン完了済みでのサイレント再実行（何もせず即終了） | アプリケーションが既に存在します（Application already exists） | ✓ |
+| **12** | ディスク空き容量不足（4GB未満） | ディスク領域がいっぱいです（Disk space is full） | コード実装済み |
+| 13, 14 | 予約（v1互換。v2では返さない） | 登録しない | — |
+
+注意:
+- フォーム冒頭の「その他すべての EXE リターン コード値のドキュメント URL」には **`https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/error-codes.html`** を入力する（インストーラー終了コードの公開説明ページ・2026-09-16にR2へ配置・HTTP 200確認済み。生成元: `output/r2-docs/error-codes.html`）。代替URL: [error-codes-v2.md（GitHub・全終了コードを含む一次情報）](https://github.com/Shineos/shineos-qa-assistant/blob/main/docs/error-codes-v2.md)
+- 「再起動が必要」「ネットワーク エラー」「インストールは既に処理中です」「インストール中にパッケージが拒否されました」の4シナリオは**空欄のまま登録しない**（完全オフラインインストーラのため通信失敗がなく、再起動要求は設計上返さず、処理中多重実行・ポリシー拒否に対応する終了コードも定義していないため）
 
 ---
 
@@ -143,7 +172,7 @@
 
 **簡単な説明（最大200字）**:
 
-> 社内規定・業務マニュアルをAIで検索できる社内Q&Aツール。回答には必ず出典（文書名・該当箇所）が付き、根拠のない回答はしません。社内文書はPCの外に出ない完全オフライン設計。AIモデルを内蔵しインストール直後から使えます。
+> 社内規定・業務マニュアルをAIで検索できる社内Q&Aツール。回答には必ず出典（文書名・該当箇所）が付き、根拠のない回答はしません。社内文書はPCの外に出ません。初回起動時にAIモデルを取得すれば、後は完全オフラインで使えます。
 
 **詳しい説明（最大1500字）**:
 
@@ -152,14 +181,14 @@
 > ■ 特徴
 > ・回答には必ず「出典（文書名・該当箇所）」が表示され、ナレッジにない質問には「該当する記載がありません」と答えます（根拠のない回答をしません）
 > ・すべての処理が自分のPC内で完結。社内文書・質問・回答が外部に送信されません（テレメトリもありません）
-> ・AIモデル（Qwen3 1.7B・高速量子化版）をインストーラに同梱。インストール直後からすぐ使えます
+> ・インストール後の初回起動時にAIモデル（クイック1.7B・合計約2.3GB）を取得します。以降は完全オフラインで動作します（モデルの取得時にだけ通信します）
 > ・速度と精度のバランスでモデルを切り替え可能（クイック1.7B／標準4B／高品質30B・追加モデルはアプリ内からダウンロード）
 > ・PDF・Word・Markdown・テキストをドラッグ＆ドロップでナレッジ化。追加した文書は即座に検索対象になります
 > ・ハイブリッド検索（キーワード＋意味検索）で型番・規程番号・固有名詞も正確にヒット
 > ・閉じるとAIエンジンも完全停止。他アプリの作業を優先する低負荷モード搭載
 >
 > ■ 動作環境
-> Windows 10/11（64bit）・メモリ8GB以上・空き容量約3GB（GPU不要）
+> Windows 10/11（64bit）・メモリ8GB以上・空き容量4GB以上（GPU不要）。初回起動時のモデル取得にのみインターネット接続が必要です
 >
 > ■ 提供形態
 > 本体は無償（MIT License）。導入支援・保守サポートは shineos.com まで。
@@ -168,7 +197,7 @@
 
 **Short description**:
 
-> Offline internal Q&A for company rules and manuals. Every answer cites its source (document & section); if the answer is not in your documents, it says so. Nothing ever leaves your PC.
+> Offline internal Q&A for company rules and manuals. Every answer cites its source (document & section); if the answer is not in your documents, it says so. Nothing ever leaves your PC — after the first-launch model download.
 
 **Long description**:
 
@@ -176,13 +205,13 @@
 >
 > - Every answer shows its source (document name and section). Questions not covered by your documents are answered with "not found" — it never guesses
 > - All processing stays on your PC. Documents, questions and answers are never sent anywhere (no telemetry)
-> - A fast AI model (Qwen3 1.7B) is bundled with the installer — ready to use immediately after installation
+> - On first launch, the app downloads the AI models (~2.3 GB); after that it runs fully offline
 > - Switch between Quick (1.7B) / Standard (4B) / Quality (30B) models right in the app; extra models download on demand
 > - Register PDF / Word / Markdown / text files by drag & drop; newly added documents are searchable immediately
 > - Hybrid search (keyword + semantic) so model numbers and regulation IDs are found accurately
 > - Closing the app stops the AI engine completely; a low-load mode prioritizes your other apps
 >
-> Requirements: Windows 10/11 (64-bit), 8 GB+ RAM, ~3 GB free disk space. No GPU needed.
+> Requirements: Windows 10/11 (64-bit), 8 GB+ RAM, ~4 GB free disk space, internet on first launch only. No GPU needed.
 >
 > Free (MIT License). Installation support: shineos.com
 
@@ -227,7 +256,7 @@
 |---|---|
 | プライバシーポリシーURL | `shineos.com` 上に [PRIVACY.md](../PRIVACY.md) の内容を公開したURLを入力 ⚠️ 公開待ち |
 | データ収集宣言（Partner Center） | **「データの収集なし」**と宣言（テレメトリ・アナリティクス・クラッシュレポートなしのため） |
-| データ収集の開示 | Web検索トグル（既定OFF・任意）のみ外部送信あり → 掲載文・審査メモに明記済み |
+| データ収集の開示 | 初回起動時のモデル取得（huggingface.co・質問や文書は送信しない）とWeb検索トグル（既定OFF・任意）のみ外部送信あり → 掲載文・審査メモに明記済み |
 | ローカルデータ | ナレッジ・履歴は `data\knowledge.db`（SQLite）にPC内保存。アンインストール時に削除確認あり |
 
 ---
@@ -252,7 +281,7 @@ MicrosoftのEXE認証テスト項目（[MSI/EXE認証プロセス](https://learn
 
 | 要件 | 状態 |
 |---|---|
-| 完全オフラインのスタンドアロンインストーラ（DL不要・ダウンローダーではない） | ✓ モデル同梱2.23GB |
+| 完全オフラインのスタンドアロンインストーラ（インストーラ自体はDLしない） | ✓ lite版47MB（モデルは初回起動時にアプリ内DL。スタンドアロン要件＝「起動時にバイナリをDLするダウンローダーでない」を満たす） |
 | 宣言コマンドでの無人インストール | ✓ exit=0実測 |
 | 再起動要求なし | ✓ |
 | 一意なリターンコード | ✓ §5 |
@@ -280,6 +309,7 @@ MicrosoftのEXE認証テスト項目（[MSI/EXE認証プロセス](https://learn
 > 4. On first launch after installation, a one-time guide dialog about knowledge registration appears (can be skipped).
 > 5. The web-search toggle is OFF by default. When explicitly turned ON, only the typed query is sent to DuckDuckGo.
 > 6. Closing the app stops all backend/engine processes and releases localhost port 8300 — nothing stays resident.
+> 7. **First-launch model download**: the installer downloads nothing. On the first app launch, a welcome wizard downloads the required AI models (~2.3 GB total: embedding, chat 1.7B, reranker) from huggingface.co with SHA-256 verification. **An internet connection is required on first launch**; after that the app is fully offline. Download progress is shown; if it fails, relaunching retries.
 >
 > Silent install (EXE form): `ShineosQA-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`
 
@@ -313,6 +343,7 @@ MicrosoftのEXE認証テスト項目（[MSI/EXE認証プロセス](https://learn
 | 資料 | URL |
 |---|---|
 | MSI/EXE認証プロセス（審査の内容・よくある不合格理由） | https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/app-certification-process |
+| MSI/EXEパッケージ アップロード（フォーム項目の定義・サイレント パラメーター・リターンコードシナリオ） | https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/upload-app-packages |
 | MSIXパッケージ要件（サイズ上限25GB等） | https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements |
 | Microsoft Store Policies（生成AIコンテンツ規定を含む） | https://learn.microsoft.com/en-us/windows/apps/publish/store-policies |
 | アプリの申請作成（Partner Center手順） | https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/create-app-submission |

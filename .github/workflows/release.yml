@@ -149,6 +149,18 @@ jobs:
           "hash=$hash" >> $env:GITHUB_OUTPUT
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## ShineosQA-Setup-$ver.exe`n`n- SHA256: \`$hash\``n- Size: $([math]::Round((Get-Item $exe).Length/1GB,2)) GB"
 
+      # ---- 6b) lite版（Store提出用・モデル非同梠・初回起動時にアプリ内DL） ----
+      - name: Build lite installer (Store submission)
+        shell: pwsh
+        run: |
+          $ver = '${{ steps.ver.outputs.version }}'
+          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=$ver" '/DLiteBuild' 'installer/installer-v2.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC (lite) failed" }
+          $exe = "dist/ShineosQA-Setup-$ver-lite.exe"
+          if (-not (Test-Path $exe)) { throw "lite installer not found: $exe" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## ShineosQA-Setup-$ver-lite.exe`n`n- SHA256: \`$hash\``n- Size: $([math]::Round((Get-Item $exe).Length/1MB,1)) MB"
+
       # ---- 7) MSIXビルド（Store提出用・Microsoft再署名のため署名なしでOK） ----
       - name: Build MSIX package
         shell: pwsh
@@ -222,12 +234,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'makeappx failed' }
           Write-Output "MSIX built: $msixPath ($([math]::Round((Get-Item $msixPath).Length/1GB,2)) GB)"
 
-      # ---- 8) Actions成果物（EXE + MSIX） ----
+      # ---- 8) Actions成果物（EXE + lite EXE + MSIX） ----
       - name: Upload installer artifact (EXE)
         uses: actions/upload-artifact@v4
         with:
           name: ShineosQA-Setup-${{ steps.ver.outputs.version }}
           path: dist/ShineosQA-Setup-${{ steps.ver.outputs.version }}.exe
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload installer artifact (lite EXE for Store)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShineosQA-Setup-${{ steps.ver.outputs.version }}-lite
+          path: dist/ShineosQA-Setup-${{ steps.ver.outputs.version }}-lite.exe
           if-no-files-found: error
           compression-level: 0
 
