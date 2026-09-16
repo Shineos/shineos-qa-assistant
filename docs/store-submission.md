@@ -215,14 +215,13 @@
 >
 > Free (MIT License). Installation support: shineos.com
 
-### 7.3 検索キーワード（優先順位順・フォームの文字数上限に収まるよう上位から入力）
+### 7.3 検索キーワード（フォーム: 最大7個・合計21単語まで）
 
 ```
-社内QA, 社内文書検索, AI チャット, オフライン AI, ChatGPT オフライン, RAG,
-ナレッジベース, 社内規定, マニュアル検索, ローカル AI, 文書 検索, 社内AI
+社内QA, 社内文書検索, オフラインAI, ローカルAI, ナレッジベース, 社内規定, マニュアル検索
 ```
 
-※「ChatGPT オフライン」「AI チャット」は実際の検索語として流入が見込める語。掲載文・機能と乖離しない範囲で含める。
+※第三者商標（ChatGPT等）はキーワード入力すると認証で却下されうるため使わない（Storeポリシー 10.1 関連）。
 
 ---
 
@@ -230,7 +229,10 @@
 
 | アセット | ファイル | 状態 |
 |---|---|---|
-| Storeロゴ 300x300 PNG | `assets/store-logo-300.png` | ✓ 生成済み |
+| Storeロゴ 1:1 Box art（必須・1080x1080） | `assets/store-logo-1080.png`（78KB・app.icoデザインの青→緑版・角透過） | ✓ 2026-09-16更新 |
+| Storeロゴ 2:3 Poster（推奨・720x1080） | `assets/store-poster-720x1080.png`（411KB） | ✓ 2026-09-16生成 |
+| ヒーロー/宣伝画像（SNS・OGP・スクショ1枚目候補・1920x1080） | `assets/promo-hero.png`（935KB） | ✓ 2026-09-16生成 |
+| Storeロゴ 300x300 PNG（従来・MSIXパッケージ内ロゴのソース） | `assets/store-logo-300.png` | ✓ 生成済み |
 | スクリーンショット1 初回モデルDL（Store版の特徴・listing文の「初回起動時にモデル取得」と整合） | `assets/screenshots/app-00-model-download.png`（1481x987・要件1366x768以上を満たす） | ✓ 2026-09-16追加 |
 | スクリーンショット2 メイン画面 | `assets/screenshots/app-01-main.png`（1500x1000・要件1366x768以上を満たす） | ✓ |
 | スクリーンショット3 出典付き回答 | `assets/screenshots/app-02-chat.png` | ✓ |
@@ -300,19 +302,18 @@ MicrosoftのEXE認証テスト項目（[MSI/EXE認証プロセス](https://learn
 
 ## 13. 審査メモ（Notes for Certification）案
 
-申請フォームの「認証メモ」欄にそのまま貼る想定（英語で記載）:
+申請フォームの「認定のための注意書き」欄にそのまま貼る（英語で記載・lite版提出の流れに対応）:
 
-> This app is a fully offline internal-document Q&A tool. No account, no sign-in, and no network connection are required to evaluate it.
+> ShineosQA ("社内知恵袋") is an internal-document Q&A tool for Japanese companies. The UI is in Japanese. No account or sign-in is required.
 >
-> 1. Launch "社内知恵袋" (ShineosQA) from the Start menu / desktop icon. It opens in about 2 seconds.
-> 2. **Important**: The app answers only from documents registered in the "ナレッジ (Knowledge)" tab. With an empty knowledge base, any general question (e.g. "How tall is Mt. Fuji?") is answered with "該当する記載がありません" (not found in the knowledge base). This is intended anti-hallucination behavior, not a malfunction.
-> 3. To evaluate Q&A: drag & drop any PDF / Word / Markdown / text file onto the Knowledge tab, wait a few seconds for indexing, then ask a question about the file's content in Japanese. Answers include citations (document name and section).
-> 4. On first launch after installation, a one-time guide dialog about knowledge registration appears (can be skipped).
-> 5. The web-search toggle is OFF by default. When explicitly turned ON, only the typed query is sent to DuckDuckGo.
+> 1. **First launch requires internet**: the installer itself downloads nothing, but on the first app launch a welcome wizard downloads the required AI models (~2.3 GB total) from huggingface.co, with SHA-256 verification and a progress bar. In the wizard, we recommend choosing "クイック（既定・推奨）" (Quick 1.7B). After the download completes, the app reloads and then works fully offline. If a download fails, relaunching retries it.
+> 2. After the models are ready, a one-time guide dialog about registering knowledge documents appears (can be dismissed).
+> 3. **Important — intended behavior**: the app answers only from documents registered in the "ナレッジ (Knowledge)" tab. With an empty knowledge base, any general question (e.g., "How tall is Mt. Fuji?") is answered with "該当する記載がありません" ("not found in the knowledge base"). This is the intended anti-hallucination design, not a malfunction.
+> 4. To evaluate Q&A: open the "ナレッジ" tab and drag & drop any PDF / Word / Markdown / text file, wait a few seconds for indexing, then ask a question about the file's content in Japanese. The answer includes citations (document name and section).
+> 5. The web-search toggle is OFF by default. Only when explicitly turned ON is the typed query sent to DuckDuckGo.
 > 6. Closing the app stops all backend/engine processes and releases localhost port 8300 — nothing stays resident.
-> 7. **First-launch model download**: the installer downloads nothing. On the first app launch, a welcome wizard downloads the required AI models (~2.3 GB total: embedding, chat 1.7B, reranker) from huggingface.co with SHA-256 verification. **An internet connection is required on first launch**; after that the app is fully offline. Download progress is shown; if it fails, relaunching retries.
 >
-> Silent install (EXE form): `ShineosQA-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`
+> Silent install: `ShineosQA-Setup-2.1.0-lite.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`
 
 ---
 
