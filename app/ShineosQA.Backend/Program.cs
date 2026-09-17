@@ -256,7 +256,7 @@ public sealed class Program
             {
                 ApplyMsixPaths();
             }
-            EnsureDefaultConfig();
+            EnsureDefaultConfig(args);
             cfg = AppConfig.Load(args);
             // エンコーディング防御: UTF-8以外で保存されたconfig.jsonは置換文字(U+FFFD)を含む。
             // 化けたパスで予期しない場所にディレクトリを作る前に検出して失敗させる（終了コード20）
@@ -365,9 +365,14 @@ public sealed class Program
 
     /// <summary>config.json が無い場合（インストール直後）にUTF-8で既定configを生成する。
     /// パスは実行ディレクトリ基準の絶対パス（フォワードスラッシュ）。
-    /// MSIX実行時は config.json を LocalState に置き、data/models も LocalState 側、engine はパッケージ内を指す</summary>
-    static void EnsureDefaultConfig()
+    /// MSIX実行時は config.json を LocalState に置き、data/models も LocalState 側、engine はパッケージ内を指す。
+    /// --config で外部configを指定された場合は生成しない（検証・開発用にpublishフォルダから起動した際に
+    /// 既定config.jsonが書き出され、それが意図せずインストーラに同梱される事故を防ぐ）</summary>
+    static void EnsureDefaultConfig(string[]? args = null)
     {
+        if (args is not null)
+            for (int i = 0; i < args.Length - 1; i++)
+                if (args[i] == "--config" && !string.IsNullOrWhiteSpace(args[i + 1])) return;
         var isMsix = MsixLocalState is not null;
         var configDir = isMsix ? MsixLocalState! : AppContext.BaseDirectory;
         var path = Path.Combine(configDir, "config.json");

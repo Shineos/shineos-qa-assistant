@@ -15,6 +15,28 @@ const SVG_ZAP = svgWrap('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2
 // 十字線付きの照準（crosshair）型にして区別させる
 const SVG_TARGET = svgWrap('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>');
 const SVG_TROPHY = svgWrap('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>');
+// メッセージカード時刻横のコピーアイコン（コピー完了時はチェックに差し替え）
+const SVG_COPY = svgWrap('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>');
+const SVG_CHECK = svgWrap('<polyline points="20 6 9 17 4 12"/>');
+
+/** クリップボードへコピー（WebView2のループバックはSecure ContextなのでClipboard APIが使える。
+ *  不可な環境向けにexecCommandフォールバックも用意） */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
 
 /** モデル階級 → 表示情報（送信フォームのセレクター用） */
 const MODEL_CHOICES = [
@@ -239,15 +261,42 @@ export class ChatView {
       card.appendChild(src);
     }
     wrap.appendChild(card);
-    // 時刻はカードの外（下）に表示。ホバーで年月日時刻
-    const tm = document.createElement('div');
-    tm.className = 'msg-time';
-    tm.textContent = time ? fmtTime(time) : '';
-    if (time) tm.title = fmtFull(time);
-    wrap.appendChild(tm);
+    this.appendTimeRow(wrap, time, content);
     m.appendChild(wrap);
     m.scrollTop = m.scrollHeight;
     return card;
+  }
+
+  /** 時刻行（カードの外・下）。時刻の横にコピーアイコン: rawTextはユーザーは入力テキスト、
+   *  AI回答はMarkdownソース（DB保存内容と同一）をそのままクリップボードへ */
+  private appendTimeRow(wrap: HTMLElement, time: Date | undefined, rawText: string): void {
+    const row = document.createElement('div');
+    row.className = 'msg-time';
+    if (time) {
+      const tm = document.createElement('span');
+      tm.textContent = fmtTime(time);
+      tm.title = fmtFull(time);
+      row.appendChild(tm);
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy-btn';
+    btn.title = 'コピー';
+    btn.setAttribute('aria-label', 'メッセージをコピー');
+    btn.innerHTML = SVG_COPY;
+    btn.addEventListener('click', async () => {
+      if (!(await copyText(rawText))) return;
+      btn.innerHTML = SVG_CHECK;
+      btn.classList.add('copied');
+      btn.title = 'コピーしました';
+      window.setTimeout(() => {
+        btn.innerHTML = SVG_COPY;
+        btn.classList.remove('copied');
+        btn.title = 'コピー';
+      }, 1500);
+    });
+    row.appendChild(btn);
+    wrap.appendChild(row);
   }
 
   /** 思考中インジケータ（カードなし・回答開始でカード表示に切替）。
@@ -516,13 +565,8 @@ export class ChatView {
                 for (const s of d.sources) src.appendChild(sourceElement(s));
                 liveCard.appendChild(src);
               }
-              // 時刻はカードの外（下）に追加。ホバーで年月日時刻
-              const now = new Date();
-              const tm = document.createElement('div');
-              tm.className = 'msg-time';
-              tm.textContent = fmtTime(now);
-              tm.title = fmtFull(now);
-              liveCard.parentElement!.appendChild(tm);
+              // 時刻はカードの外（下）に追加。コピーアイコンは acc（patch適用後の最終Markdown）をコピー対象にする
+              this.appendTimeRow(liveCard.parentElement!, new Date(), acc);
             } else {
               thinking.remove();
               this.appendMessage('assistant', acc || '', d.sources ?? [], new Date());

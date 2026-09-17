@@ -55,9 +55,14 @@ button.newchat:hover { background: var(--hover); }
 .msg-body p:last-child { margin-bottom: 0; }
 .msg-body ul { margin: 4px 0; padding-left: 20px; }
 .cite { color: var(--accent); font-weight: 600; }
-.msg-time { font-size: 11px; color: var(--muted); margin-top: 3px; padding: 0 2px; cursor: default; }
+.msg-time { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); margin-top: 3px; padding: 0 2px; cursor: default; }
 .msg-time:hover { color: var(--text); }
-.msg.user .msg-time { text-align: right; }
+.msg.user .msg-time { justify-content: flex-end; }
+/* 時刻横のコピーアイコン（ユーザーはテキスト、AI回答はMarkdownソースをコピー） */
+.copy-btn { border: 0; background: none; padding: 1px; margin: 0; cursor: pointer; color: var(--muted); display: inline-flex; line-height: 0; }
+.copy-btn svg { width: 12px; height: 12px; }
+.copy-btn:hover { color: var(--text); }
+.copy-btn.copied { color: var(--accent); }
 
 /* 思考中インジケータ */
 .thinking-block .thinking { display: inline-flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 14px; padding: 6px 4px; }

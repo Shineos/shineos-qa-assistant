@@ -192,7 +192,7 @@ public sealed class Supervisor
             try
             {
                 await _gw.ChatStreamAsync(_cfg.EnginePortLlm,
-                    new List<(string, string)> { ("system", Rag.SystemPrompt), ("user", "こんにちは") },
+                    new List<(string, string)> { ("system", Rag.SystemPrompt + Rag.CurrentDateLine()), ("user", "こんにちは") },
                     0.0, 1, _ => Task.CompletedTask, CancellationToken.None);
                 _log.Info($"llm warmup done: model={model}");
             }

@@ -38,7 +38,7 @@ Copy-Item (Join-Path $Repo 'assets\app.ico') (Join-Path $stage 'assets\app.ico')
 Add-Type -AssemblyName System.Drawing
 $assetsDir = Join-Path $stage 'assets'
 New-Item -ItemType Directory -Path $assetsDir -Force | Out-Null
-# 300pxストアロゴPNGから各サイズへ縮小生成（app.icoは32pxまでしか含まないため）
+# 300pxストアロゴPNGから各サイズへ縮小生成（ストア申請用ソース画像を統一するため。app.icoも256pxフレームを含むが申請系はPNGソースで一貫させる）
 $src = [System.Drawing.Bitmap]::FromFile((Join-Path $Repo 'assets\store-logo-300.png'))
 if ($src.Width -lt 100) { throw ('logo too small: ' + $src.Width) }
 foreach ($size in @(150, 44, 50)) {

@@ -205,6 +205,9 @@ public sealed class ChatFlow
             var qEmb = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { queryForRetrieval }, ctx.RequestAborted))[0];
 
             // 2) 回答キャッシュ（cos>=0.97 → 即時）。LLM未ロードでも返せるのでEnsureLlmより前に置く
+            // 日付感応質問（「今日は何日」等）は正解が日付で変わるためキャッシュから読まない
+            bool timeSensitive = Rag.TimeSensitiveQuestion().IsMatch(message);
+            if (!timeSensitive)
             lock (_cacheLock)
             {
                 // モデル別キャッシュ: 別階級で生成した回答を返さない（モデル識別列で判定）
@@ -259,7 +262,9 @@ public sealed class ChatFlow
             var qTokens = Rag.Tokenize(queryForRetrieval).ToHashSet();
             var hits = _index.Search(qEmb, qTokens, Rag.RerankPool);
             string webNote = webFailed ? "\n※Web検索に失敗したため、社内ナレッジのみで判定しています。" : "";
-            if (hits.Count == 0 && string.IsNullOrEmpty(webContext))
+            // 日付感応質問（「今日は何日」「今何時」等）は参照情報がなくてもシステム日時から
+            // 直接回答する（PCのシステム時計が根拠。ガードで「該当なし」にしない）
+            if (hits.Count == 0 && string.IsNullOrEmpty(webContext) && !timeSensitive)
             {
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
@@ -294,7 +299,7 @@ public sealed class ChatFlow
                     _log.Info($"rerank: top1={top1} cos={top.Cos:F2} kw={top.Kw:F2} file={top.Rec.FileName}");
                     if (ranked.Count == 0 || ranked[0].Score < Rag.GuardThreshold)
                     {
-                        if (string.IsNullOrEmpty(webContext))
+                        if (string.IsNullOrEmpty(webContext) && !timeSensitive)
                         {
                             var refusal = "該当する記載がありません。" + webNote;
                             _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
@@ -302,7 +307,7 @@ public sealed class ChatFlow
                             await Sse(ctx, "done", new { cached = false, guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                             return;
                         }
-                        chosen = new(); // Webのみで回答
+                        chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
                     }
                     else
                     {
@@ -320,7 +325,7 @@ public sealed class ChatFlow
             foreach (var wr in webResults ?? new List<WebSearch.WebResult>())
                 sources.Add(new SourceInfo { File = wr.Title, Snippet = wr.Snippet, Text = wr.Snippet, Kind = "web", Url = wr.Url });
 
-            // 6) プロンプト構築: system(静的) + 履歴 を前方に置き、質問ごとに変わる参照文脈は
+            // 6) プロンプト構築: system(静的+当日付行。日付は1日単位で固定なのでキャッシュ効率を保つ) + 履歴 を前方に置き、質問ごとに変わる参照文脈は
             //    最終userメッセージに統合。llama-serverのプレフィックスキャッシュが system+履歴
             //    全体に効き、2往復目以降のpp（履歴分〜700トークン）を丸ごと削減する。
             //    文脈は隣接チャンク(seq+1)と連結してからスニペット化: 手順・条項が
@@ -341,9 +346,12 @@ public sealed class ChatFlow
                 ctxDocs.Add((h.Rec.FileName, Rag.Snippet(MergedChunkText(h.Rec), qTokens)));
             }
             var context = Rag.BuildContext(ctxDocs, webContext);
-            var messages = new List<(string, string)> { ("system", Rag.SystemPrompt) };
+            var messages = new List<(string, string)> { ("system", Rag.SystemPrompt + Rag.CurrentDateLine()) };
             messages.AddRange(history);
-            messages.Add(("user", message + "\n\n【参照情報】\n" + context.TrimEnd()));
+            // 日付感応質問にはシステム日時（時刻込み）を明示。参照情報が無い場合は【参照情報】欄を省略
+            string sysInfo = timeSensitive ? "\n\n" + Rag.SystemInfoLine() : "";
+            string ctxPart = context.TrimEnd().Length > 0 ? "\n\n【参照情報】\n" + context.TrimEnd() : "";
+            messages.Add(("user", message + sysInfo + ctxPart));
             // 7) ストリーム生成
             var answer = new StringBuilder();
             var ttfb = -1L;
@@ -363,7 +371,7 @@ public sealed class ChatFlow
             _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json) VALUES($c,'assistant',$m,$s)",
                 ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
             _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
-            if (sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
+            if (!timeSensitive && sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
             {
                 _db.Exec("INSERT INTO answer_cache(question, answer, sources_json, emb, model) VALUES($q,$a,$s,$e,$m)",
                     ("$q", message), ("$a", answer.ToString()), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));

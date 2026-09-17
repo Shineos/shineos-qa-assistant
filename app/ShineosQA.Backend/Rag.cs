@@ -13,7 +13,33 @@ public static partial class Rag
     public const int RerankPool = 8;                // top8未満だと関連chunkが候補外に漏れる（実測）
     public const double RerankSkipCos = 0.62;       // 高信頼ショートカット: ベクトル一致が強ければリランク(~2秒)を省略
     public const double RerankSkipKw = 0.10;        // かつキーワード一致もある場合のみ（実測: hit問cos0.68-0.75 / nohit0.46）
-    public const string PromptVersion = "2026-09-14-quality-tier"; // プロンプト/キャッシュ仕様変更時は回答キャッシュを無効化
+    public const string PromptVersion = "2026-09-17-system-datetime"; // プロンプト/キャッシュ仕様変更時は回答キャッシュを無効化
+
+    /// <summary>相対日時語を含む質問の判定（「今日は何日」等）。これらは回答が日付で変わるため
+    /// 回答キャッシュの対象外とする（ChatFlowで読み書き両方をスキップ）</summary>
+    [GeneratedRegex(@"今日|本日|昨日|明日|明後日|一昨日|今週|来週|先週|今月|来月|先月|今年|昨年|去年|来年|現在|日付|曜日|何日|何時|時刻")]
+    public static partial Regex TimeSensitiveQuestion();
+
+    /// <summary>システムプロンプト末尾に付与する現在日付行。「今日は何日」等の質問に
+    /// モデルが正確に答えられるようにする（学習時点で知識が止まっているため）。
+    /// 時刻は含めない: ChatFlowの前置きキャッシュ（プリフィックスキャッシュ）効率のため
+    /// system部は1日単位で固定する</summary>
+    public static string CurrentDateLine()
+    {
+        var now = DateTime.Now;
+        var dow = "日月火水木金土"[(int)now.DayOfWeek];
+        return $"\n現在の日付: {now:yyyy年M月d日}（{dow}曜日）。日付・曜日・時期（「今日」「今月」等）の質問はこの日付を基準に回答すること。";
+    }
+
+    /// <summary>日付感応質問のuserメッセージに付与するシステム日時（時刻込み）。
+    /// system側の日付行が日単位で固定なのに対し、こちらはリクエストごとの正確な時刻を与える
+    /// （「今何時？」等に対応）。userメッセージは前置きキャッシュ対象外なので何度更新しても影響なし</summary>
+    public static string SystemInfoLine()
+    {
+        var now = DateTime.Now;
+        var dow = "日月火水木金土"[(int)now.DayOfWeek];
+        return $"【システム情報】現在の日時: {now:yyyy年M月d日}（{dow}曜日） {now:HH:mm}。このPCのシステム時計による。";
+    }
 
     [GeneratedRegex(@"[^。．.\n]+[。．.]?")]
     private static partial Regex SentenceRegex();
@@ -100,6 +126,7 @@ public static partial class Rag
         "あなたは社内文書を主な根拠とするQ&Aアシスタント。日本語で結論から答える。" +
         "短い質問は1〜2文の文章で。手順・条件・金額など複数項目の長い回答のみ箇条書き（- ）と改行で整理（手段ごとの条件を混同しない）。" +
         "社内文書になければ【参照情報】のWeb検索結果から回答してよい（根拠のサイト名を示す）。それにも無ければ「Web検索の結果からは具体的な情報が得られませんでした。最新の情報は各サイトをご確認ください」と伝える。" +
+        "【システム情報】として現在の日時が示されている場合、日付・時刻・曜日の質問はそれを根拠に正確に答える（社内文書・Web検索がなくても回答してよい）。" +
         "どちらにもなければ「該当する記載がありません」。部分該当は該当部分のみ。推測と一般知識は禁止。金額・日付・回数は文書どおり正確に。" +
         "承認者・期限など「○○の場合は△△」という条件と対象の対応は文書の記載どおり正確に答え、類似する別条件と混同しないこと。";
 

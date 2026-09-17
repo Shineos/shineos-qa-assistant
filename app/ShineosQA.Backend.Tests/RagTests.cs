@@ -150,3 +150,48 @@ public class RagSnippetTests
         Assert.DoesNotContain("【Web検索結果】", ctx);
     }
 }
+
+public class RagCurrentDateTests
+{
+    [Fact]
+    public void CurrentDateLine_ContainsDateAndWeekday()
+    {
+        var line = Rag.CurrentDateLine();
+        var now = DateTime.Now;
+        Assert.Contains($"現在の日付: {now:yyyy年M月d日}", line);
+        Assert.Contains("曜日", line);
+        Assert.Contains("日月火水木金土"[(int)now.DayOfWeek].ToString(), line);
+    }
+
+    [Fact]
+    public void TimeSensitiveQuestion_MatchesRelativeDateQueries()
+    {
+        foreach (var q in new[] { "今日は何日ですか", "今日の日付は？", "今月の締めはいつ？", "今年の改正内容は？", "現在の税率は？", "明日は何曜日？" })
+            Assert.True(Rag.TimeSensitiveQuestion().IsMatch(q), $"should match: {q}");
+    }
+
+    [Fact]
+    public void TimeSensitiveQuestion_DoesNotMatchStableQueries()
+    {
+        foreach (var q in new[] { "経費精算の手順は？", "タクシー費の上限額を教えて", "宿泊費はいくらですか" })
+            Assert.False(Rag.TimeSensitiveQuestion().IsMatch(q), $"should not match: {q}");
+    }
+
+    [Fact]
+    public void SystemInfoLine_ContainsDateWeekdayAndTime()
+    {
+        var line = Rag.SystemInfoLine();
+        var now = DateTime.Now;
+        Assert.StartsWith("【システム情報】現在の日時: ", line);
+        Assert.Contains($"{now:yyyy年M月d日}", line);
+        Assert.Contains("曜日", line);
+        Assert.Matches(@"\d{2}:\d{2}", line); // 時刻（HH:mm）
+    }
+
+    [Fact]
+    public void TimeSensitiveQuestion_MatchesClockQueries()
+    {
+        foreach (var q in new[] { "今何時？", "現在の時刻を教えて", "日付は？" })
+            Assert.True(Rag.TimeSensitiveQuestion().IsMatch(q), $"should match: {q}");
+    }
+}
