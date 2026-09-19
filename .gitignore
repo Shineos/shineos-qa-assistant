@@ -28,6 +28,7 @@ app/ShineosQA.Web/dist/
 app/ShineosQA.Backend/bin/
 app/ShineosQA.Backend/obj/
 tools/dotnet-sdk/
+tools/ffmpeg/
 output/
 
 # v2 test artifacts
