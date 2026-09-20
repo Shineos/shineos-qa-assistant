@@ -236,9 +236,12 @@ public sealed class ChatFlow
             // フォローアップ質問（指示語含む・短文）では、生のメッセージではなく
             // LLMに会話文脈から独立した検索クエリを生成させる（A案）
             // 例: 「今日の天気は」→「こちらは神奈川県ですよ」→「神奈川県 天気 予報」を生成
+            // 検索結果はページ本文抽出で補強（EnrichAsync）: SERPスニペットはサイト説明文で
+            // 事実を含まないことが多く、そのまま注入すると作話の原因になるため
             string? webContext = null;
             List<WebSearch.WebResult>? webResults = null;
             bool webFailed = false;
+            bool webContributed = false;
             if (webOn)
             {
                 try
@@ -252,7 +255,12 @@ public sealed class ChatFlow
                     }
                     webResults = await _web.SearchAsync(webQuery, 4, ctx.RequestAborted);
                     if (webResults.Count == 0) webFailed = true;
-                    else webContext = WebSearch.ToContext(webResults);
+                    else
+                    {
+                        await _web.EnrichAsync(webResults, webQuery, ctx.RequestAborted); // ページ本文で事実を補強
+                        webContext = WebSearch.ToContext(webResults);
+                        webContributed = true;
+                    }
                 }
                 catch (Exception ex) { webFailed = true; _log.Warn($"web search failed: {ex.Message}"); }
                 await Sse(ctx, "web", new { results = webResults ?? new List<WebSearch.WebResult>(), error = webFailed ? "Web検索の結果を取得できませんでした（ナレッジのみで回答します）" : null });
@@ -347,15 +355,20 @@ public sealed class ChatFlow
             }
             var context = Rag.BuildContext(ctxDocs, webContext);
             var messages = new List<(string, string)> { ("system", Rag.SystemPrompt + Rag.CurrentDateLine()) };
-            messages.AddRange(history);
+            // Web参照が大きい場合は履歴を直近1往復に削る（ctx=2048の予算内に本文を優先して入れるため。
+            // フォローアップ文脈は検索クエリ書き換え時に既に織り込み済み）
+            var promptHistory = webContext != null && webContext.Length > 600 && history.Count > 2
+                ? history.Skip(history.Count - 2).ToList() : history;
+            messages.AddRange(promptHistory);
             // 日付感応質問にはシステム日時（時刻込み）を明示。参照情報が無い場合は【参照情報】欄を省略
             string sysInfo = timeSensitive ? "\n\n" + Rag.SystemInfoLine() : "";
             string ctxPart = context.TrimEnd().Length > 0 ? "\n\n【参照情報】\n" + context.TrimEnd() : "";
             messages.Add(("user", message + sysInfo + ctxPart));
-            // 7) ストリーム生成
+            // 7) ストリーム生成。Web参照ありの回答は日付・項目の列挙が長くなるため上限を緩める
+            //    （14日分の予報列挙で400トークンでは途切れる実測。prompt込みでもctx=2048内に収まる）
             var answer = new StringBuilder();
             var ttfb = -1L;
-            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, messages, 0.0, 300, async delta =>
+            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, messages, 0.0, webContributed ? 500 : 300, async delta =>
             {
                 if (ttfb < 0) ttfb = sw.ElapsedMilliseconds;
                 answer.Append(delta);
@@ -371,7 +384,9 @@ public sealed class ChatFlow
             _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json) VALUES($c,'assistant',$m,$s)",
                 ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
             _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
-            if (!timeSensitive && sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
+            // Web由来の回答はキャッシュしない: Web検索結果は時々刻々変わる_snapshot_で、
+            // 古い（誤った）回答の恒久化を防ぐため。天気・ニュース類はTimeSensitive判定でも排除
+            if (!timeSensitive && !webContributed && sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
             {
                 _db.Exec("INSERT INTO answer_cache(question, answer, sources_json, emb, model) VALUES($q,$a,$s,$e,$m)",
                     ("$q", message), ("$a", answer.ToString()), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));

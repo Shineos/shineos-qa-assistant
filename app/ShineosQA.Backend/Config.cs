@@ -20,7 +20,7 @@ public sealed class AppConfig
     public int EnginePortLlm { get; set; } = 8301;
     public int EnginePortEmb { get; set; } = 8302;
     public int EnginePortRank { get; set; } = 8303;
-    public int CtxSize { get; set; } = 2048;
+    public int CtxSize { get; set; } = 4096;
     public int Threads { get; set; } = 0; // 0=物理コア数
     public int IdleUnloadMinutes { get; set; } = 60;
     public bool BgFriendly { get; set; } = true; // 他アプリ優先: LLM生成をBelowNormal優先度で実行（既定ON）
