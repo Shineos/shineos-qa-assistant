@@ -45,6 +45,7 @@
 | データ | 保存先 |
 |---|---|
 | ナレッジ（文書テキスト・検索索引・ベクトル）・チャット履歴・設定 | `{インストール先}\data\knowledge.db`（SQLite単一ファイル） |
+| 取り込み元ファイルの原本（図面PDF検索・Q&A拡張を有効にした場合のみ保存。キャプチャ画像は保存されません） | `{インストール先}\data\files\` |
 | AIモデル本体（GGUF） | `{インストール先}\models\`（初期モデルは同梱・追加モデルもここに保存） |
 | 動作ログ（バックエンド・エンジン） | `{インストール先}\data\logs\` |
 | アプリのログ・初回起動フラグ・WebView2ブラウザデータ（キャッシュ等） | `%APPDATA%\ShineosQA\` |
@@ -110,6 +111,7 @@ The Product is a fully local company Q&A tool that turns internal documents into
 All data stays on your PC. The default install location is `%LOCALAPPDATA%\Programs\ShineosQA` (per-user, no admin rights):
 
 - Knowledge (document text, search index, vectors), chat history & settings: `{install dir}\data\knowledge.db` (a single SQLite file)
+- Original copies of ingested files (only when the Drawing PDF Search extension is enabled; captured images are not stored): `{install dir}\data\files\`
 - AI models (GGUF): `{install dir}\models\`
 - Logs: `{install dir}\data\logs\`
 - App log, first-run flag, WebView2 browser data: `%APPDATA%\ShineosQA\`
