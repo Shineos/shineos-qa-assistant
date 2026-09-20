@@ -39,6 +39,7 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 | Stop on close | Closing the app stops the AI engine, backend and network ports completely and releases all memory (nothing stays resident) |
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
 | Web search (OFF by default) | Optional DuckDuckGo lookup (no API key). **Queries would be sent externally, so keep it OFF for company questions** |
+| Drawing PDF search & Q&A (manufacturing extension, enable in Settings) | Auto-reads the title block (part number, name, material, revision) of drawing PDFs at ingest; part-number variants (A-1234 / A1234 / full-width) match as the same token. Paste a screen capture to ask from a drawing number (on-device OCR). OFF by default |
 
 ### Key changes from the previous release (Ollama + Open WebUI)
 

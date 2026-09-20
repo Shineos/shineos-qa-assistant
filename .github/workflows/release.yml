@@ -64,6 +64,13 @@ jobs:
           npm run build
           if ($LASTEXITCODE -ne 0) { throw "web build failed" }
 
+      # ---- 1.5) 単体テスト（拡張パック導入でテスト件数が増加したためゲート化。dev-v2.md §7 backlog対応） ----
+      - name: Run backend tests
+        shell: pwsh
+        run: |
+          dotnet test app/ShineosQA.Backend.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { throw "backend tests failed" }
+
       # ---- 2) バックエンド（自己完結publish。csprojがWeb distをwwwrootとして取り込む） ----
       - name: Publish backend
         shell: pwsh

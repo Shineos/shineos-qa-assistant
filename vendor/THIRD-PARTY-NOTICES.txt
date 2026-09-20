@@ -65,6 +65,16 @@ vendor/licenses/ に格納しています。v2 では Ollama・Open WebUI・Pyth
    - 用途: デスクトップアプリ「社内知恵袋」の画面表示（同梱）
    - 備考: WebView2 ランタイム本体はMicrosoftが配布・更新するシステムコンポーネント
 
+10. PdfPig（PDFテキスト抽出ライブラリ）
+   - ライセンス: Apache License 2.0
+   - 出典: https://github.com/UglyToad/PdfPig
+   - 用途: PDF図面・文書からのテキスト抽出（ToUnicode CMap対応。CJKフォント対応）
+
+11. Docnet.Core / PDFium
+   - ライセンス: Docnet.Core: MIT License ／ PDFium: BSD 3-Clause License
+   - 出典: https://github.com/GowenGit/docnet.core ／ https://pdfium.googlesource.com/pdfium/
+   - 用途: 図面PDFのサムネイル生成（1ページ目のレンダリング・win-x64ネイティブ同梱）
+
 v1（Ollama + Open WebUI 版）が同梱していた NSSM・Ollama・Open WebUI・Python・PyTorch は、
 v2 では一切使用・同梠していません。
 
