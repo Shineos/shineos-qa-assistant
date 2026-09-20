@@ -176,6 +176,10 @@ export class ChatView {
       webBtn.classList.toggle('active', this.webSearch);
       this.packDrawing = !!s.extensions?.drawing;
       captureBtn.hidden = !this.packDrawing;
+      if (s.extensions?.spreadsheet) {
+        const ai = document.getElementById('attach-input') as HTMLInputElement;
+        ai.accept = ai.accept + ',.xlsx,.csv,.tsv';
+      }
     });
 
     // モデルセレクター: 現在の階級を表示し、未導入モデルはその場でダウンロード可能

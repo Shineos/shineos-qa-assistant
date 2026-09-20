@@ -24,6 +24,12 @@ export class KnowledgeView {
     void api.getSettings().then(s => {
       this.packDrawing = !!s.extensions?.drawing;
       if (kf) kf.hidden = !this.packDrawing;
+      // Excel・CSVパックON時のみ受け入れ拡張子と案内文を広げる（OFF時は本体UIのまま）
+      if (s.extensions?.spreadsheet) {
+        fi.accept = fi.accept + ',.xlsx,.csv,.tsv';
+        const tn = dz.firstChild;
+        if (tn && tn.nodeType === Node.TEXT_NODE) tn.textContent = 'ここに PDF / Word / Markdown / テキスト / Excel / CSV をドラッグ＆ドロップ ';
+      }
       void this.refresh();
     }).catch(() => { void this.refresh(); });
   }

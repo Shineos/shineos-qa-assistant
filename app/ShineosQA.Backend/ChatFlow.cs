@@ -351,6 +351,21 @@ public sealed class ChatFlow
                     sources.Add(EnrichDrawing(new SourceInfo { File = h.Rec.FileName, Snippet = await SnippetForSourceAsync(MergedChunkText(h.Rec), qTokens, message, ctx.RequestAborted), Text = MergedChunkText(h.Rec) }, h.Rec.FileId));
             // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）
             await Sse(ctx, "refs", new { files = chosen.Select(h => h.Rec.FileName).ToArray(), web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList() });
+
+            // 対象ガード（生成前）: 「〜できますか/方法」等の手続き質問で、質問の対象語（助詞直前の漢語等）が
+            // 取得文書のどれにも現れない場合、QA文書の類似手続きを別対象へ転用した回答（t74型）になる前に
+            // 拒否へ倒す。Web検索時は規則①〜④が効くため適用しない。時間感応質問も対象外
+            if (sources.Count > 0 && string.IsNullOrEmpty(webContext) && !timeSensitive &&
+                Rag.ProcedureTargetMissing(message, chosen.Select(h => MergedChunkText(h.Rec))))
+            {
+                _log.Info($"target guard: subject of procedure question not found in sources: {Truncate(message, 40)}");
+                var refusal = "該当する記載がありません。" + webNote;
+                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                await Sse(ctx, "delta", new { content = refusal });
+                await Sse(ctx, "done", new { cached = false, guard = "target", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                return;
+            }
+
             // Web検索結果も出典として同一デザインで表示（URL＋プレビュー）
             foreach (var wr in webResults ?? new List<WebSearch.WebResult>())
                 sources.Add(new SourceInfo { File = wr.Title, Snippet = wr.Snippet, Text = wr.Snippet, Kind = "web", Url = wr.Url });

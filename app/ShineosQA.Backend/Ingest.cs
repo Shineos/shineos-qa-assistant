@@ -30,6 +30,11 @@ public sealed class Ingest
     public string FilesDir => _filesDir;
 
     public static readonly string[] SupportedExtensions = { ".md", ".txt", ".docx", ".pdf" };
+    public static readonly string[] SheetExtensions = { ".xlsx", ".csv", ".tsv" };
+
+    /// <summary>受付拡張子（Excel・CSV取り込みパックON時のみ表計算形式を追加）</summary>
+    public static string[] SupportedExtensionsFor(bool spreadsheetPackOn) =>
+        spreadsheetPackOn ? SupportedExtensions.Concat(SheetExtensions).ToArray() : SupportedExtensions;
 
     public static string ExtractText(string fileName, Stream stream)
     {
@@ -190,6 +195,7 @@ public sealed class Ingest
             var bytes = ms.ToArray();
             var ext = Path.GetExtension(fileName).ToLowerInvariant();
             bool packOn = Extensions.IsEnabled(_db, Extensions.DrawingId);
+            bool sheetPackOn = Extensions.IsEnabled(_db, Extensions.SpreadsheetId);
 
             _db.Exec("INSERT INTO files(name, status) VALUES($n,'parsing')", ("$n", fileName));
             long fileId = _db.LastInsertId();
@@ -197,12 +203,18 @@ public sealed class Ingest
             {
                 // PDF: PdfPig（座標付き）→ 空なら従来抽出器にフォールバック
                 PdfExtractResult? pdf = null;
-                string text;
+                string text = "";
+                List<string>? sheetChunks = null;
                 if (ext == ".pdf")
                 {
                     try { pdf = PdfText.ExtractAll(bytes); text = pdf.Text; }
                     catch { text = ""; }
                     if (string.IsNullOrWhiteSpace(text)) { pdf = null; text = ExtractPdf(new MemoryStream(bytes)); }
+                }
+                else if (sheetPackOn && SheetExtensions.Contains(ext))
+                {
+                    // 表計算ファイル: ヘッダ＋行バッチのチャンク列（Rag.Chunk不使用）
+                    sheetChunks = SheetExtract.ExtractChunks(fileName, bytes);
                 }
                 else
                 {
@@ -210,7 +222,7 @@ public sealed class Ingest
                 }
 
                 // 拡張パック: 元ファイルを保存（「開く」・サムネイル・データ資産化の前提。失敗しても取り込みは続行）
-                if (packOn) SaveOriginal(fileId, ext, bytes);
+                if (packOn || sheetPackOn) SaveOriginal(fileId, ext, bytes);
 
                 var chunks = new List<string>();
                 bool isDrawing = false;
@@ -224,6 +236,10 @@ public sealed class Ingest
                     // 図面は1枚1チャンク（表題欄前置き＋全テキスト）。テキスト層ゼロはチャンク0で登録継続
                     if (pdf.Text.Trim().Length > 0)
                         chunks.Add(DrawingIngest.BuildChunkText(meta, pdf.Text));
+                }
+                else if (sheetChunks != null)
+                {
+                    chunks = sheetChunks;
                 }
                 else if (text.Trim().Length > 0)
                 {

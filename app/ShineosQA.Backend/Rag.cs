@@ -69,6 +69,48 @@ public static partial class Rag
         return sb.ToString();
     }
 
+    // ---- 対象ガード（生成前の前提検証・t74/t76型「対象置換」捏造の防御） ----
+
+    /// <summary>手続き・可否を問う質問の判定（対象ガードの適用条件。一般名詞質問・口語質問には適用しない）。
+    /// 可能形（〜せますか/れますか）・可能表現（可能ですか）も対象（t76「落とせますか」実測）</summary>
+    [GeneratedRegex(@"できますか|方法|やり方|手順|手続き|再発行|利用したい|使いたい|可能ですか|せますか|れますか|ていいですか|てよいですか")]
+    public static partial Regex ProcedureQuestion();
+
+    /// <summary>質問の対象語: 助詞（を/は/が/の/って）直前の3文字以上の漢語または英数字。
+    /// ただし方法/手順/手続きで終わる語（質問の聞き方を示す語）は対象から除外する
+    /// （「連絡方法は?」の方法を対象と誤認すると、文書が「電話で連絡」とだけ書く場合に誤拒否になる・t18実測）</summary>
+    [GeneratedRegex(@"([\u4E00-\u9FFF]{3,}|[A-Za-z0-9][A-Za-z0-9\-_/]{2,})(?=を|は|が|の|って)")]
+    private static partial Regex TargetObjectRegex();
+
+    private static bool IsTargetObject(string run) =>
+        !(run.EndsWith("方法") || run.EndsWith("手順") || run.EndsWith("手続き"));
+
+    /// <summary>対象ガード: 手続き質問の対象語が取得文書のどれにも現れない場合true。
+    /// 例「健康保険証を再発行する方法」で文書に「健康保険証」が無ければ、QA文書の
+    /// パスワード再発行等の類似手続きを転用した回答になる前に拒否へ倒せる。
+    /// 対象語が1つでも文書に現れればfalse、対象語が抽出できない質問もfalse（保守的）。
+    /// 呼び出し側は手続き質問（ProcedureQuestion）かつWeb検索未使用の場合に限る</summary>
+    public static bool ProcedureTargetMissing(string question, IEnumerable<string> sourceTexts)
+    {
+        if (!ProcedureQuestion().IsMatch(question)) return false;
+        var hay = string.Join('\n', sourceTexts).Normalize(NormalizationForm.FormKC);
+        // 英数字対象（図番）は索引側と同じ正規形で照合するため、hay側も英数のみの小文字列を作る
+        // （区切りは削除: 索引側の NormalizeZuban が "A-1234"→"a1234" を含むため）
+        var hayAlnum = string.Concat(hay.Where(char.IsAsciiLetterOrDigit).Select(char.ToLowerInvariant));
+        bool any = false;
+        foreach (var m in TargetObjectRegex().Matches(question.Normalize(NormalizationForm.FormKC)).Cast<Match>())
+        {
+            var run = m.Groups[1].Value;
+            if (!IsTargetObject(run)) continue;
+            any = true;
+            var present = char.IsAsciiLetterOrDigit(run[0])
+                ? hayAlnum.Contains(NormalizeZuban(run), StringComparison.Ordinal)
+                : hay.Contains(run, StringComparison.Ordinal);
+            if (present) return false;
+        }
+        return any;
+    }
+
     /// <summary>日本語バイグラム＋英数字トークン（検証済みトークナイザと同一仕様）
     /// ＋記号結合英数の正規形トークン（図番表記ゆれ吸収・T5）。既存トークンも併存するため旧挙動は崩れない。
     /// 冒頭のNFKCで全角英数・全角記号を半角化する（「ＳＴ－１０４２」など全角入力の図番も一致させる）</summary>

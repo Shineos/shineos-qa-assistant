@@ -54,7 +54,11 @@ public static class Api
             tier = db.GetSetting("tier", "auto"),
             idle_unload_minutes = cfg.IdleUnloadMinutes,
             bg_friendly = bool.TryParse(db.GetSetting("bg_friendly", cfg.BgFriendly.ToString()), out var b) && b,
-            extensions = new { drawing = Extensions.IsEnabled(db, Extensions.DrawingId) },
+            extensions = new
+            {
+                drawing = Extensions.IsEnabled(db, Extensions.DrawingId),
+                spreadsheet = Extensions.IsEnabled(db, Extensions.SpreadsheetId),
+            },
         }));
 
         app.MapPost("/api/settings", async (HttpRequest req) =>
@@ -80,13 +84,16 @@ public static class Api
                     if (sup.SwitchLlmTier(eff))
                         _ = Task.Run(() => { try { sup.EnsureLlm(); } catch (Exception ex2) { ctx.Log.Warn($"llm reload after tier change failed: {ex2.Message}"); } });
                 }
-                // 拡張パック: {extensions:{drawing:true}} と 平坦キー ext.drawing の両方を受け付ける（即時反映）
+                // 拡張パック: {extensions:{drawing:true,...}} と 平坦キー ext.* の両方を受け付ける（即時反映）
                 if (p.Name == "extensions" && p.Value.ValueKind == JsonValueKind.Object)
                     foreach (var e in p.Value.EnumerateObject())
-                        if (e.Name == Extensions.DrawingId && e.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                            Extensions.SetEnabled(db, Extensions.DrawingId, e.Value.GetBoolean());
+                        if (e.Value.ValueKind is JsonValueKind.True or JsonValueKind.False &&
+                            (e.Name == Extensions.DrawingId || e.Name == Extensions.SpreadsheetId))
+                            Extensions.SetEnabled(db, e.Name, e.Value.GetBoolean());
                 if (p.Name == "ext.drawing" && p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
                     Extensions.SetEnabled(db, Extensions.DrawingId, p.Value.GetBoolean());
+                if (p.Name == "ext.spreadsheet" && p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    Extensions.SetEnabled(db, Extensions.SpreadsheetId, p.Value.GetBoolean());
             }
             return Results.Ok(new { ok = true });
         });
@@ -219,7 +226,7 @@ public static class Api
                 catch { }
                 name = name.Replace('\\', '_').Replace('/', '_');
                 var ext = Path.GetExtension(name).ToLowerInvariant();
-                if (!Ingest.SupportedExtensions.Contains(ext))
+                if (!Ingest.SupportedExtensionsFor(Extensions.IsEnabled(db, Extensions.SpreadsheetId)).Contains(ext))
                 { results.Add(new { name, ok = false, error = "SHINE_E_DOC_PARSE_FAILED", message = $"未対応形式です: {ext}" }); continue; }
                 try
                 {
@@ -244,10 +251,11 @@ public static class Api
                 return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "無効なパスです" });
             var count = 0;
             var failures = new List<object>();
+            var supported = Ingest.SupportedExtensionsFor(Extensions.IsEnabled(db, Extensions.SpreadsheetId));
             foreach (var f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
             {
                 var ext = Path.GetExtension(f).ToLowerInvariant();
-                if (!Ingest.SupportedExtensions.Contains(ext)) continue;
+                if (!supported.Contains(ext)) continue;
                 try
                 {
                     await using var s = File.OpenRead(f);

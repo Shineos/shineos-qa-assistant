@@ -82,8 +82,10 @@ $env:DOTNET_ROOT = "D:\dev\shineos-local-ai\tools\dotnet-sdk"
 
 - [ ] 8GB実機でのクイック階級（1.7B）検証
 - [x] PDF本格パーサ（PdfPig置換） → **対応済み（feature/drawing-search T1）**。ただし `year-end-policy.pdf` は375バイトの破損スタブで抽出対象外（旧来同一挙動）
-- [ ] Golden QA 残失敗の改善: main既存14問（横断recall・罠質問。RESULTS.md 第9ラウンド参照）＋**t74「対象置換」捏造はプロンプト耐性 → 生成後バリデーションガード（回答の対象語が引用元本文に現れるか検証）で対応予定**
+- [x] 対象置換捏造（t74） → **対応済み（対象ガード guard="target"）**: 手続き質問の対象語が取得文書に無ければ生成前に拒否。118問でt74確定解消
+- [ ] Golden QA 残失敗の改善: main既存の横断recall・条件混同系（RESULTS.md 第9ラウンド参照。quick階級の揺らぎ s07/s12/t25/t76等）
 - [x] モデル破損時にsupervisorの再試行が続く間ユーザー応答が遅延する問題の早期エラー化 → **対応済み（RESULTS.md 第10ラウンド）**: 起動前SHA256検証（永続キャッシュ付き）＋ヘルス待ち瞬死検知＋OOM誤診阻止＋サーキットブレーカーで240秒無応答→2.5秒エラー化
 - [ ] Web検索のマルチエンジン化
 - [x] テストのCI化 → **対応済み（feature/drawing-search）**: release.yml に `dotnet test` ゲート追加
 - [ ] 図面拡張のリリースゲート残件: 実機インストーラ（lite/full）検証・WACK・Pilot先の表題欄様式に合わせた `DrawingIngest` 閾値調整（docs/impl-drawing-search.md §4.4/§7）
+- [x] Excel・CSV取り込み → **対応済み（拡張パック第2弾・SheetExtract）**: .xlsx/.csv/.tsv、ヘッダ付き行バッチ化、UTF-8→Shift-JIS自動判別。既知限界: 日付セルはシリアル値のまま・.xls非対応
