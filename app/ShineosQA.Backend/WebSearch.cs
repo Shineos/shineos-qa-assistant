@@ -13,6 +13,8 @@ public sealed partial class WebSearch
 
     public WebSearch()
     {
+        // shift_jis等の日本語レガシーエンコーディング対応（共有フレームワーク内蔵）
+        try { Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); } catch { }
         var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All };
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
         _http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ShineosQA/2.0");
@@ -28,6 +30,12 @@ public sealed partial class WebSearch
 
     [GeneratedRegex(@"<[^>]+>")]
     private static partial Regex TagRegex();
+
+    [GeneratedRegex(@"(?is)<(script|style|noscript)[^>]*>.*?</(script|style|noscript)>")]
+    private static partial Regex InvisibleBlockRegex();
+
+    [GeneratedRegex(@"(?i)<meta[^>]+charset=[""']?([a-zA-Z0-9_\-]+)")]
+    private static partial Regex MetaCharsetRegex();
 
     public async Task<List<WebResult>> SearchAsync(string query, int topN = 4, CancellationToken ct = default)
     {
@@ -91,11 +99,137 @@ public sealed partial class WebSearch
 
     private static string StripTags(string s) => WebUtility.HtmlDecode(TagRegex().Replace(s, "")).Trim();
 
-    /// <summary>プロンプト注入用の整形</summary>
+    /// <summary>検索結果のページ本文を取得してスニペットへ事実を補強する。
+    /// SERPスニペットはサイト説明文が多く事実（日付・数値・天気等）を含まないため、
+    /// そのまま注入すると回答が検索結果と食い違う原因になる。
+    /// 補強する結果はクエリとの関連度順（タイトル・スニペット・URLの語一致）に選ぶ:
+    /// SERP順位上位が必ずしも内容の濃いページではないため。
+    /// 最関連ページ1件のみ・窓700字で補強する（ctx=2048の予算内に収めるため。
+    /// 表組みのページは400字だと見出し行で切れて日付だけが入り、かえって捏造を誘う）。
+    /// SPA等で本文が取れない場合は次点のページを試す。失敗時は元スニペットのまま</summary>
+    public async Task EnrichAsync(List<WebResult> results, string query, CancellationToken ct = default)
+    {
+        if (results.Count == 0) return;
+        var tokens = Rag.Tokenize(query).ToHashSet();
+        var ranked = results.Select((r, i) => (r, i, score: tokens.Count(t => r.Title.Contains(t) || r.Snippet.Contains(t) || r.Url.Contains(t))))
+            .OrderByDescending(x => x.score).ThenBy(x => x.i).Take(2).ToList();
+        foreach (var (r, i, _) in ranked)
+        {
+            var enriched = await EnrichOneAsync(r, tokens, 700, ct);
+            if (!ReferenceEquals(enriched, r)) { results[i] = enriched; break; } // 1件成功したら打ち切り
+        }
+    }
+
+    private async Task<WebResult> EnrichOneAsync(WebResult r, IReadOnlySet<string> tokens, int size, CancellationToken ct)
+    {
+        try
+        {
+            var text = await FetchPageTextAsync(r.Url, ct);
+            if (text.Length == 0) return r;
+            // 本文からクエリ関連の最多の窓を抽出（サイト固有構造に依らない汎用の窓選択）
+            var excerpt = BestWindow(text, tokens, size);
+            if (excerpt.Length < 40) return r; // 抽出できた情報が薄い場合は元のまま
+            // {{item.xxx}} 等: JS未レンダリングの雛形断片（SPA）は本文として扱わない
+            if (excerpt.Contains("{{")) return r;
+            // 抜粋を先頭に置く: 出典プレビューはスニペット先頭の110字を表示するため、
+            // サイト説明文ではなく実際の本文が見えるようにする
+            return r with { Snippet = excerpt + (r.Snippet.Length > 0 ? "\n" + r.Snippet : "") };
+        }
+        catch (OperationCanceledException) { return r; }
+        catch (Exception) { return r; }
+    }
+
+    /// <summary>クエリトークンと最も重なる短い探査窓（約120字）を特定し、その中で最も固有な語
+    /// （文中の出現数が最も少ないクエリ語）の出現位置から約size字を返す。
+    /// 見出し・ナビが長いページや表組み（文末記号が無く文分割できない）でも関連箇所を拾うため、
+    /// 文分割ではなく位置スキャンで選ぶ。見出しから始めると後に本文・表が続く構造が多いため、
+    /// 固有語の位置を窓の「先頭」に置く（「天気」等の弱い語がナビに多く出ても巻き込まない）</summary>
+    public static string BestWindow(string text, IReadOnlySet<string> tokens, int size)
+    {
+        text = WhitespaceRegex().Replace(text, " ").Trim();
+        if (text.Length <= size) return text;
+        const int probe = 120;
+        int step = Math.Max(20, probe / 3);
+        int bestScore = -1, bestPos = 0;
+        for (int pos = 0; pos + probe <= text.Length; pos += step)
+        {
+            var p = text.Substring(pos, probe);
+            int score = tokens.Count(t => p.Contains(t));
+            if (score > bestScore) { bestScore = score; bestPos = pos; }
+        }
+        // 探査窓周辺（±探査窓幅）で最も固有なクエリ語（全文での出現数が最も少ない語）を窓の先頭にする
+        int lo = Math.Max(0, bestPos - probe);
+        bool FoundNear(string t)
+        {
+            var i = text.IndexOf(t, lo, StringComparison.Ordinal);
+            return i >= 0 && i < bestPos + probe;
+        }
+        var specific = tokens.Where(FoundNear).OrderBy(CountOfText).FirstOrDefault();
+        int anchor = specific is null ? bestPos : text.IndexOf(specific, lo, StringComparison.Ordinal);
+        int start = Math.Clamp(anchor, 0, Math.Max(0, text.Length - size));
+        return text.Substring(start, Math.Min(size, text.Length - start));
+
+        int CountOfText(string t) => CountOf(text, t);
+    }
+
+    private static int CountOf(string text, string t)
+    {
+        int c = 0, i = 0;
+        while ((i = text.IndexOf(t, i, StringComparison.Ordinal)) >= 0) { c++; i += t.Length; }
+        return c;
+    }
+
+    /// <summary>ページ本文の取得（最大256KB）。script/style等は除去し、文字コードは
+    /// レスポンスヘッダ→meta charset の順に判定（対応しない場合はUTF-8）</summary>
+    private async Task<string> FetchPageTextAsync(string url, CancellationToken ct)
+    {
+        var uri = new Uri(url);
+        NetGuard.EnsurePublicHttp(uri);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(6));
+        using var resp = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        if (!resp.IsSuccessStatusCode) return "";
+        await using var stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+        var buf = new byte[256 * 1024];
+        int n = 0, read;
+        while (n < buf.Length && (read = await stream.ReadAsync(buf.AsMemory(n, buf.Length - n), cts.Token)) > 0) n += read;
+        return HtmlToText(DecodeHtml(buf, n, resp.Content.Headers.ContentType?.CharSet));
+    }
+
+    public static string DecodeHtml(byte[] buf, int len, string? headerCharset)
+    {
+        Encoding? enc = null;
+        foreach (var name in new[] { headerCharset, SniffCharset(buf, len) })
+        {
+            if (string.IsNullOrEmpty(name)) continue;
+            try { enc = Encoding.GetEncoding(name); break; } catch (ArgumentException) { }
+        }
+        return (enc ?? Encoding.UTF8).GetString(buf, 0, len);
+    }
+
+    private static string? SniffCharset(byte[] buf, int len)
+    {
+        var head = Encoding.ASCII.GetString(buf, 0, Math.Min(len, 2048));
+        var m = MetaCharsetRegex().Match(head);
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    public static string HtmlToText(string html)
+    {
+        var text = InvisibleBlockRegex().Replace(html, " ");
+        text = TagRegex().Replace(text, " ");
+        return WebUtility.HtmlDecode(text);
+    }
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRegex();
+
+    /// <summary>プロンプト注入用の整形。URLは省く（サイト名はタイトルに含まれる。
+    /// ctx=2048の予算対策で、モデルには事実の本文を優先して与える）</summary>
     public static string ToContext(List<WebResult> results)
     {
         var sb = new StringBuilder();
-        foreach (var r in results) sb.Append($"・{r.Title}（{r.Url}）: {r.Snippet}\n");
+        foreach (var r in results) sb.Append($"・{r.Title}: {r.Snippet}\n");
         return sb.ToString();
     }
 }

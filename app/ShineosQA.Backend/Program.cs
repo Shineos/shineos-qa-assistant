@@ -395,7 +395,7 @@ public sealed class Program
             quick_model = "Qwen3-1.7B-IQ4_XS.gguf",
             quality_model = "Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
             tier = "quick",
-            ctx_size = 2048,
+            ctx_size = 4096,
             bg_friendly = true
         }, new System.Text.Json.JsonSerializerOptions
         {
