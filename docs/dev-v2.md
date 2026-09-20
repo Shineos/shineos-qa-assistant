@@ -59,7 +59,7 @@ $env:DOTNET_ROOT = "D:\dev\shineos-local-ai\tools\dotnet-sdk"
 - `GET /api/models`（カタログ＋導入状況＋needs_wizard）／`POST /api/models/install`（DL→SHA256検証→配置、ミラーfallback）／`GET /api/models/progress`／`POST /api/models/delete`
 - UI: チャットモデル未導入時に初回ウィザード（階級選択→進捗バー付きDL→自動リロード）。設定タブにAIモデル一覧（追加DL・削除）
 - **実機検証**: bge-m3を実DL（605MB・SHA一致 `950f4a8e…`）／ウィザード表示・消滅／UI操作による質問→回答（3,000円・3日とも正答＋出典）／キャッシュ即答／NO-HIT拒否／ナレッジ・設定タブ
-- 既知の修正履歴（v2.1.5実機検証）: インストーラの`/VERYSILENT`が無人動作せずウィザード表示になる（要修正・CHANGELOG参照）、アンインストール時データ保持確認は仕様どおり動作。設定タブrefreshの二重実行によるDOM競合（シリアライズ化で解消）、API JSON camelCaseとTS型PascalCaseの不一致（全snake/camel統一）
+- 既知の修正履歴（v2.1.5実機検証）: インストーラの`/VERYSILENT`「無効」は誤検知（Git Bashのパス変換が原因・cmd経由で仕様どおり動作を確認・CHANGELOG参照）、アンインストール時データ保持確認は仕様どおり動作。設定タブrefreshの二重実行によるDOM競合（シリアライズ化で解消）、API JSON camelCaseとTS型PascalCaseの不一致（全snake/camel統一）
 
 ## 6. テスト資産（2026-09-20 拡充・feature/drawing-search）
 
