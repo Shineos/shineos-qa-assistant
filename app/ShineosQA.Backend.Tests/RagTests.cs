@@ -171,6 +171,14 @@ public class RagCurrentDateTests
     }
 
     [Fact]
+    public void TimeSensitiveQuestion_MatchesVolatileWorldStateQueries()
+    {
+        // 天気・市況は現実の状態で正解が変わるため古い回答キャッシュを使わない
+        foreach (var q in new[] { "神奈川県の今後の一週間の天気を教えて", "明日の気温は？", "今日のニュース", "今の円の為替" })
+            Assert.True(Rag.TimeSensitiveQuestion().IsMatch(q), $"should match: {q}");
+    }
+
+    [Fact]
     public void TimeSensitiveQuestion_DoesNotMatchStableQueries()
     {
         foreach (var q in new[] { "経費精算の手順は？", "タクシー費の上限額を教えて", "宿泊費はいくらですか" })

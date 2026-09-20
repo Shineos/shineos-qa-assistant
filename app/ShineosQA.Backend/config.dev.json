@@ -5,5 +5,5 @@
   "engine_variant": "cpu",
   "models_dir": "D:/dev/shineos-local-ai/spikes/phase0/models",
   "tier": "standard",
-  "ctx_size": 2048
+  "ctx_size": 4096
 }
