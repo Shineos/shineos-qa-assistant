@@ -17,4 +17,9 @@
     <ProjectReference Include="..\ShineosQA.Backend\ShineosQA.Backend.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- フィクスチャPDF（TestData/src/*.html から再生成・手順はTestData/src/README.md） -->
+    <Content Include="TestData\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

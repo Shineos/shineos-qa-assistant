@@ -34,6 +34,25 @@ public sealed class LlmGateway
         return list.OrderByDescending(r => r.Score).ToList();
     }
 
+    /// <summary>非ストリーム1回呼び出し（表題欄LLM構造化など短い抽出用・maxTokens上限必須）</summary>
+    public async Task<string> ChatOnceAsync(int port, IReadOnlyList<(string role, string content)> messages, double temperature, int maxTokens, CancellationToken ct)
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            model = "local",
+            stream = false,
+            temperature,
+            max_tokens = maxTokens,
+            chat_template_kwargs = new { enable_thinking = false },
+            messages = messages.Select(m => new { role = m.role, content = m.content }),
+        });
+        using var resp = await _http.PostAsync($"http://127.0.0.1:{port}/v1/chat/completions",
+            new StringContent(body, Encoding.UTF8, "application/json"), ct);
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+    }
+
     /// <summary>SSEストリーム。deltaのcontentをonDeltaへ、最終usage/timingsを返す</summary>
     public async Task ChatStreamAsync(int port, IReadOnlyList<(string role, string content)> messages, double temperature, int maxTokens,
         Func<string, Task> onDelta, CancellationToken ct)

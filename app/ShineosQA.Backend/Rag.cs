@@ -44,23 +44,50 @@ public static partial class Rag
     [GeneratedRegex(@"[^。．.\n]+[。．.]?")]
     private static partial Regex SentenceRegex();
 
-    [GeneratedRegex(@"[\u3040-\u30FF\u4E00-\u9FFF]+|[A-Za-z0-9]+")]
-    private static partial Regex TokenRegex();
+    [GeneratedRegex(@"[\u3040-\u30FF\u4E00-\u9FFF]+")]
+    private static partial Regex CjkRegex();
 
-    /// <summary>日本語バイグラム＋英数字トークン（検証済みトークナイザと同一仕様）</summary>
+    /// <summary>記号を含む英数連結（図番・型番: ST-1042A / KB_305/2 等）。3番目の選択肢は1文字英数字の単独トークン。
+    /// 入力はNFKC正規化済みのため全角記号は登場しない</summary>
+    [GeneratedRegex(@"[A-Za-z0-9][A-Za-z0-9\-_/]{0,30}[A-Za-z0-9]|[A-Za-z0-9]")]
+    private static partial Regex JoinedAlnumRegex();
+
+    /// <summary>図番・型番の正規形（NFKC→小文字→英数以外除去）。「A-1234」「A1234」「Ａ−１２３４」を同一キー化する。
+    /// 索引（ChunkIndex）とクエリ（ChatFlow）の両方がTokenizeを通るため、両側へ自動適用される</summary>
+    public static string NormalizeZuban(string s)
+    {
+        var n = s.Normalize(NormalizationForm.FormKC).ToLowerInvariant();
+        var sb = new StringBuilder(n.Length);
+        foreach (var ch in n)
+            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) sb.Append(ch);
+        return sb.ToString();
+    }
+
+    /// <summary>日本語バイグラム＋英数字トークン（検証済みトークナイザと同一仕様）
+    /// ＋記号結合英数の正規形トークン（図番表記ゆれ吸収・T5）。既存トークンも併存するため旧挙動は崩れない。
+    /// 冒頭のNFKCで全角英数・全角記号を半角化する（「ＳＴ－１０４２」など全角入力の図番も一致させる）</summary>
     public static List<string> Tokenize(string s)
     {
+        s = s.Normalize(NormalizationForm.FormKC);
         var tokens = new List<string>();
-        foreach (var m in TokenRegex().Matches(s).Cast<Match>())
+        foreach (var m in CjkRegex().Matches(s).Cast<Match>())
         {
             var v = m.Value;
-            bool isCjk = v.Length > 0 && v.All(ch => ch >= 0x3040 && ch <= 0x9FFF);
-            if (isCjk)
+            if (v.Length == 1) tokens.Add(v);
+            else for (int i = 0; i < v.Length - 1; i++) tokens.Add(v.Substring(i, 2));
+        }
+        foreach (var m in JoinedAlnumRegex().Matches(s).Cast<Match>())
+        {
+            var v = m.Value.ToLowerInvariant();
+            tokens.Add(v);
+            if (v.Length > 1 && (v.Contains('-') || v.Contains('_') || v.Contains('/')))
             {
-                if (v.Length == 1) tokens.Add(v);
-                else for (int i = 0; i < v.Length - 1; i++) tokens.Add(v.Substring(i, 2));
+                // 旧仕様トークン（区切りで切った英数連結: st / 1042a）も併存させ、既存の一致挙動を壊さない
+                foreach (var piece in Regex.Split(v, "[^a-z0-9]"))
+                    if (piece.Length > 0) tokens.Add(piece);
+                var norm = NormalizeZuban(v);
+                if (norm.Length >= 2) tokens.Add(norm); // "st-1042a" → "st1042a"
             }
-            else tokens.Add(v.ToLowerInvariant());
         }
         return tokens;
     }
