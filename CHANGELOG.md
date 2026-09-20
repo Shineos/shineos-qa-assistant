@@ -2,7 +2,9 @@
 
 本プロジェクトのバージョンごとの変更内容です。日本語の紹介ページは [README.md](README.md) / English page: [README-EN.md](README-EN.md) を参照してください。
 
-## 2026-09-20（図面PDF検索・Q&A 拡張パック・feature/drawing-search・未リリース）
+## 2026-09-21（v2.1.6・図面PDF検索・Q## 2026-09-20（図面PDF検索・Q&A 拡張パック・feature/drawing-search・未リリース）A 拡張パック）
+
+> 内容: 拡張パック本体・回答品質修正（fact-grounding-8）・v2.1.5実機検証の結果。コードはv2.1.5検証済みビルドと同一（以降はドキュメント整備のみ）
 
 ### 製造業向け拡張パック「図面PDF検索・Q&A」 — 設定からON/OFF（既定OFF・本体フロー不変）
 
