@@ -24,8 +24,11 @@ public static class Ocr
         return _engine is not null;
     }
 
-    /// <summary>画像(PNG/JPEG)をOCRし、テキストと図番候補（正規形）を返す</summary>
-    public static async Task<(string Text, List<(string Raw, string Norm)> Zubans)> RecognizeAsync(byte[] image)
+    public sealed record OcrZuban(string Raw, string Norm);
+
+    /// <summary>画像(PNG/JPEG)をOCRし、テキストと図番候補（正規形）を返す。
+    /// タプルはJSON直列化で空オブジェクトになるためレコード型を使用（/api/ocr の契約: zubans[{raw,norm}]）</summary>
+    public static async Task<(string Text, List<OcrZuban> Zubans)> RecognizeAsync(byte[] image)
     {
         if (!IsAvailable() || _engine is null)
             throw new InvalidOperationException("ja-JP OCR engine unavailable");
@@ -34,11 +37,11 @@ public static class Ocr
         using var software = await decoder.GetSoftwareBitmapAsync();
         var result = await _engine.RecognizeAsync(software);
         var text = result.Text ?? "";
-        var zubans = new List<(string Raw, string Norm)>();
+        var zubans = new List<OcrZuban>();
         foreach (var m in DrawingIngest.ZubanRegex().Matches(text).Cast<Match>())
         {
             var norm = Rag.NormalizeZuban(m.Value);
-            if (norm.Length >= 2 && !zubans.Any(z => z.Norm == norm)) zubans.Add((m.Value, norm));
+            if (norm.Length >= 2 && !zubans.Any(z => z.Norm == norm)) zubans.Add(new OcrZuban(m.Value, norm));
         }
         return (text, zubans);
     }
