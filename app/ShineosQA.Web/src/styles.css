@@ -199,3 +199,14 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .pbar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.4s; }
 .model-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .model-row span:first-child { flex: 1; }
+
+/* ---- 図面PDF検索・Q&A 拡張パック（製造業向け） ---- */
+.badge-drawing { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 999px; padding: 1px 8px; font-size: 10.5px; font-weight: 600; }
+.file-thumb { width: 34px; height: 44px; object-fit: cover; object-position: top left; border: 1px solid var(--border); border-radius: 4px; vertical-align: middle; margin-right: 8px; background: #fff; }
+.kfilter { margin: 8px 0; }
+.kfilter input { width: 100%; max-width: 420px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; font-family: inherit; }
+.msg-image { max-width: 260px; border-radius: 8px; border: 1px solid var(--border); margin-top: 6px; display: block; }
+.chip { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin: 6px 0; background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; font-size: 12.5px; }
+.chip-thumb { width: 44px; height: 30px; object-fit: cover; border-radius: 4px; }
+.chip-input { border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 12.5px; width: 130px; font-family: inherit; }
+.open-drawing { flex-shrink: 0; margin-left: auto; }

@@ -264,6 +264,25 @@ public static class Api
             return Results.Json(new { imported = count, failed = failures });
         });
 
+        // 拡張パック（図面）: キャプチャ画像のOCR（Windows内蔵エンジン・完全オフライン）
+        app.MapPost("/api/ocr", async (HttpRequest req) =>
+        {
+            if (!Extensions.IsEnabled(db, Extensions.DrawingId))
+                return Results.Json(new { error = "SHINE_E_EXTENSION_DISABLED", message = "図面拡張機能が無効です（設定で有効にしてください）" }, statusCode: 503);
+            if (!req.HasFormContentType) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "multipart/form-data が必要です" });
+            var form = await req.ReadFormAsync();
+            var f = form.Files.FirstOrDefault();
+            if (f is null || f.Length == 0 || f.Length > 20 * 1024 * 1024)
+                return Results.Json(new { error = "SHINE_E_BAD_REQUEST", message = "画像がありません" }, statusCode: 400);
+            if (!Ocr.IsAvailable())
+                return Results.Json(new { error = "SHINE_E_OCR_UNAVAILABLE", message = "日本語OCRエンジンが利用できません。Windowsの設定で日本語言語パックを導入してください。" }, statusCode: 503);
+            using var s = f.OpenReadStream();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            var (text, zubans) = await Ocr.RecognizeAsync(ms.ToArray());
+            return Results.Json(new { text, zubans });
+        });
+
         app.MapDelete("/api/knowledge/{id}", (long id) =>
         {
             db.Exec("DELETE FROM files WHERE file_id=$i", ("$i", id));

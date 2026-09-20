@@ -35,6 +35,7 @@
           <div id="chat-status" class="chat-status" hidden></div>
           <form id="chat-form" class="composer">
             <textarea id="chat-input" rows="1" placeholder="質問を入力してください（Enterで送信 / Shift+Enterで改行）"></textarea>
+            <div id="capture-host"></div>
             <input type="file" id="attach-input" multiple accept=".pdf,.docx,.md,.txt" hidden />
             <div class="composer-bar">
               <span class="model-wrap">
@@ -46,6 +47,10 @@
               <button type="button" id="attach-btn" class="tool-btn" title="ナレッジにファイルを添付（PDF / Word / Markdown / テキストをその場で登録）">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                 <span>添付</span>
+              </button>
+              <button type="button" id="capture-btn" class="tool-btn" title="画面キャプチャで質問: Win+Shift+S で図面を切り取り、入力欄に Ctrl+V で貼り付けてください（製造業向け拡張）" hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                <span>キャプチャ</span>
               </button>
               <button type="button" id="web-btn" class="tool-btn" title="Web検索（ONにすると質問が外部の検索サービスへ送信されます）">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
@@ -69,8 +74,9 @@
             または <label class="filelabel">ファイルを選択<input type="file" id="file-input" multiple accept=".pdf,.docx,.md,.txt" hidden /></label>
           </div>
           <div id="ingest-status" class="muted"></div>
+          <div class="kfilter"><input type="search" id="knowledge-filter" placeholder="図番・品名・ファイル名で絞り込み（図面拡張機能）" hidden /></div>
           <table class="table" id="files-table">
-            <thead><tr><th>ファイル</th><th>状態</th><th>チャンク数</th><th>登録日時</th><th></th></tr></thead>
+            <thead><tr id="files-head"><th>ファイル</th><th>状態</th><th>チャンク数</th><th>登録日時</th><th></th></tr></thead>
             <tbody id="files-body"></tbody>
           </table>
         </div>

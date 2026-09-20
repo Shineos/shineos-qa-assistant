@@ -1,15 +1,16 @@
 // バックエンドREST/SSEクライアント（OpenAPI契約はフェーズ1で型生成に置換予定）
 
-export interface SourceInfo { file: string; snippet: string; text?: string; kind?: string; url?: string | null }
+export interface SourceInfo { file: string; snippet: string; text?: string; kind?: string; url?: string | null; file_id?: number; zuban?: string | null; hinmei?: string | null; revision?: string | null }
 export interface ChatSummary { uuid: string; id: number; title: string; updated_at: string }
 export interface ChatMessage { role: string; content: string; sources_json?: string | null; created_at?: string }
 export interface ChatDetail { id: number; title: string; messages: ChatMessage[] }
-export interface KnowledgeFile { file_id: number; name: string; status: string; error?: string | null; chunk_count: number; added_at: string }
+export interface KnowledgeFile { file_id: number; name: string; status: string; error?: string | null; chunk_count: number; added_at: string; kind?: string; zuban_raw?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null }
 export interface StatusInfo {
   version: string; tier: string; chat_model: string; chunks: number; ram_gb: number;
   engines: { tier: string; chat_model: string; llm: string; embed: string; rank: string };
 }
-export interface Settings { web_search: boolean; tier: string; idle_unload_minutes: number; bg_friendly: boolean }
+export interface Settings { web_search: boolean; tier: string; idle_unload_minutes: number; bg_friendly: boolean; extensions?: { drawing?: boolean } }
+export interface OcrResult { text: string; zubans: { raw: string; norm: string }[] }
 
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -25,7 +26,14 @@ export const api = {
   newChat: () => fetch('/api/chats', { method: 'POST' }).then(r => json<{ uuid: string }>(r)),
   chat: (uuid: string) => fetch(`/api/chats/${uuid}`).then(r => json<ChatDetail>(r)),
   deleteChat: (uuid: string) => fetch(`/api/chats/${uuid}`, { method: 'DELETE' }),
-  knowledge: () => fetch('/api/knowledge').then(r => json<KnowledgeFile[]>(r)),
+  knowledge: (q?: string) => fetch(`/api/knowledge${q ? `?q=${encodeURIComponent(q)}` : ''}`).then(r => json<KnowledgeFile[]>(r)),
+  thumbUrl: (id: number) => `/api/knowledge/${id}/thumb`,
+  fileUrl: (id: number) => `/api/knowledge/${id}/file`,
+  ocr: (image: File) => {
+    const fd = new FormData();
+    fd.append('image', image, image.name || 'capture.png');
+    return fetch('/api/ocr', { method: 'POST', body: fd }).then(r => json<OcrResult>(r));
+  },
   upload: (files: File[]) => {
     const fd = new FormData();
     for (const f of files) fd.append('files', f, f.name);
