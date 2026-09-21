@@ -44,7 +44,7 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $v = if ($env:GITHUB_REF -match '^refs/tags/v(\d+\.\d+\.\d+)$') { $Matches[1] } else { '0.0.0-dev' }
+          $v = if ($env:GITHUB_REF -match '^refs/tags/v(\d+\.\d+\.\d+)$') { $Matches[1] } else { '0.0.0' }
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "building ShineosQA $v"
 
