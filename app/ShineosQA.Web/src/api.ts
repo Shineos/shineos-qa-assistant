@@ -10,7 +10,7 @@ export interface StatusInfo {
   engines: { tier: string; chat_model: string; llm: string; embed: string; rank: string };
 }
 export interface Settings { web_search: boolean; tier: string; idle_unload_minutes: number; bg_friendly: boolean; extensions?: { drawing?: boolean } }
-export interface OcrResult { text: string; zubans: { raw: string; norm: string }[] }
+export interface OcrResult { text: string; zubans: { raw: string; norm: string }[]; vision?: { zuban?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null; shape?: string | null } | null }
 
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

@@ -187,6 +187,7 @@ export class ChatView {
   private packDrawing = false;               // 拡張パック（図面）: キャプチャ入力の表示条件
   private pendingCapture: { objectUrl: string; file: File } | null = null;
   private pendingZuban = '';
+  private pendingShape = '';                 // 文字なし図形キャプチャからAI読取した形状キーワード
   private showArchived = false;              // サイドバー一覧のアーカイブビュー切替
 
   constructor() {
@@ -415,10 +416,13 @@ export class ChatView {
     host.querySelector('.icon-btn')!.addEventListener('click', () => this.clearCapture(true));
     try {
       const r = await api.ocr(file);
-      this.pendingZuban = r.zubans[0]?.raw ?? '';
+      // AI読取（視覚モデル）の図番を優先。無ければWinRT OCRの第1候補
+      const visionZuban = r.vision?.zuban ?? '';
+      this.pendingZuban = visionZuban || r.zubans[0]?.raw || '';
+      this.pendingShape = r.vision?.shape ?? '';
       const textEl = host.querySelector('.chip-text')!;
       if (this.pendingZuban) {
-        // 確認チップ: OCR結果を1タップで修正できるようにする（読み間違いを致命傷にしない設計）
+        // 確認チップ: 読取結果を1タップで修正できるようにする（読み間違いを致命傷にしない設計）
         textEl.textContent = '';
         const inp = document.createElement('input');
         inp.type = 'text';
@@ -429,10 +433,13 @@ export class ChatView {
           if (ev.key === 'Enter') { ev.preventDefault(); (document.getElementById('chat-input') as HTMLTextAreaElement).focus(); }
         });
         const lbl = document.createElement('span');
-        lbl.textContent = 'の図面について質問';
+        lbl.textContent = visionZuban ? 'の図面について質問（AI読取）' : 'の図面について質問';
         textEl.append(inp, lbl);
         inp.focus();
         inp.select();
+      } else if (this.pendingShape) {
+        // 文字なし図形キャプチャ: AIが図形の特徴を読み、それを検索の手がかりにする
+        textEl.textContent = `図形を読み取りました（${this.pendingShape}）— 質問を入力して送信すると、この特徴で検索します`;
       } else {
         textEl.textContent = '図番を読み取れませんでした（画像は質問に添付されます）';
       }
@@ -446,6 +453,7 @@ export class ChatView {
     if (this.pendingCapture && revoke) URL.revokeObjectURL(this.pendingCapture.objectUrl);
     this.pendingCapture = null;
     this.pendingZuban = '';
+    this.pendingShape = '';
     const host = document.getElementById('capture-host');
     if (host) host.innerHTML = '';
   }
@@ -674,7 +682,9 @@ export class ChatView {
     if (this.sending) return;
     const input = document.getElementById('chat-input') as HTMLTextAreaElement;
     const text = input.value.trim();
-    if (!text) return;
+    // キャプチャ（図面拡張）があれば質問文なしでも送信可: 図番やAI読取した形状キーワードが
+    // 検索の手がかりになる（文字なし図形キャプチャからの検索要求）
+    if (!text && !this.pendingCapture) return;
     input.value = '';
     input.style.height = 'auto';
     // キャプチャ（拡張パック）: 確認チップの図番（修正可）を質問文に前置きする
@@ -682,7 +692,10 @@ export class ChatView {
     const zuban = this.pendingZuban ? (chipInput?.value.trim() || this.pendingZuban) : '';
     const captureFile = this.pendingCapture?.file;
     const captureUrl = this.pendingCapture?.objectUrl;
-    const message = zuban ? `（図番: ${zuban}）${text}` : text;
+    const shape = this.pendingShape;
+    let message = zuban ? `（図番: ${zuban}）${text}` : text;
+    // 文字なし図形キャプチャ: 図番が読めなくても、AIが読んだ形状キーワードを検索の手がかりにする
+    if (!zuban && shape && captureFile) message = `（図面の特徴: ${shape}）${text}`;
     this.clearCapture(false);
     this.sending = true;
     (document.getElementById('send-btn') as HTMLButtonElement).disabled = true;

@@ -126,6 +126,13 @@ public static partial class DrawingIngest
 
     public static bool IsPlausibleRevision(string? v) => v != null && System.Text.RegularExpressions.Regex.IsMatch(v, "^[A-Z][0-9]?$");
 
+    [GeneratedRegex(@"^(SS[0-9]|SUS[0-9]*|S45C|S50C|S55C|SM[0-9A-Z]+|SCM[0-9]*|FC[DT]?[0-9]*|FCD[0-9]*|A5052|A6061|A6063|AC[0-9A-Z]+|C[0-9]{4}|AL)[0-9A-Za-z\- ]*$")]
+    private static partial Regex MaterialTokenRegex();
+
+    /// <summary>材質トークンの判定（SS400・SUS304 等）。LLMが材質を品名フィールドに返す誤りを実図面検証で
+    /// 確認したため、品名の検証でこれを排除する（「SS400ブラケット」等の複合語は排除しない）</summary>
+    public static bool IsMaterialToken(string? v) => v != null && MaterialTokenRegex().IsMatch(v.Trim());
+
     /// <summary>チャンク前置き。出典表示とRAGコンテキストが図面情報を自然に運ぶ（ChatFlowの出典正規化はFile名ベースのため変更不要）。
     /// 抽出できた欄のみを載せる（「不明」の断言も誤りの一種。実図面検証cr05: スキャン図面の「尺度: 不明」が
     /// ベクトル図面の「尺度: 1:1」への回答を妨げた）。尺度和らメタは前置きに含め、ノイズの多い本体テキストに頼らない</summary>

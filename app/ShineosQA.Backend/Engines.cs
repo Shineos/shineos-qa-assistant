@@ -94,8 +94,9 @@ public sealed class Supervisor
     private readonly LlmGateway _gw;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly object _lock = new();
-    private EngineProc? _llm, _emb, _rank;
+    private EngineProc? _llm, _emb, _rank, _vision;
     private DateTime _llmLastUsed = DateTime.UtcNow;
+    private DateTime _visionLastUsed = DateTime.UtcNow;
     private Task? _idleTask;
     private readonly ILogger _log;
     private int _llmStartFails;      // 連続起動失敗（サーキットブレーカー）
@@ -103,7 +104,7 @@ public sealed class Supervisor
 
     public Supervisor(AppConfig cfg, LlmGateway gw, ILogger log) { _cfg = cfg; _gw = gw; _log = log; }
 
-    private sealed class EngineProc
+    public sealed class EngineProc // EnsureVision(公開)の戻り値
     {
         public required string Name;
         public required string File; // 読み込んだモデルファイル（tier整合チェック用）
@@ -177,6 +178,31 @@ public sealed class Supervisor
         }
     }
 
+    /// <summary>視覚言語エンジン（図面キャプチャのAI読取）を確保する。モデル未導入ならnull
+    /// （呼び出し側はWinRT OCRへフォールバック）。--mmproj付きで起動し画像入力を有効化する。
+    /// 初回起動はモデル1.7GBのロードで数十秒かかるため、拡張パックON時にウォームアップする</summary>
+    public EngineProc? EnsureVision()
+    {
+        lock (_lock)
+        {
+            if (!VisionInstalled) return null;
+            if (_vision is { } v && !v.Proc.HasExited)
+            { _visionLastUsed = DateTime.UtcNow; StartIdleWatcher(); return v; }
+            if (_vision != null) DisposeEngine(_vision);
+            var mmproj = Path.Combine(_cfg.ModelsDir, _cfg.VisionMmprojFile);
+            _vision = Start("vision", _cfg.VisionModelFile, _cfg.EnginePortVision,
+                extra: new[] { "--mmproj", mmproj, "-c", "8192" }); // 画像トークン分の余裕を持たせたctx
+            _visionLastUsed = DateTime.UtcNow;
+            StartIdleWatcher();
+            return _vision;
+        }
+    }
+
+    /// <summary>視覚モデル2ファイル（本体+mmproj）がモデルディレクトリに揃っているか</summary>
+    public bool VisionInstalled =>
+        File.Exists(Path.Combine(_cfg.ModelsDir, _cfg.VisionModelFile)) &&
+        File.Exists(Path.Combine(_cfg.ModelsDir, _cfg.VisionMmprojFile));
+
     /// <summary>LLM起動失敗の連続カウントをリセット（モデル再ダウンロード完了・階級切替時に呼ぶ）</summary>
     public void ResetLlmFailure()
     {
@@ -245,10 +271,11 @@ public sealed class Supervisor
         while (true)
         {
             await Task.Delay(TimeSpan.FromMinutes(1));
-            EngineProc? toStopLlm = null, toStopRank = null, toStopEmb = null;
+            EngineProc? toStopLlm = null, toStopRank = null, toStopEmb = null, toStopVision = null;
             lock (_lock)
             {
                 var idle = DateTime.UtcNow - _llmLastUsed;
+                var visionIdle = DateTime.UtcNow - _visionLastUsed;
                 if (idle <= llmIdle)
                 {
                     // 利用が再開されたら解放予定を取り消す
@@ -260,6 +287,8 @@ public sealed class Supervisor
                     rankDueAt ??= DateTime.UtcNow + TimeSpan.FromMinutes(5);
                     embDueAt ??= DateTime.UtcNow + llmIdle;
                 }
+                if (visionIdle > llmIdle && _vision != null && !_vision.Proc.HasExited)
+                { toStopVision = _vision; _vision = null; }
                 if (rankDueAt is { } r && _rank != null && !_rank.Proc.HasExited && DateTime.UtcNow > r)
                 { toStopRank = _rank; _rank = null; rankDueAt = null; }
                 if (embDueAt is { } e && _emb != null && !_emb.Proc.HasExited && DateTime.UtcNow > e)
@@ -269,10 +298,11 @@ public sealed class Supervisor
             if (toStopLlm != null) { _log.Info($"idle unload: stopping llm engine (port {toStopLlm.Port})"); lock (_lock) DisposeEngine(toStopLlm); }
             if (toStopRank != null) { _log.Info("idle unload: stopping rank engine"); lock (_lock) DisposeEngine(toStopRank); }
             if (toStopEmb != null) { _log.Info("idle unload: stopping embed engine"); lock (_lock) DisposeEngine(toStopEmb); }
+            if (toStopVision != null) { _log.Info("idle unload: stopping vision engine"); lock (_lock) DisposeEngine(toStopVision); }
             lock (_lock)
             {
                 // 全エンジン停止で監視ループも終了（次のEnsureLlmが新しい監視を起動する）
-                if (_llm == null && _rank == null && _emb == null)
+                if (_llm == null && _rank == null && _emb == null && _vision == null)
                 {
                     _idleTask = null;
                     return;
@@ -377,8 +407,8 @@ public sealed class Supervisor
     {
         lock (_lock)
         {
-            foreach (var e in new[] { _llm, _emb, _rank }) if (e != null) DisposeEngine(e);
-            _llm = _emb = _rank = null;
+            foreach (var e in new[] { _llm, _emb, _rank, _vision }) if (e != null) DisposeEngine(e);
+            _llm = _emb = _rank = _vision = null;
         }
     }
 
@@ -389,6 +419,7 @@ public sealed class Supervisor
         llm = _llm == null ? "unloaded" : (_llm.Proc.HasExited ? "crashed" : $"running(pid={_llm.Proc.Id})"),
         embed = _emb is { } e1 && !e1.Proc.HasExited ? $"running(pid={e1.Proc.Id})" : "stopped",
         rank = _rank is { } e2 && !e2.Proc.HasExited ? $"running(pid={e2.Proc.Id})" : "stopped",
+        vision = _vision is { } v && !v.Proc.HasExited ? $"running(pid={v.Proc.Id})" : (VisionInstalled ? "stopped" : "未導入"),
     };
 }
 

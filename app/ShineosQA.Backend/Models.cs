@@ -31,6 +31,17 @@ public sealed class ModelManager
             "https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/resolve/main/Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
             "https://hf-mirror.com/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/resolve/main/Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
             "36c21449a36760933709aa8fe6ffafe946961a6dc9174b6ad10ba6000e649121", "Apache-2.0", false, 16),
+        // 視覚言語モデル（図面キャプチャのAI読取）: 表題欄の図番・品名・材質・改訂を画像から直接読む。
+        // WinRT OCRがハイフン付き図番や素材記号を読み違える実図面検証の対策。Qwen3-VLはApache-2.0
+        // （Qwen2.5系のQwen Research Licenseとは異なりカタログ配布可能）
+        new("vision-qwen3vl", "視覚モデル Qwen3-VL-2B（図面キャプチャのAI読取・約1.7GB）", "Qwen3-VL-2B-Instruct-Q8_0.gguf", "vision", 1834427296,
+            "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3-VL-2B-Instruct-Q8_0.gguf",
+            "https://hf-mirror.com/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3-VL-2B-Instruct-Q8_0.gguf",
+            "b7802e29f71a9e5b5e3f83f613df898a2204342dcea71a231ea501d481813c39", "Apache-2.0", false, 8),
+        new("vision-qwen3vl-mmproj", "視覚プロジェクタ Qwen3-VL-2B（視覚モデルとセットで導入）", "mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf", "vision", 445053056,
+            "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+            "https://hf-mirror.com/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+            "69066c8f279ec85ff48ab4059f6ebba0d2932ca57667f2bbdac7d9805bca9e7b", "Apache-2.0", false, 0),
     };
 
     /// <summary>ファイル名からカタログのSHA256を引く（起動前整合性検証用）。カタログ外はnull</summary>

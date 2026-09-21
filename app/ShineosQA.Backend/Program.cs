@@ -35,6 +35,7 @@ public static class Api
     public static void MapRoutes(WebApplication app, AppCtx ctx)
     {
         var cfg = ctx.Cfg; var db = ctx.Db; var sup = ctx.Sup; var index = ctx.Index; var ingest = ctx.Ingest; var flow = ctx.Flow;
+        var gw = ctx.Gateway; var log = ctx.Log;
 
         app.MapGet("/health", () => Results.Json(new { status = true }));
 
@@ -316,7 +317,9 @@ public static class Api
             return Results.Json(new { imported = count, failed = failures });
         });
 
-        // 拡張パック（図面）: キャプチャ画像のOCR（Windows内蔵エンジン・完全オフライン）
+        // 拡張パック（図面）: キャプチャ画像の読取。WinRT OCR＋視覚言語モデル（導入時）の併用。
+        // VLモデル（Qwen3-VL）はWinRT OCRが読めない表題欄（ハイフン付き図番等）や文字なし図形からも
+        // 図番・品名・材質・改訂・形状キーワードを読み取る（完全オフライン）
         app.MapPost("/api/ocr", async (HttpRequest req) =>
         {
             if (!Extensions.IsEnabled(db, Extensions.DrawingId))
@@ -331,9 +334,22 @@ public static class Api
             using var s = f.OpenReadStream();
             using var ms = new MemoryStream();
             s.CopyTo(ms);
-            var (text, zubans) = await Ocr.RecognizeAsync(ms.ToArray());
-            return Results.Json(new { text, zubans });
+            var image = ms.ToArray();
+            var (text, zubans) = await Ocr.RecognizeAsync(image);
+            // 視覚モデルAI読取（導入済みなら優先。未導入ならnullで従来どおり）
+            object? vision = null;
+            var vr = await VisionRead.ReadAsync(gw, sup, cfg, image, f.ContentType ?? "image/png", log, req.HttpContext.RequestAborted);
+            if (vr is not null)
+            {
+                vision = new { zuban = NullIfEmpty(vr.Zuban), hinmei = NullIfEmpty(vr.Hinmei), zairyo = NullIfEmpty(vr.Zairyo), revision = NullIfEmpty(vr.Revision), shape = NullIfEmpty(vr.Shape) };
+                // AI読取の図番を候補の先頭に置く（チップの初期値になる。WinRT候補は予備として残す）
+                if (!string.IsNullOrWhiteSpace(vr.Zuban))
+                    zubans.Insert(0, new Ocr.OcrZuban(vr.Zuban, Rag.NormalizeZuban(vr.Zuban)));
+            }
+            return Results.Json(new { text, zubans, vision });
         });
+
+        static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
         app.MapDelete("/api/knowledge/{id}", (long id) =>
         {
@@ -355,6 +371,7 @@ public sealed class AppCtx
     public required Ingest Ingest;
     public required ChatFlow Flow;
     public required ModelManager Models;
+    public required LlmGateway Gateway; // /api/ocrの視覚モデルAI読取から共用
 }
 
 public sealed class Program
@@ -540,7 +557,7 @@ public sealed class Program
         index.LoadFrom(db);
         var ingest = new Ingest(db, gw, sup, index, cfg, log);
         var flow = new ChatFlow(cfg, db, sup, gw, index, new WebSearch(), log);
-        var ctx = new AppCtx { Cfg = cfg, Db = db, Sup = sup, Index = index, Ingest = ingest, Flow = flow, Models = new ModelManager(cfg, log), Log = log };
+        var ctx = new AppCtx { Cfg = cfg, Db = db, Sup = sup, Index = index, Ingest = ingest, Flow = flow, Models = new ModelManager(cfg, log), Log = log, Gateway = gw };
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>(), ContentRootPath = AppContext.BaseDirectory, WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot") });
         builder.WebHost.ConfigureKestrel(o => o.Listen(System.Net.IPAddress.Loopback, cfg.Port));

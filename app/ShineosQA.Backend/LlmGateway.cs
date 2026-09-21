@@ -53,6 +53,36 @@ public sealed class LlmGateway
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
     }
 
+    /// <summary>視覚言語モデルへの画像付き1回呼出し（llama-serverのOpenAI互換マルチモーダルAPI）。
+    /// 画像はdata URLで送る。画像エンコード込みでCPUだと数十秒かかるため呼び出し側でタイムアウトを管理する</summary>
+    public async Task<string> VisionOnceAsync(int port, string prompt, byte[] image, string imageMime, int maxTokens, CancellationToken ct)
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            model = "local-vision",
+            stream = false,
+            temperature = 0,
+            max_tokens = maxTokens,
+            messages = new object[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "text", text = prompt },
+                        new { type = "image_url", image_url = new { url = $"data:{imageMime};base64,{Convert.ToBase64String(image)}" } },
+                    },
+                },
+            },
+        });
+        using var resp = await _http.PostAsync($"http://127.0.0.1:{port}/v1/chat/completions",
+            new StringContent(body, Encoding.UTF8, "application/json"), ct);
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
+    }
+
     /// <summary>SSEストリーム。deltaのcontentをonDeltaへ、最終usage/timingsを返す</summary>
     public async Task ChatStreamAsync(int port, IReadOnlyList<(string role, string content)> messages, double temperature, int maxTokens,
         Func<string, Task> onDelta, CancellationToken ct)
