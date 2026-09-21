@@ -39,21 +39,40 @@ public sealed partial class WebSearch
 
     public async Task<List<WebResult>> SearchAsync(string query, int topN = 4, CancellationToken ct = default)
     {
-        // GET（実測で安定）→ 1s待ちPOST → 2s待ちGET の順にリトライ
+        // GET（実測で安定）→ 1s待ちPOST → 2s待ちGET の順にリトライ。
+        // 重複排除で候補が減るため多めに取得してから上位topNに絞る
         Exception? lastErr = null;
         foreach (var (method, delayMs) in new[] { ("GET", 0), ("POST", 1000), ("GET", 2000) })
         {
             if (delayMs > 0) await Task.Delay(delayMs, ct);
             try
             {
-                var results = method == "GET" ? await GetAsync(query, topN, ct) : await PostAsync(query, topN, ct);
-                if (results.Count > 0) return results;
+                var results = method == "GET" ? await GetAsync(query, topN * 3, ct) : await PostAsync(query, topN * 3, ct);
+                results = Dedup(results);
+                if (results.Count > 0) return results.Take(topN).ToList();
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { lastErr = ex; }
         }
         if (lastErr != null) throw lastErr;
         return new List<WebResult>();
+    }
+
+    /// <summary>同一URL・同一内容（タイトル+スニペット）の重複を排除する。
+    /// DuckDuckGoは同一サイトの複数URLや同一スニペットの重複を返すことがあり、
+    /// 参照情報の重複はクイック1.7Bの「情報なし」誤判定（横浜天気の実測）を誘発する</summary>
+    public static List<WebResult> Dedup(List<WebResult> results)
+    {
+        var seenUrl = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenContent = new HashSet<string>(StringComparer.Ordinal);
+        var list = new List<WebResult>();
+        foreach (var r in results)
+        {
+            if (!seenUrl.Add(r.Url.Split('?', '#')[0])) continue;           // 同一URL（クエリ・フラグメント除く）
+            if (!seenContent.Add(r.Title + "\n" + r.Snippet)) continue;     // 同一タイトル+スニペット
+            list.Add(r);
+        }
+        return list;
     }
 
     private async Task<List<WebResult>> GetAsync(string query, int topN, CancellationToken ct)
@@ -228,8 +247,14 @@ public sealed partial class WebSearch
     /// ctx=2048の予算対策で、モデルには事実の本文を優先して与える）</summary>
     public static string ToContext(List<WebResult> results)
     {
+        // 念のためここでも重複排除（二重防御: 上流で重複が混入しても同一行の反復を防ぐ）
         var sb = new StringBuilder();
-        foreach (var r in results) sb.Append($"・{r.Title}: {r.Snippet}\n");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var r in results)
+        {
+            if (!seen.Add(r.Title + "\n" + r.Snippet)) continue;
+            sb.Append($"・{r.Title}: {r.Snippet}\n");
+        }
         return sb.ToString();
     }
 }

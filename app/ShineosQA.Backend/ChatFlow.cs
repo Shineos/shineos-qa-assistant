@@ -285,6 +285,19 @@ public sealed class ChatFlow
                 _db.SetSetting("tier", modelSel);
                 await Sse(ctx, "model", new { tier = modelSel, model_file = _cfg.ChatModelFile });
             }
+            // Web検索時はクイック1.7Bだと参照内容の読み違え（「情報なし」誤判定・表の誤コピー）が
+            // 起きるため（v2.1.4実測＋横浜天気の誤回答）、標準モデルが導入済みなら自動で標準を使用する。
+            // ユーザーの明示指定（modelパラメータ）がある場合はそちらを優先
+            if (webOn && modelSel.Length == 0 && _cfg.EffectiveTier == "quick"
+                && File.Exists(Path.Combine(_cfg.ModelsDir, _cfg.StandardModel)))
+            {
+                if (_sup.SwitchLlmTier("standard"))
+                {
+                    _db.SetSetting("tier", "standard");
+                    await Sse(ctx, "model", new { tier = "standard", model_file = _cfg.ChatModelFile });
+                    _log.Info("web search: auto-switched to standard tier (quick misreads web references)");
+                }
+            }
             _sup.EnsureLlm(); // idle unload後の再確保（キャッシュヒット時は不要のためここで確保）
 
             // 3) Web検索（任意）— 失敗・0件はSSEで可視化し、回答にも反映
