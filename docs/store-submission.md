@@ -183,7 +183,7 @@
 > ・すべての処理が自分のPC内で完結。社内文書・質問・回答が外部に送信されません（テレメトリもありません）
 > ・インストール後の初回起動時にAIモデル（クイック1.7B・合計約2.3GB）を取得します。以降は完全オフラインで動作します（モデルの取得時にだけ通信します）
 > ・速度と精度のバランスでモデルを切り替え可能（クイック1.7B／標準4B／高品質30B・追加モデルはアプリ内からダウンロード）
-> ・PDF・Word・Markdown・テキストをドラッグ＆ドロップでナレッジ化。追加した文書は即座に検索対象になります
+> ・PDF・Word・Excel・CSV・Markdown・テキストをドラッグ＆ドロップでナレッジ化。追加した文書は即座に検索対象になります
 > ・ハイブリッド検索（キーワード＋意味検索）で型番・規程番号・固有名詞も正確にヒット
 > ・閉じるとAIエンジンも完全停止。他アプリの作業を優先する低負荷モード搭載
 > ・製造業向け拡張（設定から有効・既定OFF）: 図面PDFの表題欄（図番・品名・材質・改訂）を自動読み取りし、図番の表記ゆれ（A-1234／A1234）も同一視して検索。画面キャプチャを貼って図番から質問もできます（OCRはPC内で処理）
@@ -208,7 +208,7 @@
 > - All processing stays on your PC. Documents, questions and answers are never sent anywhere (no telemetry)
 > - On first launch, the app downloads the AI models (~2.3 GB); after that it runs fully offline
 > - Switch between Quick (1.7B) / Standard (4B) / Quality (30B) models right in the app; extra models download on demand
-> - Register PDF / Word / Markdown / text files by drag & drop; newly added documents are searchable immediately
+> - Register PDF / Word / Excel / CSV / Markdown / text files by drag & drop; newly added documents are searchable immediately
 > - Hybrid search (keyword + semantic) so model numbers and regulation IDs are found accurately
 > - Closing the app stops the AI engine completely; a low-load mode prioritizes your other apps
 >
