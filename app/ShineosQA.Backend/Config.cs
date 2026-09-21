@@ -20,6 +20,9 @@ public sealed class AppConfig
     public int EnginePortLlm { get; set; } = 8301;
     public int EnginePortEmb { get; set; } = 8302;
     public int EnginePortRank { get; set; } = 8303;
+    public int EnginePortVision { get; set; } = 8304; // 図面キャプチャAI読取（視覚言語モデル・任意）
+    public string VisionModelFile { get; set; } = "Qwen3-VL-2B-Instruct-Q8_0.gguf";
+    public string VisionMmprojFile { get; set; } = "mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf";
     public int CtxSize { get; set; } = 4096;
     public int Threads { get; set; } = 0; // 0=物理コア数
     public int IdleUnloadMinutes { get; set; } = 60;

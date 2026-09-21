@@ -49,6 +49,10 @@ public sealed class Db : IDisposable
         try { Exec("ALTER TABLE answer_cache ADD COLUMN model TEXT NOT NULL DEFAULT ''"); } catch { }
         // 拡張パック（図面検索）: files種別列 + 図面メタデータ（docs/impl-drawing-search.md §1.4）
         try { Exec("ALTER TABLE files ADD COLUMN kind TEXT NOT NULL DEFAULT 'doc'"); } catch { }
+        // キャプチャ画像: ユーザーメッセージに添付画像の保存相対パス（data/files/captures/...）。NULL=画像なし
+        try { Exec("ALTER TABLE messages ADD COLUMN image TEXT"); } catch { }
+        // チャットアーカイブ: 0=通常 / 1=アーカイブ済み（一覧の既定表示から除外）
+        try { Exec("ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"); } catch { }
         Exec("""
             CREATE TABLE IF NOT EXISTS drawing_meta(
               file_id INTEGER PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,

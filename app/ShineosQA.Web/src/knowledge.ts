@@ -48,7 +48,14 @@ export class KnowledgeView {
       this.packDrawing = !!s.extensions?.drawing;
     } catch { /* 設定取得失敗時は現状維持で一覧のみ更新 */ }
     const fi = document.getElementById('file-input') as HTMLInputElement;
-    fi.accept = ACCEPT;
+    fi.accept = ACCEPT + (this.packDrawing ? ',.dxf' : '');
+    const dz = document.getElementById('dropzone')!;
+    const tn = dz.firstChild;
+    if (tn && tn.nodeType === Node.TEXT_NODE) {
+      tn.textContent = this.packDrawing
+        ? 'ここに PDF / Word / Excel / CSV / Markdown / テキスト / DXF（CAD図面） をドラッグ＆ドロップ '
+        : 'ここに PDF / Word / Excel / CSV / Markdown / テキスト をドラッグ＆ドロップ ';
+    }
     const kf = document.getElementById('knowledge-filter') as HTMLInputElement | null;
     if (kf) kf.hidden = !this.packDrawing;
 
@@ -73,6 +80,23 @@ export class KnowledgeView {
       cells += `<td class="st-${f.status}">${esc(status)}</td><td>${f.chunk_count}</td><td>${esc(f.added_at ?? '')}</td>`;
       tr.innerHTML = cells;
       const td = document.createElement('td');
+      // 取り込み失敗は原因を取り除いた後にワンクリックで再試行できる（元ファイルが保存されている場合）
+      if (f.status === 'error') {
+        const retry = document.createElement('button');
+        retry.className = 'icon-btn';
+        retry.textContent = '↻';
+        retry.title = '再試行';
+        retry.addEventListener('click', async () => {
+          retry.disabled = true;
+          const r = await api.retryKnowledge(f.file_id).catch(() => ({ ok: false, message: '通信エラー' }));
+          if (r.ok === false) {
+            const st = tr.querySelector('.st-error') as HTMLElement | null;
+            if (st) st.title = `再試行できません: ${r.message ?? ''}`;
+          }
+          await this.refresh();
+        });
+        td.appendChild(retry);
+      }
       const del = document.createElement('button');
       del.className = 'icon-btn';
       del.textContent = '×';

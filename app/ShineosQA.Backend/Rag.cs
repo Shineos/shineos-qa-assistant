@@ -26,6 +26,13 @@ public static partial class Rag
     [GeneratedRegex(@"今日|本日|昨日|明日|明後日|一昨日|今週|来週|先週|今月|来月|先月|今年|昨年|去年|来年|現在|日付|曜日|何日|何時|時刻|天気|気温|天候|降水確率|気象|ニュース|株価|為替|レート")]
     public static partial Regex TimeSensitiveQuestion();
 
+    /// <summary>質問の図面意図: 「図面/図番」を含むか図番パターン（キャプチャチップからの質問含む）。
+    /// 図面チャンクは寸法数値のノイズでキーワード一致が希薄になり濃密な文書チャンクに埋もれるため
+    /// （実図面検証cr02: JIS B 0405の質問が規格一覧文書に取って代わられた）、この判定で図面チャンクを
+    /// 候補プールへ優先的に残す（ChatFlowのブーストで使用）</summary>
+    public static bool HasDrawingIntent(string question) =>
+        question.Contains("図面") || question.Contains("図番") || DrawingIngest.ZubanRegex().IsMatch(question);
+
     /// <summary>システムプロンプト末尾に付与する現在日付行。「今日は何日」等の質問に
     /// モデルが正確に答えられるようにする（学習時点で知識が止まっているため）。
     /// 時刻は含めない: ChatFlowの前置きキャッシュ（プリフィックスキャッシュ）効率のため
@@ -169,13 +176,19 @@ public static partial class Rag
         return dot / Math.Sqrt(na * nb);
     }
 
+    /// <summary>文＋元の区切り文字（句点・改行）を含めて切り出す正規表現。Snippet専用:
+    /// 区切り込みで切り出せば再結合が元テキストの完全な部分文字列になり、出典モーダルの
+    /// 該当箇所ハイライト（indexOf照合）が必ず成功する（SentenceRegexは句点/改行を捨てるため不使用）</summary>
+    [GeneratedRegex(@"[^。．.\n]+[。．.]?\n?")]
+    private static partial Regex SnippetSentenceRegex();
+
     /// <summary>クエリ関連文を中心としたスニペット抽出。
     /// 語彙が重ならない場合（例: 日本語質問↔英語PDF）は関連文を特定できないため全文を返す
     /// （スニペット化による誤ガード回帰の防止: latency-verification §5）</summary>
     public static string Snippet(string text, IReadOnlySet<string> queryTokens, int max = SnippetMaxChars)
     {
         if (text.Length <= max) return text;
-        var sents = SentenceRegex().Matches(text).Cast<Match>().Select(m => m.Value).ToArray();
+        var sents = SnippetSentenceRegex().Matches(text).Cast<Match>().Select(m => m.Value).ToArray();
         if (sents.Length == 0) return text.Substring(0, max);
         int bestI = 0, bestScore = 0;
         for (int i = 0; i < sents.Length; i++)
@@ -189,6 +202,7 @@ public static partial class Rag
         var sb = new StringBuilder(sents[bestI]);
         while (sb.Length < max)
         {
+            // 区切り文字込みで結合するため、再結合結果は常に元テキストの部分文字列になる
             if (hi + 1 < sents.Length && sb.Length + sents[hi + 1].Length <= max) { hi++; sb.Append(sents[hi]); }
             else if (lo - 1 >= 0 && sb.Length + sents[lo - 1].Length <= max) { lo--; sb.Insert(0, sents[lo]); }
             else break;

@@ -7,7 +7,12 @@ namespace ShineosQA.Backend;
 public sealed class ModelManager
 {
     public sealed record CatalogEntry(string Id, string Name, string File, string Kind, long SizeBytes,
-        string UrlPrimary, string UrlMirror, string Sha256, string License, bool Required, int MinRamGb);
+        string UrlPrimary, string UrlMirror, string Sha256, string License, bool Required, int MinRamGb,
+        CompanionFile[]? Extras = null);
+
+    /// <summary>セットで必要な追加ファイル（例: 視覚モデルのmmproj）。本体と同時にDL・検証・削除される。
+    /// SizeBytesはプログレス表示の合計計算に使う</summary>
+    public sealed record CompanionFile(string File, string UrlPrimary, string UrlMirror, string Sha256, long SizeBytes);
 
     private static readonly CatalogEntry[] Catalog =
     {
@@ -31,6 +36,18 @@ public sealed class ModelManager
             "https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/resolve/main/Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
             "https://hf-mirror.com/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/resolve/main/Qwen3-30B-A3B-Instruct-2507-UD-Q3_K_XL.gguf",
             "36c21449a36760933709aa8fe6ffafe946961a6dc9174b6ad10ba6000e649121", "Apache-2.0", false, 16),
+        // 視覚言語モデル（図面キャプチャのAI読取）: 表題欄の図番・品名・材質・改訂を画像から直接読む。
+        // WinRT OCRがハイフン付き図番や素材記号を読み違える実図面検証の対策。Qwen3-VLはApache-2.0
+        // （Qwen2.5系のQwen Research Licenseとは異なりカタログ配布可能）。
+        // SizeBytesは本体+mmprojの合計。UIは1行（本体+セット品を1クリックでDL）
+        new("vision-qwen3vl", "視覚モデル Qwen3-VL-2B（図面キャプチャのAI読取・約2.1GB）", "Qwen3-VL-2B-Instruct-Q8_0.gguf", "vision", 2279480352,
+            "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3-VL-2B-Instruct-Q8_0.gguf",
+            "https://hf-mirror.com/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3-VL-2B-Instruct-Q8_0.gguf",
+            "b7802e29f71a9e5b5e3f83f613df898a2204342dcea71a231ea501d481813c39", "Apache-2.0", false, 8,
+            new[] { new CompanionFile("mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+                "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+                "https://hf-mirror.com/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+                "69066c8f279ec85ff48ab4059f6ebba0d2932ca57667f2bbdac7d9805bca9e7b", 445053056) }),
     };
 
     /// <summary>ファイル名からカタログのSHA256を引く（起動前整合性検証用）。カタログ外はnull</summary>
@@ -65,6 +82,14 @@ public sealed class ModelManager
         var installed = File.Exists(p);
         // 破損判定は検証キャッシュのみで参照（ハッシュ計算なし）。エンジン起動時の検証で判明する
         var corrupted = installed && ModelIntegrity.CachedOk(p, _cfg.DataDir) == false;
+        // セット品（mmproj等）も揃って初めて「導入済み」
+        foreach (var x in e.Extras ?? Array.Empty<CompanionFile>())
+        {
+            var xp = Path.Combine(_cfg.ModelsDir, x.File);
+            var xi = File.Exists(xp);
+            installed = installed && xi;
+            if (xi && ModelIntegrity.CachedOk(xp, _cfg.DataDir) == false) corrupted = true;
+        }
         return new ModelStatus(e.Id, e.Name, e.File, e.Kind, e.SizeBytes, e.License,
             installed, e.Required, e.MinRamGb, corrupted);
     }).ToList();
@@ -78,63 +103,81 @@ public sealed class ModelManager
         try
         {
             var entry = Catalog.FirstOrDefault(e => e.Id == id) ?? throw new KeyNotFoundException($"unknown model id: {id}");
-            var dest = Path.Combine(_cfg.ModelsDir, entry.File);
-            if (File.Exists(dest))
-            {
-                // 既存ファイルが正常なら何もしない。破損（SHA不一致）している場合は削除して
-                // 再ダウンロードする — 「再ダウンロードしてください」の案内が実際に修復を完了させるため
-                string existing;
-                using (var fs = File.OpenRead(dest))
-                    existing = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct));
-                if (existing.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase)) return;
-                _log.Warn($"existing model file is corrupted ({entry.File}, sha {existing[..12]}…) — re-downloading");
-                File.Delete(dest);
-            }
+            // 本体＋セット品（mmproj等）を順にダウンロード・検証する（1エントリ=1機能の完全導入）
+            var targets = new List<(string File, string UrlP, string UrlM, string Sha)>()
+                { (entry.File, entry.UrlPrimary, entry.UrlMirror, entry.Sha256) };
+            foreach (var x in entry.Extras ?? Array.Empty<CompanionFile>())
+                targets.Add((x.File, x.UrlPrimary, x.UrlMirror, x.Sha256));
+
             Directory.CreateDirectory(_cfg.ModelsDir);
+            Progress = new DownloadProgress { State = "downloading", CurrentId = id, Total = entry.SizeBytes, StartedAt = DateTime.UtcNow };
             Exception? lastErr = null;
-            foreach (var url in new[] { entry.UrlPrimary, entry.UrlMirror })
+
+            foreach (var (file, urlP, urlM, sha) in targets)
             {
-                try
+                var dest = Path.Combine(_cfg.ModelsDir, file);
+                if (File.Exists(dest))
                 {
-                    var uri = new Uri(url);
-                    NetGuard.EnsurePublicHttp(uri); // SSRFガード: http/Https・公開アドレスのみ
-                    Progress = new DownloadProgress { State = "downloading", CurrentId = id, StartedAt = DateTime.UtcNow };
-                    var tmp = dest + ".part";
-                    using (var resp = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct))
+                    // 既存ファイルが正常ならスキップ（進捗は合計に加算）。破損（SHA不一致）は削除して再DL
+                    string existing;
+                    using (var fs = File.OpenRead(dest))
+                        existing = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct));
+                    if (existing.Equals(sha, StringComparison.OrdinalIgnoreCase))
                     {
-                        resp.EnsureSuccessStatusCode();
-                        Progress.Total = resp.Content.Headers.ContentLength ?? entry.SizeBytes;
-                        await using var src = await resp.Content.ReadAsStreamAsync(ct);
-                        await using var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
-                        var buf = new byte[1 << 20];
-                        int n;
-                        while ((n = await src.ReadAsync(buf, ct)) > 0)
-                        {
-                            await fs.WriteAsync(buf.AsMemory(0, n), ct);
-                            Progress.Bytes += n;
-                        }
+                        Progress.Bytes += new FileInfo(dest).Length;
+                        continue;
                     }
-                    Progress = new DownloadProgress { State = "verifying", CurrentId = id, Bytes = Progress.Bytes, Total = Progress.Total };
-                    string hash;
-                    await using (var fs = File.OpenRead(tmp))
-                        hash = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct));
-                    if (!hash.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException($"sha256 mismatch: expected {entry.Sha256[..12]}… got {hash[..12]}… (SHINE_E_MODEL_VERIFY_FAILED)");
-                    File.Move(tmp, dest);
-                    Progress = new DownloadProgress { State = "done", CurrentId = id, Bytes = Progress.Bytes, Total = Progress.Total };
-                    _log.Info($"model installed: {entry.File} ({Progress.Bytes / 1024 / 1024}MB, sha verified)");
-                    return;
+                    _log.Warn($"existing model file is corrupted ({file}, sha {existing[..12]}…) — re-downloading");
+                    File.Delete(dest);
                 }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
+
+                Exception? fileErr = null;
+                foreach (var url in new[] { urlP, urlM })
                 {
-                    lastErr = ex;
-                    _log.Warn($"model download failed from {url}: {ex.Message}");
-                    Progress.Bytes = 0;
+                    try
+                    {
+                        var uri = new Uri(url);
+                        NetGuard.EnsurePublicHttp(uri); // SSRFガード: http/Https・公開アドレスのみ
+                        var tmp = dest + ".part";
+                        using (var resp = await _http.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct))
+                        {
+                            resp.EnsureSuccessStatusCode();
+                            await using var src = await resp.Content.ReadAsStreamAsync(ct);
+                            await using var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
+                            var buf = new byte[1 << 20];
+                            int n;
+                            while ((n = await src.ReadAsync(buf, ct)) > 0)
+                            {
+                                await fs.WriteAsync(buf.AsMemory(0, n), ct);
+                                Progress.Bytes += n;
+                            }
+                        }
+                        Progress = new DownloadProgress { State = "verifying", CurrentId = id, Bytes = Progress.Bytes, Total = Progress.Total };
+                        string hash;
+                        await using (var fs = File.OpenRead(tmp))
+                            hash = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct));
+                        if (!hash.Equals(sha, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException($"sha256 mismatch: expected {sha[..12]}… got {hash[..12]}… (SHINE_E_MODEL_VERIFY_FAILED)");
+                        File.Move(tmp, dest);
+                        _log.Info($"model file installed: {file} ({new FileInfo(dest).Length / 1024 / 1024}MB, sha verified)");
+                        fileErr = null;
+                        break;
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        fileErr = ex;
+                        _log.Warn($"model download failed from {url}: {ex.Message}");
+                    }
+                }
+                if (fileErr != null)
+                {
+                    lastErr = fileErr;
+                    Progress = new DownloadProgress { State = "error", CurrentId = id, Error = fileErr.Message };
+                    throw fileErr;
                 }
             }
-            Progress = new DownloadProgress { State = "error", CurrentId = id, Error = lastErr?.Message };
-            throw lastErr ?? new InvalidOperationException("download failed (SHINE_E_MODEL_DOWNLOAD_FAILED)");
+            Progress = new DownloadProgress { State = "done", CurrentId = id, Bytes = Progress.Bytes, Total = Progress.Total };
         }
         finally { _lock.Release(); }
     }
@@ -143,8 +186,13 @@ public sealed class ModelManager
     {
         var entry = Catalog.FirstOrDefault(e => e.Id == id) ?? throw new KeyNotFoundException($"unknown model id: {id}");
         if (entry.Required) throw new InvalidOperationException("required model cannot be deleted");
-        var p = Path.Combine(_cfg.ModelsDir, entry.File);
-        if (File.Exists(p)) File.Delete(p);
-        _log.Info($"model deleted: {entry.File}");
+        var files = new List<string> { entry.File };
+        files.AddRange((entry.Extras ?? Array.Empty<CompanionFile>()).Select(x => x.File));
+        foreach (var f in files)
+        {
+            var p = Path.Combine(_cfg.ModelsDir, f);
+            if (File.Exists(p)) File.Delete(p);
+        }
+        _log.Info($"model deleted: {entry.File} (+{files.Count - 1} companion file(s))");
     }
 }

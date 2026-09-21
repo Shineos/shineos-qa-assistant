@@ -20,6 +20,13 @@ vendor/licenses/ に格納しています。v2 では Ollama・Open WebUI・Pyth
      公開GGUFを利用。派生物の再配布は Apache 2.0 が許諾
    - ライセンス文: licenses/Qwen3-LICENSE.txt
 
+2a. Qwen3-VL-2B-Instruct（GGUF量子化版 Qwen3-VL-2B-Instruct-Q8_0.gguf + mmproj-Q8_0.gguf）
+   - ライセンス: Apache License 2.0（商用利用可）
+   - 権利者: Alibaba Cloud / Tongyi Lab
+   - 出典: https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF
+   - 用途: 図面キャプチャのAI読取（表題欄の図番・品名・材質・改訂の画像読み取り。任意機能・アプリ内からダウンロード）
+   - 備考: 同梱ではなく設定画面からダウンロードする任意モデル。量子化(Q8_0)は ggml-org による公開GGUFを利用
+
 3. BAAI bge-m3（GGUF量子化版 bge-m3-Q8_0.gguf）
    - ライセンス: MIT License
    - 権利者: BAAI (Beijing Academy of Artificial Intelligence)

@@ -35,12 +35,13 @@ public static class Api
     public static void MapRoutes(WebApplication app, AppCtx ctx)
     {
         var cfg = ctx.Cfg; var db = ctx.Db; var sup = ctx.Sup; var index = ctx.Index; var ingest = ctx.Ingest; var flow = ctx.Flow;
+        var gw = ctx.Gateway; var log = ctx.Log;
 
         app.MapGet("/health", () => Results.Json(new { status = true }));
 
         app.MapGet("/api/status", () => Results.Json(new
         {
-            version = "2.0.0",
+            version = "2.1.8",
             tier = cfg.EffectiveTier,
             chat_model = cfg.ChatModelFile,
             chunks = index.Count,
@@ -92,18 +93,41 @@ public static class Api
         });
 
         // ---- チャット履歴（uuidベース・URLルーティング /c/{uuid} 対応） ----
-        app.MapGet("/api/chats", () => Results.Json(db.Query(
-            "SELECT uuid, id, title, updated_at FROM chats ORDER BY updated_at DESC, id DESC LIMIT 200")));
+        app.MapGet("/api/chats", (HttpRequest req) => Results.Json(db.Query(
+            "SELECT uuid, id, title, updated_at, archived FROM chats WHERE archived = $a ORDER BY updated_at DESC, id DESC LIMIT 200",
+            ("$a", req.Query["archived"].ToString() == "1" ? 1 : 0))));
 
         app.MapPost("/api/chats", () => Results.Json(new { uuid = db.NewChatUuid() }));
+
+        // チャットのアーカイブ切替（サイドバーの既定一覧から外す。データは残る）
+        app.MapPost("/api/chats/{uuid}/archive", async (string uuid, HttpRequest req) =>
+        {
+            var id = db.ChatIdFromUuid(uuid);
+            if (id == 0) return Results.NotFound(new { error = "not found" });
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(req.Body);
+            bool archived = doc.RootElement.TryGetProperty("archived", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.True;
+            db.Exec("UPDATE chats SET archived=$v WHERE id=$i", ("$v", archived ? 1 : 0), ("$i", id));
+            return Results.Ok(new { ok = true, archived });
+        });
 
         app.MapGet("/api/chats/{uuid}", (string uuid) =>
         {
             var id = db.ChatIdFromUuid(uuid);
             if (id == 0) return Results.NotFound(new { error = "not found" });
-            var chat = db.Query("SELECT uuid, title FROM chats WHERE id=$i", ("$i", id));
-            var msgs = db.Query("SELECT role, content, sources_json, created_at FROM messages WHERE chat_id=$i ORDER BY id", ("$i", id));
-            return Results.Json(new { uuid, title = chat[0]["title"], messages = msgs });
+            var chat = db.Query("SELECT uuid, title, archived FROM chats WHERE id=$i", ("$i", id));
+            var msgs = db.Query("SELECT id, role, content, image, sources_json, created_at FROM messages WHERE chat_id=$i ORDER BY id", ("$i", id));
+            return Results.Json(new { uuid, title = chat[0]["title"], archived = chat[0]["archived"], messages = msgs });
+        });
+
+        // キャプチャ画像の配信（ローカル保存された過去チャット添付画像。messages.image は files/captures/{name}.png の相対パス）
+        app.MapGet("/api/messages/{id}/image", (long id) =>
+        {
+            var rows = db.Query("SELECT image FROM messages WHERE id=$i", ("$i", id));
+            if (rows.Count == 0 || rows[0]["image"] is not string rel || rel.Length == 0)
+                return Results.NotFound();
+            var path = Path.Combine(ingest.FilesDir, "captures", Path.GetFileName(rel));
+            if (!File.Exists(path)) return Results.NotFound();
+            return Results.File(path, "image/png");
         });
 
         app.MapDelete("/api/chats/{uuid}", (string uuid) =>
@@ -199,6 +223,35 @@ public static class Api
             return Results.File(file, ct);
         });
 
+        // 図面出典のプレビュー: 元PDFのシートページ画像＋スニペット該当領域の矩形（画像幅高の百分率）。
+        // テキスト層が無いスキャン図面は画像のみ（rects空）、PDF以外（DXF等）は404でUIがテキストモーダルへフォールバック
+        app.MapGet("/api/knowledge/{id}/preview", async (long id, string? snippet, HttpContext http) =>
+        {
+            if (string.IsNullOrWhiteSpace(snippet)) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "snippet required" });
+            if (!Directory.Exists(ingest.FilesDir)) return Results.NotFound();
+            var file = Directory.EnumerateFiles(ingest.FilesDir, $"{id}.*")
+                .FirstOrDefault(p => !p.EndsWith(".thumb.png") && p.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase));
+            if (file is null) return Results.NotFound();
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(file);
+                var result = await SourcePreview.BuildAsync(bytes, snippet, http.RequestAborted);
+                if (result is null) return Results.NotFound();
+                return Results.Json(new
+                {
+                    image = result.ImageDataUrl,
+                    image_width = result.ImageWidth,
+                    image_height = result.ImageHeight,
+                    page = result.Page,
+                    rects = result.Rects.Select(r => new { left = r.Left, top = r.Top, width = r.Width, height = r.Height }),
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { error = "SHINE_E_PREVIEW_FAILED", message = ex.Message }, statusCode: 500);
+            }
+        });
+
         app.MapPost("/api/knowledge", async (HttpRequest req) =>
         {
             if (!req.HasFormContentType) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "multipart/form-data が必要です" });
@@ -264,7 +317,9 @@ public static class Api
             return Results.Json(new { imported = count, failed = failures });
         });
 
-        // 拡張パック（図面）: キャプチャ画像のOCR（Windows内蔵エンジン・完全オフライン）
+        // 拡張パック（図面）: キャプチャ画像の読取。WinRT OCR＋視覚言語モデル（導入時）の併用。
+        // VLモデル（Qwen3-VL）はWinRT OCRが読めない表題欄（ハイフン付き図番等）や文字なし図形からも
+        // 図番・品名・材質・改訂・形状キーワードを読み取る（完全オフライン）
         app.MapPost("/api/ocr", async (HttpRequest req) =>
         {
             if (!Extensions.IsEnabled(db, Extensions.DrawingId))
@@ -279,9 +334,22 @@ public static class Api
             using var s = f.OpenReadStream();
             using var ms = new MemoryStream();
             s.CopyTo(ms);
-            var (text, zubans) = await Ocr.RecognizeAsync(ms.ToArray());
-            return Results.Json(new { text, zubans });
+            var image = ms.ToArray();
+            var (text, zubans) = await Ocr.RecognizeAsync(image);
+            // 視覚モデルAI読取（導入済みなら優先。未導入ならnullで従来どおり）
+            object? vision = null;
+            var vr = await VisionRead.ReadAsync(gw, sup, cfg, image, f.ContentType ?? "image/png", log, req.HttpContext.RequestAborted);
+            if (vr is not null)
+            {
+                vision = new { zuban = NullIfEmpty(vr.Zuban), hinmei = NullIfEmpty(vr.Hinmei), zairyo = NullIfEmpty(vr.Zairyo), revision = NullIfEmpty(vr.Revision), shape = NullIfEmpty(vr.Shape) };
+                // AI読取の図番を候補の先頭に置く（チップの初期値になる。WinRT候補は予備として残す）
+                if (!string.IsNullOrWhiteSpace(vr.Zuban))
+                    zubans.Insert(0, new Ocr.OcrZuban(vr.Zuban, Rag.NormalizeZuban(vr.Zuban)));
+            }
+            return Results.Json(new { text, zubans, vision });
         });
+
+        static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
         app.MapDelete("/api/knowledge/{id}", (long id) =>
         {
@@ -289,6 +357,33 @@ public static class Api
             index.RemoveFile(id);
             ingest.DeleteStoredFiles(id); // 拡張パック: 元ファイル・サムネイルを掃除
             return Results.Ok(new { ok = true });
+        });
+
+        // 失敗した取り込みの再試行: 拡張パックON時に保存された元ファイルを再解析する。
+        // 例: 図面拡張OFFで取り込んだスキャンPDF → ONに変更してから再試行するとOCRで取り込める
+        object RetryUnavailable() => new { error = "SHINE_E_RETRY_NO_FILE", message = "元ファイルが保存されていないため再試行できません（該当ファイルを削除し、設定を確認のうえ登録し直してください）" };
+        app.MapPost("/api/knowledge/{id}/retry", async (long id, HttpContext http) =>
+        {
+            var rows = db.Query("SELECT name FROM files WHERE file_id=$i", ("$i", id));
+            if (rows.Count == 0) return Results.NotFound(new { error = "not found" });
+            var name = Convert.ToString(rows[0]["name"]) ?? "retry.pdf";
+            if (!Directory.Exists(ingest.FilesDir)) return Results.Json(RetryUnavailable(), statusCode: 409);
+            var orig = Directory.EnumerateFiles(ingest.FilesDir, $"{id}.*")
+                .FirstOrDefault(p => !p.EndsWith(".thumb.png"));
+            if (orig is null) return Results.Json(RetryUnavailable(), statusCode: 409);
+            db.Exec("DELETE FROM files WHERE file_id=$i", ("$i", id));
+            index.RemoveFile(id); // メモリ索引からも旧チャンクを除去（DBはカスケードで削除済み）
+            await using var fs = File.OpenRead(orig);
+            try
+            {
+                var newId = await ingest.IngestFileAsync(name, fs, http.RequestAborted);
+                return Results.Json(new { ok = true, file_id = newId });
+            }
+            catch (Exception ex)
+            {
+                // IngestFileAsyncがerror行を記録済み。UIは一覧の更新だけすればよい
+                return Results.Json(new { ok = false, message = ex.Message });
+            }
         });
     }
 }
@@ -303,6 +398,7 @@ public sealed class AppCtx
     public required Ingest Ingest;
     public required ChatFlow Flow;
     public required ModelManager Models;
+    public required LlmGateway Gateway; // /api/ocrの視覚モデルAI読取から共用
 }
 
 public sealed class Program
@@ -488,7 +584,7 @@ public sealed class Program
         index.LoadFrom(db);
         var ingest = new Ingest(db, gw, sup, index, cfg, log);
         var flow = new ChatFlow(cfg, db, sup, gw, index, new WebSearch(), log);
-        var ctx = new AppCtx { Cfg = cfg, Db = db, Sup = sup, Index = index, Ingest = ingest, Flow = flow, Models = new ModelManager(cfg, log), Log = log };
+        var ctx = new AppCtx { Cfg = cfg, Db = db, Sup = sup, Index = index, Ingest = ingest, Flow = flow, Models = new ModelManager(cfg, log), Log = log, Gateway = gw };
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>(), ContentRootPath = AppContext.BaseDirectory, WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot") });
         builder.WebHost.ConfigureKestrel(o => o.Listen(System.Net.IPAddress.Loopback, cfg.Port));

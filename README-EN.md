@@ -39,7 +39,11 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 | Stop on close | Closing the app stops the AI engine, backend and network ports completely and releases all memory (nothing stays resident) |
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
 | Web search (OFF by default) | Optional DuckDuckGo lookup (no API key). **Queries would be sent externally, so keep it OFF for company questions** |
-| Drawing PDF search & Q&A (manufacturing extension, enable in Settings) | Auto-reads the title block (part number, name, material, revision) of drawing PDFs at ingest; part-number variants (A-1234 / A1234 / full-width) match as the same token. Paste a screen capture to ask from a drawing number (on-device OCR). OFF by default |
+| Drawing PDF search & Q&A (manufacturing extension, enable in Settings) | Auto-reads the title block (part number, name, material, revision) of drawing PDFs at ingest; part-number variants (A-1234 / A1234 / full-width) match as the same token. **DXF (CAD exchange format)** files can also be ingested directly (DWG is not supported — export to DXF/PDF). Paste a screen capture to ask from a drawing number (on-device OCR). OFF by default |
+| AI reading of drawing captures (`Win+Shift+S` → paste) | The vision-language model (Qwen3-VL, processed on-device) reads part number, name, material and revision straight from the capture image and pre-fills the confirmation chip (more accurate than WinRT OCR; one-tap correction). Download from Settings → AI models (~2.1 GB, optional) |
+| Shape-only captures also work | Even a crop of just the drawing geometry (no text at all) works: the AI reads shape cues as search keywords, and sending with no typed text is supported |
+| Source preview with on-drawing highlight | Clicking a drawing source shows the original page with the cited region highlighted; "Open original file" opens the real PDF/DXF |
+| Chat management (stored captures & archive) | Captures are stored locally and shown again when you reopen old chats. Unused chats can be 📦 archived instead of deleted (restorable anytime) |
 
 ### Key changes from the previous release (Ollama + Open WebUI)
 
@@ -57,16 +61,16 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 
 - Windows 10 / 11 (64-bit) — **no GPU required** (CPU only)
 - 8 GB RAM or more (16 GB+ lets you use the 🏆Quality 30B model)
-- Free disk space: full installer ~3 GB for the initial install (⚡Quick bundled). Microsoft Store build: ~0.2 GB install + ~2.3 GB first-launch model download. Adding 🎯Standard 4B takes ~2.5 GB more; 🏆Quality 30B ~14 GB
-- Internet connection is only needed to fetch AI models (the full installer bundles them, so installation itself is fully offline; the Store build fetches them on first launch)
+- Free disk space: the installer is ~200 MB (no models bundled) plus the first-launch AI model download (⚡Quick + the required embedding model ≈ 1.7 GB). Adding 🎯Standard 4B takes ~2.5 GB more; 🏆Quality 30B ~14 GB; the **drawing capture AI reader (Qwen3-VL, optional) ~2.1 GB**
+- Internet connection is only needed for the **first-launch AI model download** (after that, fully offline)
 - Answers take a few to ~15 seconds (all processing is local). The product specializes in regulations/manuals Q&A; general-knowledge questions are declined with "not found in the knowledge base"
 
 ## Download & Install
 
-Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; ~2.2 GB download with the starter models bundled, fully offline install). **Microsoft Store distribution is in preparation** — the Store build uses a small installer (~47 MB) and downloads the AI models (~2.3 GB) in the app on first launch (see the first screenshot in the [gallery](#screenshots) below).
+Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; the installer is a lightweight ~200 MB with no models bundled). **Microsoft Store distribution is in preparation**.
 
-1. ⚡Quick (Qwen3-1.7B, IQ4_XS quantization) is **bundled with the installer**, so the app is ready immediately after setup
-2. 🎯Standard (4B) and 🏆Quality (30B) can be downloaded later from the model menu or the settings tab — only if you need them
+1. On the first launch after setup, the **AI model download wizard** appears. Choose ⚡Quick (Qwen3-1.7B) + the required embedding model (~1.7 GB total, with progress display)
+2. Once downloaded, the app runs fully offline (🎯Standard 4B and 🏆Quality 30B can be fetched later from the model menu or the settings tab — only if you need them)
 3. After setup, double-click the "社内知恵袋" desktop icon — the app opens in about 2 seconds (no URL entry; closing it stops every related process)
 
 Silent installation (`/VERYSILENT`) is supported.

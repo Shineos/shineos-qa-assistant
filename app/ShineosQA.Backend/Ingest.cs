@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Xml;
 using Docnet.Core;
@@ -29,7 +30,7 @@ public sealed class Ingest
     /// <summary>元ファイル保存先（拡張パックON時のみ使用）。Programのthumb/fileエンドポイントが参照する</summary>
     public string FilesDir => _filesDir;
 
-    public static readonly string[] SupportedExtensions = { ".md", ".txt", ".docx", ".pdf", ".xlsx", ".csv", ".tsv" };
+    public static readonly string[] SupportedExtensions = { ".md", ".txt", ".docx", ".pdf", ".xlsx", ".csv", ".tsv", ".dxf" };
     private static readonly string[] SheetExtensions = { ".xlsx", ".csv", ".tsv" };
 
     public static string ExtractText(string fileName, Stream stream)
@@ -40,6 +41,7 @@ public sealed class Ingest
             ".md" or ".txt" => ReadText(stream),
             ".docx" => ExtractDocx(stream),
             ".pdf" => ExtractPdfAny(stream),
+            ".dwg" => throw new NotSupportedException("DWG形式は直接検索できません。CADソフトからDXF形式でエクスポートするか、PDF形式で取り込んでください (SHINE_E_UNSUPPORTED_CAD)"),
             _ => throw new NotSupportedException($"unsupported file type: {ext} (SHINE_E_DOC_PARSE_FAILED)")
         };
     }
@@ -196,20 +198,56 @@ public sealed class Ingest
             long fileId = _db.LastInsertId();
             try
             {
-                // PDF: PdfPig（座標付き）→ 空なら従来抽出器にフォールバック
+                // PDF: PdfPig（座標付き）→ 空なら従来抽出器にフォールバック → 画像のみならOCR救済（拡張パックON時）
                 PdfExtractResult? pdf = null;
                 string text = "";
                 List<string>? sheetChunks = null;
+                bool scannedOcr = false;
+                List<(float W, float H)>? ocrPageDims = null;
+                List<DxfText.DxfRun>? dxfRuns = null;
                 if (ext == ".pdf")
                 {
                     try { pdf = PdfText.ExtractAll(bytes); text = pdf.Text; }
                     catch { text = ""; }
-                    if (string.IsNullOrWhiteSpace(text)) { pdf = null; text = ExtractPdf(new MemoryStream(bytes)); }
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        pdf = null;
+                        InvalidDataException? legacyErr = null;
+                        try { text = ExtractPdf(new MemoryStream(bytes)); }
+                        catch (InvalidDataException ex) { legacyErr = ex; text = ""; }
+                        // スキャンPDF（画像のみ）救済: ページをレンダリング→内蔵OCRでテキスト化。
+                        // 実図面検証で金賞作品図面（スキャン1枚）が取り込み不可だった問題の根本対策
+                        if (string.IsNullOrWhiteSpace(text) && packOn)
+                        {
+                            var ocr = await OcrPdfFallbackAsync(bytes, ct);
+                            if (ocr != null)
+                            {
+                                var firstDim = ocr.PageDims.Count > 0 ? ocr.PageDims[0] : (0f, 0f);
+                                pdf = new PdfExtractResult(ocr.Text, ocr.Pages, ocr.Runs, firstDim.Item1, firstDim.Item2);
+                                text = pdf.Text;
+                                ocrPageDims = ocr.PageDims;
+                                scannedOcr = true;
+                            }
+                            else if (legacyErr != null)
+                                throw new InvalidDataException(legacyErr.Message + " （スキャンPDF: OCRでも読み取れる文字がありませんでした）");
+                        }
+                        if (string.IsNullOrWhiteSpace(text) && legacyErr != null) throw legacyErr;
+                    }
                 }
                 else if (SheetExtensions.Contains(ext))
                 {
                     // 表計算ファイル（本体標準機能）: ヘッダ＋行バッチのチャンク列（Rag.Chunk不使用）
                     sheetChunks = SheetExtract.ExtractChunks(fileName, bytes);
+                }
+                else if (ext == ".dxf")
+                {
+                    // CAD図面（DXF）: 拡張パックON時のみ。TEXT/MTEXT/ATTRIBの文字と挿入点を抽出し
+                    // 表題欄抽出にそのまま渡す（DWGはクローズド形式のため対象外→明確な案内メッセージ）
+                    if (!packOn)
+                        throw new NotSupportedException("DXF（CAD図面）の取り込みには設定→拡張機能「図面PDF検索・Q&A」を有効にしてください (SHINE_E_EXTENSION_DISABLED)");
+                    var dxf = DxfText.Extract(bytes);
+                    text = dxf.Text;
+                    dxfRuns = dxf.Runs;
                 }
                 else
                 {
@@ -225,12 +263,35 @@ public sealed class Ingest
                 if (packOn && ext == ".pdf" && pdf != null && DrawingIngest.LooksLikeDrawing(fileName, pdf.Pages, pdf.Text))
                 {
                     isDrawing = true;
-                    meta = DrawingIngest.ExtractTitleBlock(pdf.Runs, pdf.PageWidth, pdf.PageHeight);
+                    // 表紙付きPDF対策: 表題欄を読むページ（図面シート）を選んでから抽出する
+                    var sheetPage = DrawingIngest.PickSheetPage(pdf.Runs, pdf.Pages);
+                    var (pw, ph) = ocrPageDims != null && ocrPageDims.Count >= sheetPage
+                        ? ocrPageDims[sheetPage - 1]
+                        : DrawingIngest.PageDims(pdf.Runs, sheetPage);
+                    if (pw <= 0) { pw = pdf.PageWidth; ph = pdf.PageHeight; }
+                    var sheetRuns = pdf.Runs.Where(r => r.Page == sheetPage).ToList();
+                    meta = DrawingIngest.ExtractTitleBlock(sheetRuns, pw, ph);
                     if (meta.ZubanRaw is null && Extensions.DrawingLlmEnabled(_db))
-                        meta = await TryLlmMetaAsync(meta, pdf, ct);
-                    // 図面は1枚1チャンク（表題欄前置き＋全テキスト）。テキスト層ゼロはチャンク0で登録継続
-                    if (pdf.Text.Trim().Length > 0)
-                        chunks.Add(DrawingIngest.BuildChunkText(meta, pdf.Text));
+                        meta = await TryLlmMetaAsync(meta, sheetRuns, pw, ph, pdf.Text, ct);
+                    // 図面は1枚1チャンク（表題欄前置き＋全テキスト）。テキスト層ゼロはチャンク0で登録継続。
+                    // OCR由来のテキストは読み取り誤差の可能性をチャンク内に明記する（回答の根拠提示に直結）
+                    var fullText = scannedOcr ? pdf.Text + "\n※このテキストはOCRによる読み取りです（誤読を含む場合があります）" : pdf.Text;
+                    if (fullText.Trim().Length > 0)
+                        chunks.Add(DrawingIngest.BuildChunkText(meta, fullText));
+                }
+                else if (dxfRuns != null)
+                {
+                    // DXF（CAD図面）: ヒューリスティック判定を介さず図面として取り込む（DXFは図面そのもの）。
+                    // 文字の挿入点（Y上向き正=PDF式と同向）から表題欄抽出を共用する
+                    isDrawing = true;
+                    var runs = DxfText.ToPdfRuns(dxfRuns);
+                    var (pw, ph) = DrawingIngest.PageDims(runs, 1);
+                    if (pw <= 0) { pw = 297; ph = 210; } // 空図面の保険（A3縦）
+                    meta = DrawingIngest.ExtractTitleBlock(runs, pw, ph);
+                    if (meta.ZubanRaw is null && Extensions.DrawingLlmEnabled(_db))
+                        meta = await TryLlmMetaAsync(meta, runs, pw, ph, text, ct);
+                    if (text.Trim().Length > 0)
+                        chunks.Add(DrawingIngest.BuildChunkText(meta, text));
                 }
                 else if (sheetChunks != null)
                 {
@@ -258,7 +319,7 @@ public sealed class Ingest
                     _index.AddRange(fileName, fileId, chunks.Select((t, seq) => (seq, t, embeddings[seq])));
                 }
                 _db.Exec("UPDATE files SET status='ready', chunk_count=$c WHERE file_id=$i", ("$c", chunks.Count), ("$i", fileId));
-                if (packOn && ext == ".pdf") TryMakeThumbnail(fileId, bytes); // 失敗しても取り込みを妨げない
+                if (packOn && ext == ".pdf") await TryMakeThumbnailAsync(fileId, bytes, ct); // 失敗しても取り込みを妨げない
                 _log.Info($"ingested {fileName}: {chunks.Count} chunks{(isDrawing ? " (drawing)" : "")}");
                 return fileId;
             }
@@ -295,21 +356,34 @@ public sealed class Ingest
         catch (Exception ex) { _log.Warn($"save original failed: {ex.Message}"); }
     }
 
-    private void TryMakeThumbnail(long fileId, byte[] pdf)
+    private async Task TryMakeThumbnailAsync(long fileId, byte[] pdf, CancellationToken ct)
     {
         try
         {
-            using var lib = DocLib.Instance;
-            using var reader = lib.GetDocReader(pdf, new PageDimensions(400, 560));
-            var page = reader.GetPageReader(0);
-            var raw = page.GetImage(); // BGRA 32bpp 行優先
-            int w = (int)Math.Round((double)page.GetPageWidth());
-            int h = w > 0 ? raw.Length / (4 * w) : 0; // 生バイト長から高さを検証付きで導出
-            if (w <= 0 || h <= 0 || w * h * 4 != raw.Length) return; // 寸法が取れない場合はサムネなし
-            var rgba = new byte[raw.Length];
-            for (int i = 0; i + 3 < raw.Length; i += 4)
-            { rgba[i] = raw[i + 2]; rgba[i + 1] = raw[i + 1]; rgba[i + 2] = raw[i]; rgba[i + 3] = 255; }
-            File.WriteAllBytes(Path.Combine(_filesDir, fileId + ".thumb.png"), Png.EncodeRgba(rgba, w, h));
+            byte[] pngBytes; int w, h;
+            using (var lib = DocLib.Instance)
+            using (var reader = lib.GetDocReader(pdf, new PageDimensions(400, 560)))
+            {
+                var page = reader.GetPageReader(0);
+                var raw = page.GetImage(); // BGRA 32bpp 行優先
+                w = (int)Math.Round((double)page.GetPageWidth());
+                h = w > 0 ? raw.Length / (4 * w) : 0; // 生バイト長から高さを検証付きで導出
+                if (w <= 0 || h <= 0 || w * h * 4 != raw.Length) return; // 寸法が取れない場合はサムネなし
+                var rgba = new byte[raw.Length];
+                for (int i = 0; i + 3 < raw.Length; i += 4)
+                { rgba[i] = raw[i + 2]; rgba[i + 1] = raw[i + 1]; rgba[i + 2] = raw[i]; rgba[i + 3] = 255; }
+                if (IsNearlyBlack(rgba, w, h))
+                {
+                    // スキャンPDFのCMYK-JPEG黒つぶし対策（実図面で発生）: WinRT描画に差し替える
+                    var winrt = await RenderPageWinRtAsync(pdf, 0, 400, ct);
+                    pngBytes = winrt.Png; w = winrt.W; h = winrt.H;
+                }
+                else
+                {
+                    pngBytes = Png.EncodeRgba(rgba, w, h);
+                }
+            }
+            File.WriteAllBytes(Path.Combine(_filesDir, fileId + ".thumb.png"), pngBytes);
         }
         catch (Exception ex) { _log.Warn($"thumbnail failed: {ex.Message}"); }
     }
@@ -319,16 +393,23 @@ public sealed class Ingest
             ("$f", fileId), ("$zr", m.ZubanRaw), ("$zn", m.ZubanNorm), ("$h", m.Hinmei), ("$za", m.Zairyo),
             ("$s", m.Scale), ("$r", m.Revision), ("$a", m.ApprovedAt));
 
-    /// <summary>表題欄のLLM構造化（T6）。ルール抽出で図番が取れなかった図面のみ。失敗時はルール結果を維持</summary>
-    private async Task<DrawingIngest.DrawingMeta> TryLlmMetaAsync(DrawingIngest.DrawingMeta m, PdfExtractResult pdf, CancellationToken ct)
+    /// <summary>表題欄のLLM構造化（T6）。ルール抽出で図番が取れなかった図面のみ。失敗時はルール結果を維持。
+    /// 出力は検証器を通し、尺度・寸法表記の誤採用（実図面で発生）を二重に防ぐ</summary>
+    private async Task<DrawingIngest.DrawingMeta> TryLlmMetaAsync(DrawingIngest.DrawingMeta m,
+        List<PdfTextRun> sheetRuns, float pw, float ph, string fullText, CancellationToken ct)
     {
         try
         {
             _sup.EnsureLlm();
-            var region = pdf.Runs.Where(r => pdf.PageWidth > 0 && pdf.PageHeight > 0
-                && r.X > pdf.PageWidth * 0.55f && r.Y < pdf.PageHeight * 0.40f);
+            var region = sheetRuns.Where(r => pw > 0 && ph > 0
+                && r.X > pw * 0.55f && r.Y < ph * 0.40f);
             var regionText = string.Join("\n", DrawingIngest.ToLines(region.ToList()));
-            if (regionText.Length == 0) regionText = pdf.Text[..Math.Min(400, pdf.Text.Length)];
+            if (regionText.Length == 0) regionText = fullText[..Math.Min(400, fullText.Length)];
+            // 表題欄の兆候（図番系ラベルか図番パターン）がないシートではLLMを起こさない。
+            // 「尺度1:1・受検番号・氏名」しかない表題欄でLLMが尺度/寸法を図番・品名にした実図面の誤りの根本対策
+            var hasSign = System.Text.RegularExpressions.Regex.IsMatch(regionText, "図番|品名|材質|材料|DWG|TITLE|MATERIAL")
+                || DrawingIngest.ZubanRegex().IsMatch(regionText);
+            if (!hasSign) return m;
             var prompt = "以下は図面の表題欄付近から抽出したテキストである。図番(zuban)・品名(hinmei)・材質(zairyo)・改訂(revision)を読み取り、"
                 + "JSON「{\"zuban\":..,\"hinmei\":..,\"zairyo\":..,\"revision\":..}」のみを返せ（不明はnull、推測しない）。テキスト:\n" + regionText;
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -340,14 +421,120 @@ public sealed class Ingest
             using var doc = System.Text.Json.JsonDocument.Parse(resp[start..(end + 1)]);
             string? Get(string k) =>
                 doc.RootElement.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+            var zuban = Get("zuban");
+            var hinmei = Get("hinmei");
+            var zairyo = Get("zairyo");
+            var revision = Get("revision");
             return m with
             {
-                ZubanRaw = m.ZubanRaw ?? Get("zuban"),
-                Hinmei = m.Hinmei ?? Get("hinmei"),
-                Zairyo = m.Zairyo ?? Get("zairyo"),
-                Revision = m.Revision ?? Get("revision"),
+                ZubanRaw = m.ZubanRaw ?? (DrawingIngest.IsPlausibleZuban(zuban) ? zuban!.Trim() : null),
+                Hinmei = m.Hinmei ?? (DrawingIngest.IsPlausibleHinmei(hinmei) && !DrawingIngest.IsMaterialToken(hinmei) ? hinmei!.Trim() : null),
+                Zairyo = m.Zairyo ?? (DrawingIngest.IsPlausibleZairyo(zairyo) ? zairyo!.Trim() : null),
+                Revision = m.Revision ?? (DrawingIngest.IsPlausibleRevision(revision) ? revision!.Trim() : null),
             };
         }
         catch (Exception ex) { _log.Warn($"drawing llm structuring failed: {ex.Message}"); return m; }
+    }
+
+    public sealed record OcrPdfText(string Text, int Pages, List<PdfTextRun> Runs, List<(float W, float H)> PageDims);
+
+    /// <summary>画像のみPDF（スキャン図面）の救済: 各ページをレンダリング→内蔵OCR（回転最良）でテキスト化。
+    /// 拡張パックON時のみ呼ばれる。長文スキャン（MaxPages超）やOCR結果がほぼ空のページは救済対象外としてnull
+    /// （静的: テストから直接検証できる。OCRは ja-JP言語パック必須、無ければガイド付きの例外）。
+    /// レンダリングはWindows.Data.Pdf（WinRT）。Docnet/PDFiumはスキャンPDFのCMYK-JPEGを黒つぶしで
+    /// 描画するため（実図面の金賞作品PDFで発生）、OCR入力には使えない</summary>
+    public static async Task<OcrPdfText?> OcrPdfFallbackAsync(byte[] bytes, CancellationToken ct)
+    {
+        if (!Ocr.IsAvailable())
+            throw new InvalidDataException("pdf: 画像のみのPDFです。スキャン図面のOCR取り込みにはWindowsの日本語言語パックが必要です");
+        var target = (int)Math.Min(2200u, Ocr.MaxImageDimension);
+        // ページ数だけ先に知る必要があるため全体を1回ロードして順に描画する
+        var tmp = Path.Combine(Path.GetTempPath(), "shineosqa-ocr-" + Guid.NewGuid().ToString("N") + ".pdf");
+        try
+        {
+            await File.WriteAllBytesAsync(tmp, bytes, ct);
+            var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(tmp);
+            var pdf = await Windows.Data.Pdf.PdfDocument.LoadFromFileAsync(file).AsTask(ct);
+            int pages = (int)pdf.PageCount;
+            if (pages == 0 || pages > DrawingIngest.MaxPages) return null; // 長文スキャンは図面拡張の対象外（誠実に失敗させる）
+            var pngs = new List<byte[]>();
+            var dims = new List<(float W, float H)>();
+            for (uint i = 0; i < pages; i++)
+            {
+                using var page = pdf.GetPage(i);
+                using var ms = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                var opts = new Windows.Data.Pdf.PdfPageRenderOptions { DestinationWidth = (uint)target };
+                await page.RenderToStreamAsync(ms, opts).AsTask(ct);
+                var size = (uint)ms.Size;
+                using var reader = new Windows.Storage.Streams.DataReader(ms.GetInputStreamAt(0));
+                await reader.LoadAsync(size);
+                var pngBytes = new byte[size];
+                reader.ReadBytes(pngBytes);
+                var dec = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(new MemoryStream(pngBytes).AsRandomAccessStream());
+                pngs.Add(pngBytes);
+                dims.Add((dec.PixelWidth, dec.PixelHeight));
+            }
+            var sb = new StringBuilder();
+            var runs = new List<PdfTextRun>();
+            for (int i = 0; i < pngs.Count; i++)
+            {
+                var best = await Ocr.RecognizeBestAsync(pngs[i]);
+                sb.AppendLine(best.Text);
+                var (w, h) = dims[i];
+                // OCRの単語矩形（左上原点・ピクセル）をPDF式（左下原点）へ変換し、表題欄抽出を共用する
+                foreach (var word in best.Words)
+                    runs.Add(new PdfTextRun(word.Text, i + 1, (float)word.X, (float)(h - (word.Y + word.H)), (float)word.W, (float)word.H));
+                ct.ThrowIfCancellationRequested();
+            }
+            var text = sb.ToString();
+            // 白紙・無地ページ（OCR実測で0〜3文字程度）は救済不能。小さな表題欄のみのシートも救えるよう
+            // 下限は最小限にする（実測: 画像サンプル640x320の有効テキスト18文字が救済対象）
+            if (text.Trim().Length < 8) return null;
+            return new OcrPdfText(text, pages, runs, dims);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    /// <summary>指定ページをWindows.Data.Pdf（WinRT）でPNG描画する。Docnet黒つぶし対策の共通経路
+    /// （SourcePreviewの図上ハイライトでも使用）。戻り値のPNG寸法はBitmapDecoderで実測する
+    /// （DestinationWidthは幅指定のみで高さは縦横比維持）</summary>
+    public static async Task<(byte[] Png, int W, int H)> RenderPageWinRtAsync(byte[] pdfBytes, int pageIndex, int targetWidth, CancellationToken ct)
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "shineosqa-pdf-" + Guid.NewGuid().ToString("N") + ".pdf");
+        try
+        {
+            await File.WriteAllBytesAsync(tmp, pdfBytes, ct);
+            var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(tmp);
+            var pdf = await Windows.Data.Pdf.PdfDocument.LoadFromFileAsync(file).AsTask(ct);
+            if (pageIndex >= pdf.PageCount) throw new InvalidDataException("pdf: page index out of range");
+            using var page = pdf.GetPage((uint)pageIndex);
+            using var ms = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            var opts = new Windows.Data.Pdf.PdfPageRenderOptions { DestinationWidth = (uint)targetWidth };
+            await page.RenderToStreamAsync(ms, opts).AsTask(ct);
+            var size = (uint)ms.Size;
+            using var reader = new Windows.Storage.Streams.DataReader(ms.GetInputStreamAt(0));
+            await reader.LoadAsync(size);
+            var png = new byte[size];
+            reader.ReadBytes(png);
+            var dec = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(new MemoryStream(png).AsRandomAccessStream());
+            return (png, (int)dec.PixelWidth, (int)dec.PixelHeight);
+        }
+        finally { try { File.Delete(tmp); } catch { } }
+    }
+
+    /// <summary>描画結果の黒つぶし検出（疎サンプリング）。スキャンPDFのCMYK-JPEGをDocnetで描くと
+    /// 全面黒になるため（実図面で発生）、サムネイルをWinRT描画へフォールバックする判定に使う</summary>
+    private static bool IsNearlyBlack(byte[] rgba, int w, int h)
+    {
+        long sample = 0, dark = 0;
+        int stride = w * 4;
+        int limit = Math.Min(rgba.Length - 3, stride * h);
+        for (int i = 0; i < limit; i += 4 * 97)
+        {
+            sample++;
+            int lum = (rgba[i] + rgba[i + 1] + rgba[i + 2]) / 3;
+            if (lum < 8) dark++;
+        }
+        return sample > 0 && dark * 20 > sample * 19; // 95%以上が黒
     }
 }

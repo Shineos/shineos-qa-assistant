@@ -55,7 +55,12 @@ public sealed class ChatFlow
         public string? Url { get; set; }           // Web検索のみ
         // 拡張パック（図面）: Kindはkbのまま、図面メタデータを別フィールドで運ぶ
         // （出典行の正規化 NormalizeSourcesLine が Kind=="kb" 前提のため、種別フラグを分ける）
+        // JsonPropertyName必須: CamelCaseポリシーだと fileId/isDrawing になりUI側（file_id/is_drawing）と
+        // 不一致し、図面出典の【図面】表示が一度も発火しなかった（出典表示不具合の根本原因）
+        [System.Text.Json.Serialization.JsonPropertyName("file_id")]
         public long? FileId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("is_drawing")]
+        public bool IsDrawing { get; set; }        // drawing_meta に存在する図面ファイル（出典UIの【図面】表示に使用）
         public string? Zuban { get; set; }
         public string? Hinmei { get; set; }
         public string? Revision { get; set; }
@@ -120,6 +125,7 @@ public sealed class ChatFlow
             var rows = _db.Query("SELECT zuban_raw, hinmei, revision FROM drawing_meta WHERE file_id=$i", ("$i", fileId));
             if (rows.Count == 0) return s;
             s.FileId = fileId;
+            s.IsDrawing = true; // 図番が未抽出（null）の図面でも【図面】出典として表示できるように種別だけは立てる
             s.Zuban = rows[0]["zuban_raw"] as string;
             s.Hinmei = rows[0]["hinmei"] as string;
             s.Revision = rows[0]["revision"] as string;
@@ -160,6 +166,28 @@ public sealed class ChatFlow
     }
 
     // ---- SSEヘルパー ----
+    /// <summary>キャプチャ画像の保存（拡張パック）。data/files/captures/ 配下にPNGとして残し、
+    /// 直近のユーザーメッセージにパスを紐付ける（過去チャットでの再表示用。ローカルPC外へは送信しない）</summary>
+    private void SaveCaptureImage(long chatId, string dataUrl)
+    {
+        try
+        {
+            var comma = dataUrl.IndexOf(',');
+            if (!dataUrl.StartsWith("data:image/", StringComparison.Ordinal) || comma < 0) return;
+            var bytes = Convert.FromBase64String(dataUrl[(comma + 1)..]);
+            if (bytes.Length == 0 || bytes.Length > 20 * 1024 * 1024) return;
+            var dataRoot = Path.IsPathRooted(_cfg.DataDir) ? _cfg.DataDir : Path.Combine(AppContext.BaseDirectory, _cfg.DataDir);
+            var dir = Path.Combine(dataRoot, "files", "captures");
+            Directory.CreateDirectory(dir);
+            var rel = $"files/captures/{Guid.NewGuid():N}.png";
+            File.WriteAllBytes(Path.Combine(dataRoot, rel.Replace('/', Path.DirectorySeparatorChar)), bytes);
+            // 直前にINSERTしたユーザーメッセージへ紐付ける
+            _db.Exec("UPDATE messages SET image=$p WHERE id=(SELECT MAX(id) FROM messages WHERE chat_id=$c AND role='user')",
+                ("$p", rel), ("$c", chatId));
+        }
+        catch (Exception ex) { _log.Warn($"capture image save failed: {ex.Message}"); }
+    }
+
     private static async Task Sse(HttpContext ctx, string ev, object payload)
     {
         var json = JsonSerializer.Serialize(payload, JsonOpts);
@@ -174,6 +202,10 @@ public sealed class ChatFlow
         var root = body.RootElement;
         string chatUuid = root.TryGetProperty("chat_uuid", out var cu) && cu.ValueKind == JsonValueKind.String ? cu.GetString()! : "";
         var message = root.GetProperty("message").GetString() ?? throw new BadHttpRequestException("message required");
+        // キャプチャ画像（拡張パック）: data URL（data:image/png;base64,...）で受け取りローカルに保存して
+        // メッセージに紐付ける。画像は完全オフラインのローカルPC内に留まる（S3等への送信は無い）
+        string? captureImage = root.TryGetProperty("capture_image", out var ci) && ci.ValueKind == JsonValueKind.String
+            ? ci.GetString() : null;
         bool webOn = root.TryGetProperty("web_search", out var w) && (w.ValueKind == JsonValueKind.True || w.ValueKind == JsonValueKind.False)
             ? w.GetBoolean() : _cfg.WebSearch;
         // 送信フォームからのモデル指定（quick/standard/quality）。未指定なら現在の階級を使う
@@ -213,6 +245,7 @@ public sealed class ChatFlow
         string prevUser = history.LastOrDefault(h => h.Item1 == "user").Item2 ?? "";
 
         _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'user',$m)", ("$c", chatId), ("$m", message));
+        if (captureImage != null) SaveCaptureImage(chatId, captureImage);
 
         try
         {
@@ -291,6 +324,19 @@ public sealed class ChatFlow
             // 4) ハイブリッド検索 top8
             var qTokens = Rag.Tokenize(queryForRetrieval).ToHashSet();
             var hits = _index.Search(qEmb, qTokens, Rag.RerankPool);
+            // 図面チャンクの判別（意図ブーストとスニペット免除で共用。files は小型テーブルなので都度照会で即時反映）
+            var drawingIds = _db.Query("SELECT file_id FROM files WHERE kind='drawing'")
+                .Select(r => Convert.ToInt64(r["file_id"] ?? 0L)).ToHashSet();
+            // 図面意図ブースト: 「図面/図番」や図番パターンを含む質問では、寸法数値ノイズでキーワード一致が
+            // 希薄になる図面チャンクを広めのプールから上位へ浮上させる（実図面検証cr02の根本対策）。
+            // リランク以降の判断は変わらないため、通常質問への影響はこの分岐の外に出ない
+            if (Rag.HasDrawingIntent(queryForRetrieval))
+            {
+                var pool = _index.Search(qEmb, qTokens, Rag.RerankPool * 3);
+                foreach (var h in pool)
+                    if (drawingIds.Contains(h.Rec.FileId)) h.Hybrid *= 1.4;
+                hits = pool.OrderByDescending(h => h.Hybrid).Take(Rag.RerankPool).ToList();
+            }
             string webNote = webFailed ? "\n※Web検索に失敗したため、社内ナレッジのみで判定しています。" : "";
             // 日付感応質問（「今日は何日」「今何時」等）は参照情報がなくてもシステム日時から
             // 直接回答する（PCのシステム時計が根拠。ガードで「該当なし」にしない）
@@ -324,26 +370,36 @@ public sealed class ChatFlow
                 }
                 else
                 {
-                    var ranked = await _gw.RerankAsync(_cfg.EnginePortRank, queryForRetrieval, docs, 2, ctx.RequestAborted);
-                    var top1 = ranked.Count > 0 ? ranked[0].Score.ToString("F2") : "none";
-                    _log.Info($"rerank: top1={top1} cos={top.Cos:F2} kw={top.Kw:F2} file={top.Rec.FileName}");
-                    if (ranked.Count == 0 || ranked[0].Score < Rag.GuardThreshold)
+                    // リランカは任意モデル（未DL環境では未起動）: 起動していなければ
+                    // ハイブリッド順の上位をそのまま採用する（該当なし判定はhits==0のガードが担う）
+                    if (!_sup.IsRankAlive)
                     {
-                        if (string.IsNullOrEmpty(webContext) && !timeSensitive)
-                        {
-                            var refusal = "該当する記載がありません。" + webNote;
-                            _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
-                            await Sse(ctx, "delta", new { content = refusal });
-                            await Sse(ctx, "done", new { cached = false, guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
-                            return;
-                        }
-                        chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
+                        _log.Info("rerank unavailable (rank model not installed) — using hybrid order");
+                        chosen = hits.Take(2).ToList();
                     }
                     else
                     {
-                        // 高信頼（top1スコア≥+2.0）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2
-                        var take = ranked[0].Score >= 2.0 ? 1 : 2;
-                        chosen = ranked.Take(take).Select(r => hits[r.Index]).ToList();
+                        var ranked = await _gw.RerankAsync(_cfg.EnginePortRank, queryForRetrieval, docs, 2, ctx.RequestAborted);
+                        var top1 = ranked.Count > 0 ? ranked[0].Score.ToString("F2") : "none";
+                        _log.Info($"rerank: top1={top1} cos={top.Cos:F2} kw={top.Kw:F2} file={top.Rec.FileName}");
+                        if (ranked.Count == 0 || ranked[0].Score < Rag.GuardThreshold)
+                        {
+                            if (string.IsNullOrEmpty(webContext) && !timeSensitive)
+                            {
+                                var refusal = "該当する記載がありません。" + webNote;
+                                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                                await Sse(ctx, "delta", new { content = refusal });
+                                await Sse(ctx, "done", new { cached = false, guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                                return;
+                            }
+                            chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
+                        }
+                        else
+                        {
+                            // 高信頼（top1スコア≥+2.0）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2
+                            var take = ranked[0].Score >= 2.0 ? 1 : 2;
+                            chosen = ranked.Take(take).Select(r => hits[r.Index]).ToList();
+                        }
                     }
                 }
             }
@@ -388,7 +444,12 @@ public sealed class ChatFlow
                 if (covered.Contains((h.Rec.FileId, h.Rec.Seq))) continue;
                 covered.Add((h.Rec.FileId, h.Rec.Seq));
                 if (_index.NextChunkText(h.Rec.FileId, h.Rec.Seq) is not null) covered.Add((h.Rec.FileId, h.Rec.Seq + 1));
-                ctxDocs.Add((h.Rec.FileName, Rag.Snippet(MergedChunkText(h.Rec), qTokens)));
+                var merged = MergedChunkText(h.Rec);
+                // 図面チャンク（1枚=1チャンク・テキスト量は取り込み時に DrawingIngest.MaxTextChars で上限）は
+                // スニペット化せず全文注入する: 240字の窓は寸法ノイズの間に散らばる表題欄・注記を切断し、
+                // 「チャンク内に記載があるのに模型に渡らない」実図面検証cr02（JIS B 0405-m）の原因だった
+                if (!drawingIds.Contains(h.Rec.FileId)) merged = Rag.Snippet(merged, qTokens);
+                ctxDocs.Add((h.Rec.FileName, merged));
             }
             var context = Rag.BuildContext(ctxDocs, webContext);
             var messages = new List<(string, string)> { ("system", Rag.SystemPrompt + Rag.CurrentDateLine()) };
