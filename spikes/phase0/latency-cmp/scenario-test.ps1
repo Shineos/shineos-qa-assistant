@@ -1,4 +1,4 @@
-﻿param([string]$Label = "run", [string]$Scenarios = "scenarios.json")
+﻿param([string]$Label = "run", [string]$Scenarios = "scenarios.json", [switch]$WebSearch)
 # 品質シナリオテスト: シナリオJSON（既定 scenarios.json、-Scenarios scenarios-100.json で100問）を
 # /api/chat に流し、期待キーワード/拒否を判定。
 # 出力: TSV（tag, pass, answer_chars, ms）＋ answers/<Label>-<tag>.txt
@@ -13,7 +13,9 @@ if (-not (Test-Path $ansDir)) { [IO.Directory]::CreateDirectory($ansDir) | Out-N
 $utf8 = New-Object Text.UTF8Encoding($false)
 
 function Ask([string]$q, [string]$uuid) {
-  $body = @{ chat_uuid = $uuid; message = $q } | ConvertTo-Json -Compress
+  $body = @{ chat_uuid = $uuid; message = $q }
+  if ($WebSearch) { $body.web_search = $true }
+  $body = $body | ConvertTo-Json -Compress
   $tmp = [IO.Path]::GetTempFileName()
   $out = [IO.Path]::GetTempFileName()
   [IO.File]::WriteAllText($tmp, $body, $utf8)

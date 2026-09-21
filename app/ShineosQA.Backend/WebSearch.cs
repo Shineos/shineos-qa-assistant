@@ -39,21 +39,70 @@ public sealed partial class WebSearch
 
     public async Task<List<WebResult>> SearchAsync(string query, int topN = 4, CancellationToken ct = default)
     {
-        // GET（実測で安定）→ 1s待ちPOST → 2s待ちGET の順にリトライ
+        // 安定化: ①同一クエリのTTLキャッシュ ②検索の最小間隔ゲート ③空結果時のバックオフ再試行。
+        // DuckDuckGoのHTMLエンドポイントは非公式のため、短時間の連続クエリで0件（レート制限）に
+        // なることがある（横浜天気の実測）。無料で使い続けるための安定化策
+        lock (_gateLock)
+        {
+            if (_cache.TryGetValue(query, out var hit) && DateTime.UtcNow - hit.At < CacheTtl)
+                return hit.Results;
+            var since = DateTime.UtcNow - _lastSearchUtc;
+            if (since < MinSearchInterval) Thread.Sleep(MinSearchInterval - since);
+        }
+        var results = await SearchCoreAsync(query, topN, ct);
+        lock (_gateLock)
+        {
+            _lastSearchUtc = DateTime.UtcNow;
+            _cache[query] = (DateTime.UtcNow, results);
+            if (_cache.Count > 32) // 溜まりすぎ防止（古いものから削除）
+                foreach (var k in _cache.Keys.OrderBy(k => _cache[k].At).Take(_cache.Count - 32).ToList())
+                    _cache.Remove(k);
+        }
+        return results;
+    }
+
+    private static readonly object _gateLock = new();
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan MinSearchInterval = TimeSpan.FromSeconds(2.5);
+    private static readonly Dictionary<string, (DateTime At, List<WebResult> Results)> _cache = new();
+    private static DateTime _lastSearchUtc = DateTime.MinValue;
+
+    /// <summary>検索本体。GET→POST→GETに加え、0件のときはバックオフしてもう1ラウンド試す
+    /// （レート制限の空応答は数秒置くと回復する実測）</summary>
+    private async Task<List<WebResult>> SearchCoreAsync(string query, int topN, CancellationToken ct)
+    {
         Exception? lastErr = null;
-        foreach (var (method, delayMs) in new[] { ("GET", 0), ("POST", 1000), ("GET", 2000) })
+        foreach (var (method, delayMs) in new[] { ("GET", 0), ("POST", 1000), ("GET", 2000), ("GET", 5000) })
         {
             if (delayMs > 0) await Task.Delay(delayMs, ct);
             try
             {
-                var results = method == "GET" ? await GetAsync(query, topN, ct) : await PostAsync(query, topN, ct);
-                if (results.Count > 0) return results;
+                var results = method == "GET" ? await GetAsync(query, topN * 3, ct) : await PostAsync(query, topN * 3, ct);
+                results = Dedup(results);
+                if (results.Count > 0) return results.Take(topN).ToList();
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { lastErr = ex; }
         }
         if (lastErr != null) throw lastErr;
         return new List<WebResult>();
+    }
+
+    /// <summary>同一URL・同一内容（タイトル+スニペット）の重複を排除する。
+    /// DuckDuckGoは同一サイトの複数URLや同一スニペットの重複を返すことがあり、
+    /// 参照情報の重複はクイック1.7Bの「情報なし」誤判定（横浜天気の実測）を誘発する</summary>
+    public static List<WebResult> Dedup(List<WebResult> results)
+    {
+        var seenUrl = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenContent = new HashSet<string>(StringComparer.Ordinal);
+        var list = new List<WebResult>();
+        foreach (var r in results)
+        {
+            if (!seenUrl.Add(r.Url.Split('?', '#')[0])) continue;           // 同一URL（クエリ・フラグメント除く）
+            if (!seenContent.Add(r.Title + "\n" + r.Snippet)) continue;     // 同一タイトル+スニペット
+            list.Add(r);
+        }
+        return list;
     }
 
     private async Task<List<WebResult>> GetAsync(string query, int topN, CancellationToken ct)
@@ -228,8 +277,14 @@ public sealed partial class WebSearch
     /// ctx=2048の予算対策で、モデルには事実の本文を優先して与える）</summary>
     public static string ToContext(List<WebResult> results)
     {
+        // 念のためここでも重複排除（二重防御: 上流で重複が混入しても同一行の反復を防ぐ）
         var sb = new StringBuilder();
-        foreach (var r in results) sb.Append($"・{r.Title}: {r.Snippet}\n");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var r in results)
+        {
+            if (!seen.Add(r.Title + "\n" + r.Snippet)) continue;
+            sb.Append($"・{r.Title}: {r.Snippet}\n");
+        }
         return sb.ToString();
     }
 }
