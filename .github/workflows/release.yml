@@ -2,15 +2,15 @@
 #
 # - v* タグを push すると: Windows ランナー上で
 #     Web UI (npm) → バックエンド自己完結publish (dotnet) → WebView2ラッパー (csc)
-#     → llama.cppエンジンDL → モデルGGUF 3点DL (SHA256検証) → Inno Setup 6 で
-#     完全オフラインexe（モデル同梱・約2.1GB）を生成し、Actions成果物 + Release に添付
-# - exeはGitHub Releaseの1アセット上限(2GiB)を超えるため分割添付+結合batを同梱
-#   （Actions成果物からは単一exeをDL可能）
+#     → llama.cppエンジンDL → Inno Setup 6 で **モデル非同梠の軽量インストーラ（約200MB）**
+#     を生成し、Actions成果物 + Release に添付
+# - AIモデル（GGUF）はインストーラに同梱しない: 初回起動時のウィザード（または設定→AIモデル）
+#   でアプリ内からダウンロードする（Models.cs / wizard.ts の既存DLフロー・SHA256検証付き）
 # - SignPath署名は Secrets 設定後に別ステップで追加する（本ワークフローでは未署名）
 #
 # CIで調達する資産（ローカル開発資産の代替）:
 #   - WebView2 DLL: NuGet Microsoft.Web.WebView2 から抽出
-#   - エンジン/モデル: 配布元からDL（URL・SHA256は app/ShineosQA.Backend/Models.cs と同一値）
+#   - エンジン: 公式プリビルドをDL（モデルは同梱しないためDL不要）
 name: build-release
 
 on:
@@ -25,12 +25,6 @@ permissions:
 env:
   LLAMA_RELEASE_URL: https://github.com/ggml-org/llama.cpp/releases/download/b10936/llama-b10936-bin-win-cpu-x64.zip
   WEBVIEW2_NUGET: https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4129.50/microsoft.web.webview2.1.0.4129.50.nupkg
-  MODEL_QUICK_URL: https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-IQ4_XS.gguf
-  MODEL_QUICK_SHA: a02e41d3208e97a7cb224297e8d3abb22e5bb8d664362c6be4f48948a3797eec
-  MODEL_EMBED_URL: https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q8_0.gguf
-  MODEL_EMBED_SHA: 950f4a8e5e19477a6d3c26d2f162233c20002c601f75e4b002e3239997821167
-  MODEL_RANK_URL: https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q8_0.gguf
-  MODEL_RANK_SHA: a43c7c9b11a4c1517e5bf95151960e1621d1b72f7a493364b01e386cf1aaa1d3
 
 jobs:
   build:
@@ -109,24 +103,7 @@ jobs:
           Expand-Archive $tmp -DestinationPath $dst -Force
           if (-not (Test-Path "$dst/llama-server.exe")) { throw "llama-server.exe missing after extract" }
 
-      # ---- 5) モデルGGUF 3点（SHA256検証付き・計約2.2GB） ----
-      - name: Download models
-        shell: pwsh
-        run: |
-          $dst = 'spikes/phase0/models'
-          New-Item -ItemType Directory -Force -Path $dst | Out-Null
-          foreach ($m in @(
-            @{ u = $env:MODEL_QUICK_URL; s = $env:MODEL_QUICK_SHA; f = 'Qwen3-1.7B-IQ4_XS.gguf' },
-            @{ u = $env:MODEL_EMBED_URL; s = $env:MODEL_EMBED_SHA; f = 'bge-m3-Q8_0.gguf' },
-            @{ u = $env:MODEL_RANK_URL;  s = $env:MODEL_RANK_SHA;  f = 'bge-reranker-v2-m3-Q8_0.gguf' }
-          )) {
-            $p = Join-Path $dst $m.f
-            curl.exe -L --fail --retry 3 -o $p $m.u
-            if ($LASTEXITCODE -ne 0) { throw "model download failed: $($m.f)" }
-            $h = (Get-FileHash $p -Algorithm SHA256).Hash.ToLower()
-            if ($h -ne $m.s.ToLower()) { throw "sha256 mismatch for $($m.f): got $h" }
-            Write-Host "$($m.f) verified ok"
-          }
+      # ---- 5) モデルGGUFは同梱しない（初回起動時のウィザードでアプリ内DL。Models.cs/wizard.tsの既存フロー） ----
 
       # ---- 6) Inno Setup 6.7.3（公式リリースから直接導入。7系はNon-commercialのため不使用） ----
       - name: Install Inno Setup 6.7.3
@@ -143,30 +120,19 @@ jobs:
           }
           if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
 
-      - name: Build installer
+      - name: Build installer (lite — AI models are downloaded on first run)
         id: build
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.version }}'
-          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=$ver" 'installer/installer-v2.iss'
+          # /DLiteBuild: モデルGGUFを同梱しない（初回起動時のウィザードでアプリ内DL）
+          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=$ver" '/DLiteBuild' 'installer/installer-v2.iss'
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           $exe = "dist/ShineosQA-Setup-$ver.exe"
           if (-not (Test-Path $exe)) { throw "installer exe not found: $exe" }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           "hash=$hash" >> $env:GITHUB_OUTPUT
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## ShineosQA-Setup-$ver.exe`n`n- SHA256: \`$hash\``n- Size: $([math]::Round((Get-Item $exe).Length/1GB,2)) GB"
-
-      # ---- 6b) lite版（Store提出用・モデル非同梠・初回起動時にアプリ内DL） ----
-      - name: Build lite installer (Store submission)
-        shell: pwsh
-        run: |
-          $ver = '${{ steps.ver.outputs.version }}'
-          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=$ver" '/DLiteBuild' 'installer/installer-v2.iss'
-          if ($LASTEXITCODE -ne 0) { throw "ISCC (lite) failed" }
-          $exe = "dist/ShineosQA-Setup-$ver-lite.exe"
-          if (-not (Test-Path $exe)) { throw "lite installer not found: $exe" }
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## ShineosQA-Setup-$ver-lite.exe`n`n- SHA256: \`$hash\``n- Size: $([math]::Round((Get-Item $exe).Length/1MB,1)) MB"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## ShineosQA-Setup-$ver.exe`n`n- SHA256: \`$hash\``n- Size: $([math]::Round((Get-Item $exe).Length/1MB,1)) MB（モデル非同梱・初回起動時にアプリ内DL）"
 
       # ---- 7) MSIXビルド（Store提出用・Microsoft再署名のため署名なしでOK） ----
       - name: Build MSIX package
@@ -198,12 +164,8 @@ jobs:
           foreach ($f in 'ShineosQA.exe','Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.Wpf.dll','WebView2Loader.dll') {
             Copy-Item "$appDir/$f" $stage -Force
           }
-          # エンジン・モデル
+          # エンジン（モデルは同梱しない: 初回起動時のウィザードでアプリ内DL）
           Copy-Item spikes/phase0/engine/cpu/* "$stage/engine" -Recurse -Force
-          New-Item -ItemType Directory -Path "$stage/models" -Force | Out-Null
-          foreach ($m in 'Qwen3-1.7B-IQ4_XS.gguf','bge-m3-Q8_0.gguf','bge-reranker-v2-m3-Q8_0.gguf') {
-            Copy-Item "spikes/phase0/models/$m" "$stage/models/" -Force
-          }
           # ライセンス
           Copy-Item vendor/licenses/* "$stage/licenses" -Recurse -Force
           Copy-Item vendor/THIRD-PARTY-NOTICES.txt $stage -Force
@@ -241,20 +203,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'makeappx failed' }
           Write-Output "MSIX built: $msixPath ($([math]::Round((Get-Item $msixPath).Length/1GB,2)) GB)"
 
-      # ---- 8) Actions成果物（EXE + lite EXE + MSIX） ----
+      # ---- 8) Actions成果物（EXE + MSIX） ----
       - name: Upload installer artifact (EXE)
         uses: actions/upload-artifact@v4
         with:
           name: ShineosQA-Setup-${{ steps.ver.outputs.version }}
           path: dist/ShineosQA-Setup-${{ steps.ver.outputs.version }}.exe
-          if-no-files-found: error
-          compression-level: 0
-
-      - name: Upload installer artifact (lite EXE for Store)
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShineosQA-Setup-${{ steps.ver.outputs.version }}-lite
-          path: dist/ShineosQA-Setup-${{ steps.ver.outputs.version }}-lite.exe
           if-no-files-found: error
           compression-level: 0
 
@@ -283,24 +237,9 @@ jobs:
           } else {
             gh release edit "$env:GITHUB_REF_NAME" --notes "SHA256(exe): $hash"
           }
-          # exe: 2GiB超 → 分割添付
-          $part = "$exe.part"
-          New-Item -ItemType Directory -Force -Path $part | Out-Null
-          $fs = [IO.File]::OpenRead($exe)
-          $buf = New-Object byte[] (1GB)
-          $i = 0
-          for (;;) {
-            $r = $fs.Read($buf, 0, $buf.Length)
-            if ($r -le 0) { break }
-            $i++
-            $out = New-Object byte[] $r
-            [Array]::Copy($buf, $out, $r)
-            [IO.File]::WriteAllBytes("$part/$ver.part$('{0:d2}' -f $i)", $out)
-          }
-          $fs.Close()
-          Set-Content -Path "$part/join-and-run.bat" -Value "@echo off`r`ncopy /b $ver.part* ShineosQA-Setup-$ver.exe`r`nShineosQA-Setup-$ver.exe" -Encoding ASCII
-          gh release upload "$env:GITHUB_REF_NAME" "$part/*" --clobber
-          if ($LASTEXITCODE -ne 0) { throw "gh release upload (exe parts) failed" }
+          # exe: モデル非同梠のため1ファイル直接添付（2GiB未満）
+          gh release upload "$env:GITHUB_REF_NAME" $exe --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload (exe) failed" }
           # MSIX: 2GiB以下なら直接、超過なら分割添付
           $msixFile = Get-ChildItem "dist/ShineosQA-*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($msixFile -and $msixFile.Length -lt 2GB) {
