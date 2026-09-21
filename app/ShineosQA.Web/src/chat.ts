@@ -171,17 +171,6 @@ export class ChatView {
       this.setStatus('📸 Win+Shift+S で画面（図面の表題欄など）を切り取り、入力欄に Ctrl+V で貼り付けてください'));
     input.addEventListener('paste', (e) => this.onPaste(e));
 
-    void api.getSettings().then(s => {
-      this.webSearch = s.web_search;
-      webBtn.classList.toggle('active', this.webSearch);
-      this.packDrawing = !!s.extensions?.drawing;
-      captureBtn.hidden = !this.packDrawing;
-      if (s.extensions?.spreadsheet) {
-        const ai = document.getElementById('attach-input') as HTMLInputElement;
-        ai.accept = ai.accept + ',.xlsx,.csv,.tsv';
-      }
-    });
-
     // モデルセレクター: 現在の階級を表示し、未導入モデルはその場でダウンロード可能
     document.getElementById('model-btn')!.addEventListener('click', () => void this.toggleModelMenu());
     void this.initModelPicker();
@@ -192,8 +181,27 @@ export class ChatView {
     // URLルーティング: /c/{uuid} で開く（リロード・共有で会話を復元）
     window.addEventListener('popstate', () => this.routeFromUrl());
     this.routeFromUrl();
+
+    void this.refresh();
   }
 
+  /** タブ表示時に呼ばれる（main.ts activateTab）。拡張パックの状態もここで再反映する
+   *  （設定画面でのトグル直後にチャットへ戻ってもキャプチャボタンが即座に切替わる） */
+  async refresh() {
+    const captureBtn = document.getElementById('capture-btn') as HTMLButtonElement;
+    const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
+    try {
+      const s = await api.getSettings();
+      this.webSearch = s.web_search;
+      webBtn.classList.toggle('active', this.webSearch);
+      this.packDrawing = !!s.extensions?.drawing;
+      captureBtn.hidden = !this.packDrawing;
+      if (s.extensions?.spreadsheet) {
+        const ai = document.getElementById('attach-input') as HTMLInputElement;
+        if (!ai.accept.includes('.xlsx')) ai.accept = ai.accept + ',.xlsx,.csv,.tsv';
+      }
+    } catch { /* 設定取得失敗時は現状維持 */ }
+  }
   /** 現在のチャットのURLパス（タブ復帰用） */
   currentPath(): string {
     return this.chatUuid ? `/c/${this.chatUuid}` : '/';
