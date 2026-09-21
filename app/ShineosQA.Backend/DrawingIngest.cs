@@ -26,28 +26,120 @@ public static partial class DrawingIngest
         && text.Length <= MaxTextChars
         && ZubanRegex().IsMatch(text);
 
-    /// <summary>表題欄抽出。ページ1右下領域（JIS慣行）の行テキストからラベル近接で各欄を取り出す。
+    /// <summary>図面シート（表題欄のあるページ）の選択。表紙付きPDF（表紙+図面）で表題欄を表紙から
+    /// 読もうとしてLLMが寸法・尺度を図番として返した実図面の誤り（技能検定解答例PDF）を防ぐ。
+    /// スコア = 表題欄ラベル3点 + 図番パターン1点。同点は後のページ（表紙は前、図面は後がJIS慣行）</summary>
+    public static int PickSheetPage(IReadOnlyList<PdfTextRun> runs, int pages)
+    {
+        int bestPage = pages, bestScore = -1;
+        for (int p = 1; p <= pages; p++)
+        {
+            var pageRuns = runs.Where(r => r.Page == p).ToList();
+            if (pageRuns.Count == 0) continue;
+            var text = string.Join("\n", ToLines(pageRuns));
+            int score = SheetLabelRegex().Matches(text).Count * 3 + ZubanRegex().Matches(text).Count;
+            if (score >= bestScore) { bestScore = score; bestPage = p; }
+        }
+        return bestPage;
+    }
+
+    /// <summary>指定ページの寸法（runs座標から導出。PdfExtractResultは1ページ目の寸法しか保持しないため）</summary>
+    public static (float W, float H) PageDims(IReadOnlyList<PdfTextRun> runs, int page)
+    {
+        var pr = runs.Where(r => r.Page == page).ToList();
+        if (pr.Count == 0) return (0, 0);
+        return (pr.Max(r => r.X + r.W), pr.Max(r => r.Y + r.H));
+    }
+
+    /// <summary>表題欄抽出。渡すrunsは図面シート1ページ分（PickSheetPageで選択したページ。呼び出し側でフィルタ済み）。
+    /// JIS慣行の右下領域の行テキストからラベル近接で各欄を取り出し、寸法・尺度等の誤採用を検証で排除する。
     /// 取得できなかった欄はnull（呼び出し側でLLM構造化のフォールバック判定に使う）</summary>
     public static DrawingMeta ExtractTitleBlock(IReadOnlyList<PdfTextRun> runs, float pageWidth, float pageHeight)
     {
         var region = runs
-            .Where(r => r.Page == 1 && pageWidth > 0 && pageHeight > 0
+            .Where(r => pageWidth > 0 && pageHeight > 0
                 && r.X > pageWidth * 0.55f && r.Y < pageHeight * 0.40f)
             .ToList();
         var lines = ToLines(region);
         string? zuban = FindZuban(lines);
+        if (!IsPlausibleZuban(zuban)) zuban = null;
+        var hinmei = ValueAfterLabel(lines, "品名", "名称", "TITLE");
+        var zairyo = ValueAfterLabel(lines, "材質", "材料", "MATERIAL");
+        var scale = ValueAfterLabel(lines, "縮尺", "尺度", "SCALE");
+        var revision = RevisionOf(lines, zuban);
+        var approvedAt = ValueAfterLabel(lines, "承認", "日付", "DATE");
         return new DrawingMeta(
             ZubanRaw: zuban,
-            Hinmei: ValueAfterLabel(lines, "品名", "名称", "TITLE"),
-            Zairyo: ValueAfterLabel(lines, "材質", "材料", "MATERIAL"),
-            Scale: ValueAfterLabel(lines, "縮尺", "SCALE"),
-            Revision: RevisionOf(lines, zuban),
-            ApprovedAt: ValueAfterLabel(lines, "承認", "日付", "DATE"));
+            Hinmei: IsPlausibleHinmei(hinmei) ? hinmei : null,
+            Zairyo: IsPlausibleZairyo(zairyo) ? zairyo : null,
+            Scale: IsPlausibleScale(scale) ? scale : null,
+            Revision: IsPlausibleRevision(revision) ? revision : null,
+            ApprovedAt: string.IsNullOrWhiteSpace(approvedAt) ? null : approvedAt.Trim());
     }
 
-    /// <summary>チャンク前置き。出典表示とRAGコンテキストが図面情報を自然に運ぶ（ChatFlowの出典正規化はFile名ベースのため変更不要）</summary>
-    public static string BuildChunkText(DrawingMeta m, string fullText) =>
-        $"【図面】図番: {m.ZubanRaw ?? "不明"} / 品名: {m.Hinmei ?? "不明"} / 材質: {m.Zairyo ?? "不明"} / 改訂: {m.Revision ?? "-"}\n{fullText.Trim()}";
+    // ---- 表題欄値の検証（実図面で発生した誤抽出の根本対策: ルール・LLM双方の出力に適用する） ----
+
+    [GeneratedRegex(@"^\d+(?:\.\d+)?\s*[:／/=＝]\s*\d+(?:\.\d+)?[a-zA-Z]?$")]
+    private static partial Regex ScaleRegex();
+
+    [GeneratedRegex("図番|品名|材質|材料|尺度|縮尺|改訂|投影法|承認|DWG|TITLE|MATERIAL|SCALE|REV")]
+    private static partial Regex SheetLabelRegex();
+
+    /// <summary>図番らしさ: 図番パターンに合致すること。LLMが尺度「1:1」を図番として返した実図面の誤りを排除</summary>
+    public static bool IsPlausibleZuban(string? v) =>
+        !string.IsNullOrWhiteSpace(v) && ZubanRegex().IsMatch(v) && !ScaleRegex().IsMatch(v.Trim());
+
+    /// <summary>品名らしさ: 寸法・呼び・仕上げ記号のみの表記（Ø160、M6×15/Ø4.8×20 等）は品名になり得ない。
+    /// LLMが寸法値を品名として返した実図面の誤りを排除する</summary>
+    public static bool IsPlausibleHinmei(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return false;
+        var t = v.Trim();
+        if (t.Length < 2 || t.Length > 40) return false;
+        // 寸法表記の文字種（数字・空白・寸法記号・呼び記号）だけで構成される文字列は品名ではない
+        bool dimensionOnly = t.All(c => char.IsAsciiDigit(c) || char.IsWhiteSpace(c)
+            || "Øφ⌀°.,、×xX*CMR-+/()（）".Contains(c));
+        if (dimensionOnly) return false;
+        return t.Any(c => char.IsLetter(c) || c >= 0x3000); // 文字（かな漢字・英字）を1つは含む
+    }
+
+    /// <summary>材質らしさ: 数値開始・寸法記号・ねじ規格（Rc1/16 等）・寸法対（20×15）を排除。
+    /// LLMが「8 Ø126 Rc1/16」を材質として返した実図面の誤りを排除する</summary>
+    public static bool IsPlausibleZairyo(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return false;
+        var t = v.Trim();
+        if (t.Length > 24) return false;
+        if (t.Contains('Ø') || t.Contains('φ') || t.Contains('⌀') || t.Contains('°')) return false;
+        if (char.IsAsciiDigit(t[0])) return false;
+        if (ThreadSpecRegex().IsMatch(t) || DimPairRegex().IsMatch(t)) return false;
+        return t.Any(c => char.IsLetter(c) || c >= 0x3000);
+    }
+
+    [GeneratedRegex(@"(^|\s)(Rc|R|G|NPT|PT|PF)\s?[0-9]")]
+    private static partial Regex ThreadSpecRegex();
+
+    [GeneratedRegex(@"[0-9]\s?[x×]\s?[0-9]")]
+    private static partial Regex DimPairRegex();
+
+    public static bool IsPlausibleScale(string? v) => v != null && ScaleRegex().IsMatch(v.Trim());
+
+    public static bool IsPlausibleRevision(string? v) => v != null && System.Text.RegularExpressions.Regex.IsMatch(v, "^[A-Z][0-9]?$");
+
+    /// <summary>チャンク前置き。出典表示とRAGコンテキストが図面情報を自然に運ぶ（ChatFlowの出典正規化はFile名ベースのため変更不要）。
+    /// 抽出できた欄のみを載せる（「不明」の断言も誤りの一種。実図面検証cr05: スキャン図面の「尺度: 不明」が
+    /// ベクトル図面の「尺度: 1:1」への回答を妨げた）。尺度和らメタは前置きに含め、ノイズの多い本体テキストに頼らない</summary>
+    public static string BuildChunkText(DrawingMeta m, string fullText)
+    {
+        var parts = new List<string>();
+        if (m.ZubanRaw != null) parts.Add($"図番: {m.ZubanRaw}");
+        if (m.Hinmei != null) parts.Add($"品名: {m.Hinmei}");
+        if (m.Zairyo != null) parts.Add($"材質: {m.Zairyo}");
+        if (m.Revision != null) parts.Add($"改訂: {m.Revision}");
+        if (m.Scale != null) parts.Add($"尺度: {m.Scale}");
+        var head = parts.Count > 0 ? $"【図面】{string.Join(" / ", parts)}" : "【図面】";
+        return $"{head}\n{fullText.Trim()}";
+    }
 
     // ---- 内部 ----
 

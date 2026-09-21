@@ -291,6 +291,18 @@ public sealed class ChatFlow
             // 4) ハイブリッド検索 top8
             var qTokens = Rag.Tokenize(queryForRetrieval).ToHashSet();
             var hits = _index.Search(qEmb, qTokens, Rag.RerankPool);
+            // 図面意図ブースト: 「図面/図番」や図番パターンを含む質問では、寸法数値ノイズでキーワード一致が
+            // 希薄になる図面チャンクを広めのプールから上位へ浮上させる（実図面検証cr02の根本対策）。
+            // リランク以降の判断は変わらないため、通常質問への影響はこの分岐の外に出ない
+            if (Rag.HasDrawingIntent(queryForRetrieval))
+            {
+                var drawingIds = _db.Query("SELECT file_id FROM files WHERE kind='drawing'")
+                    .Select(r => Convert.ToInt64(r["file_id"] ?? 0L)).ToHashSet();
+                var pool = _index.Search(qEmb, qTokens, Rag.RerankPool * 3);
+                foreach (var h in pool)
+                    if (drawingIds.Contains(h.Rec.FileId)) h.Hybrid *= 1.4;
+                hits = pool.OrderByDescending(h => h.Hybrid).Take(Rag.RerankPool).ToList();
+            }
             string webNote = webFailed ? "\n※Web検索に失敗したため、社内ナレッジのみで判定しています。" : "";
             // 日付感応質問（「今日は何日」「今何時」等）は参照情報がなくてもシステム日時から
             // 直接回答する（PCのシステム時計が根拠。ガードで「該当なし」にしない）

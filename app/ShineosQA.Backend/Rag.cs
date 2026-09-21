@@ -26,6 +26,13 @@ public static partial class Rag
     [GeneratedRegex(@"今日|本日|昨日|明日|明後日|一昨日|今週|来週|先週|今月|来月|先月|今年|昨年|去年|来年|現在|日付|曜日|何日|何時|時刻|天気|気温|天候|降水確率|気象|ニュース|株価|為替|レート")]
     public static partial Regex TimeSensitiveQuestion();
 
+    /// <summary>質問の図面意図: 「図面/図番」を含むか図番パターン（キャプチャチップからの質問含む）。
+    /// 図面チャンクは寸法数値のノイズでキーワード一致が希薄になり濃密な文書チャンクに埋もれるため
+    /// （実図面検証cr02: JIS B 0405の質問が規格一覧文書に取って代わられた）、この判定で図面チャンクを
+    /// 候補プールへ優先的に残す（ChatFlowのブーストで使用）</summary>
+    public static bool HasDrawingIntent(string question) =>
+        question.Contains("図面") || question.Contains("図番") || DrawingIngest.ZubanRegex().IsMatch(question);
+
     /// <summary>システムプロンプト末尾に付与する現在日付行。「今日は何日」等の質問に
     /// モデルが正確に答えられるようにする（学習時点で知識が止まっているため）。
     /// 時刻は含めない: ChatFlowの前置きキャッシュ（プリフィックスキャッシュ）効率のため
