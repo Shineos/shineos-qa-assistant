@@ -2,7 +2,9 @@
 
 本プロジェクトのバージョンごとの変更内容です。日本語の紹介ページは [README.md](README.md) / English page: [README-EN.md](README-EN.md) を参照してください。
 
-## 2026-09-21（対象ガード＋Excel・CSV取り込み・feature/drawing-search・未リリース）
+## 2026-09-21（v2.1.7・対象ガード＋Excel・CSV取り込み）
+
+> 図面PDF検索・Q&A拡張パック（v2.1.6）の完成度向上と、表計算ファイル対応の追加。コード内容は feature/drawing-search マージ（PR #3）どおり
 
 ### 対象ガード（生成前の前提検証・t74/t76型「対象置換」捏造の防御）
 
