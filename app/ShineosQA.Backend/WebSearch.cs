@@ -39,10 +39,40 @@ public sealed partial class WebSearch
 
     public async Task<List<WebResult>> SearchAsync(string query, int topN = 4, CancellationToken ct = default)
     {
-        // GET（実測で安定）→ 1s待ちPOST → 2s待ちGET の順にリトライ。
-        // 重複排除で候補が減るため多めに取得してから上位topNに絞る
+        // 安定化: ①同一クエリのTTLキャッシュ ②検索の最小間隔ゲート ③空結果時のバックオフ再試行。
+        // DuckDuckGoのHTMLエンドポイントは非公式のため、短時間の連続クエリで0件（レート制限）に
+        // なることがある（横浜天気の実測）。無料で使い続けるための安定化策
+        lock (_gateLock)
+        {
+            if (_cache.TryGetValue(query, out var hit) && DateTime.UtcNow - hit.At < CacheTtl)
+                return hit.Results;
+            var since = DateTime.UtcNow - _lastSearchUtc;
+            if (since < MinSearchInterval) Thread.Sleep(MinSearchInterval - since);
+        }
+        var results = await SearchCoreAsync(query, topN, ct);
+        lock (_gateLock)
+        {
+            _lastSearchUtc = DateTime.UtcNow;
+            _cache[query] = (DateTime.UtcNow, results);
+            if (_cache.Count > 32) // 溜まりすぎ防止（古いものから削除）
+                foreach (var k in _cache.Keys.OrderBy(k => _cache[k].At).Take(_cache.Count - 32).ToList())
+                    _cache.Remove(k);
+        }
+        return results;
+    }
+
+    private static readonly object _gateLock = new();
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan MinSearchInterval = TimeSpan.FromSeconds(2.5);
+    private static readonly Dictionary<string, (DateTime At, List<WebResult> Results)> _cache = new();
+    private static DateTime _lastSearchUtc = DateTime.MinValue;
+
+    /// <summary>検索本体。GET→POST→GETに加え、0件のときはバックオフしてもう1ラウンド試す
+    /// （レート制限の空応答は数秒置くと回復する実測）</summary>
+    private async Task<List<WebResult>> SearchCoreAsync(string query, int topN, CancellationToken ct)
+    {
         Exception? lastErr = null;
-        foreach (var (method, delayMs) in new[] { ("GET", 0), ("POST", 1000), ("GET", 2000) })
+        foreach (var (method, delayMs) in new[] { ("GET", 0), ("POST", 1000), ("GET", 2000), ("GET", 5000) })
         {
             if (delayMs > 0) await Task.Delay(delayMs, ct);
             try

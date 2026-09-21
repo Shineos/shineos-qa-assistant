@@ -416,6 +416,15 @@ public sealed class ChatFlow
                     }
                 }
             }
+            // 回答材料が全く無い場合（Web検索0件＋タイムセンシティブ等）: 空回答の代わりに再試行を案内
+            if (chosen.Count == 0 && (webResults == null || webResults.Count == 0) && string.IsNullOrEmpty(webContext))
+            {
+                var msg = "Web検索に失敗しました（アクセスが集中している可能性があります）。少し待ってからもう一度お試しください。";
+                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", msg));
+                await Sse(ctx, "delta", new { content = msg });
+                await Sse(ctx, "done", new { cached = false, guard = "web-failed", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                return;
+            }
             foreach (var h in chosen)
                     sources.Add(EnrichDrawing(new SourceInfo { File = h.Rec.FileName, Snippet = await SnippetForSourceAsync(MergedChunkText(h.Rec), qTokens, message, ctx.RequestAborted), Text = MergedChunkText(h.Rec) }, h.Rec.FileId));
             // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）
