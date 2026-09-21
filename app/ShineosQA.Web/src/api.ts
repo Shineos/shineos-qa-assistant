@@ -47,6 +47,10 @@ export const api = {
     fetch('/api/knowledge/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) })
       .then(r => json<{ imported: number }>(r)),
   deleteKnowledge: (id: number) => fetch(`/api/knowledge/${id}`, { method: 'DELETE' }),
+  retryKnowledge: (id: number) =>
+    fetch(`/api/knowledge/${id}/retry`, { method: 'POST' })
+      .then(r => r.json().then(j => ({ ok: (r.ok && j.ok !== false) as boolean, message: j.message as string | undefined })))
+      .catch(() => ({ ok: false as boolean, message: '通信エラー' })),
   models: () => fetch('/api/models').then(r => json<{ models: ModelEntry[]; needs_wizard: boolean }>(r)),
   installModel: (id: string) =>
     fetch('/api/models/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),

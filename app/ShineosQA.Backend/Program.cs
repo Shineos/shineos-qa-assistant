@@ -358,6 +358,33 @@ public static class Api
             ingest.DeleteStoredFiles(id); // 拡張パック: 元ファイル・サムネイルを掃除
             return Results.Ok(new { ok = true });
         });
+
+        // 失敗した取り込みの再試行: 拡張パックON時に保存された元ファイルを再解析する。
+        // 例: 図面拡張OFFで取り込んだスキャンPDF → ONに変更してから再試行するとOCRで取り込める
+        object RetryUnavailable() => new { error = "SHINE_E_RETRY_NO_FILE", message = "元ファイルが保存されていないため再試行できません（該当ファイルを削除し、設定を確認のうえ登録し直してください）" };
+        app.MapPost("/api/knowledge/{id}/retry", async (long id, HttpContext http) =>
+        {
+            var rows = db.Query("SELECT name FROM files WHERE file_id=$i", ("$i", id));
+            if (rows.Count == 0) return Results.NotFound(new { error = "not found" });
+            var name = Convert.ToString(rows[0]["name"]) ?? "retry.pdf";
+            if (!Directory.Exists(ingest.FilesDir)) return Results.Json(RetryUnavailable(), statusCode: 409);
+            var orig = Directory.EnumerateFiles(ingest.FilesDir, $"{id}.*")
+                .FirstOrDefault(p => !p.EndsWith(".thumb.png"));
+            if (orig is null) return Results.Json(RetryUnavailable(), statusCode: 409);
+            db.Exec("DELETE FROM files WHERE file_id=$i", ("$i", id));
+            index.RemoveFile(id); // メモリ索引からも旧チャンクを除去（DBはカスケードで削除済み）
+            await using var fs = File.OpenRead(orig);
+            try
+            {
+                var newId = await ingest.IngestFileAsync(name, fs, http.RequestAborted);
+                return Results.Json(new { ok = true, file_id = newId });
+            }
+            catch (Exception ex)
+            {
+                // IngestFileAsyncがerror行を記録済み。UIは一覧の更新だけすればよい
+                return Results.Json(new { ok = false, message = ex.Message });
+            }
+        });
     }
 }
 

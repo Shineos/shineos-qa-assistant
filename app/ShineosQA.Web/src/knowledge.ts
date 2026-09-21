@@ -80,6 +80,23 @@ export class KnowledgeView {
       cells += `<td class="st-${f.status}">${esc(status)}</td><td>${f.chunk_count}</td><td>${esc(f.added_at ?? '')}</td>`;
       tr.innerHTML = cells;
       const td = document.createElement('td');
+      // 取り込み失敗は原因を取り除いた後にワンクリックで再試行できる（元ファイルが保存されている場合）
+      if (f.status === 'error') {
+        const retry = document.createElement('button');
+        retry.className = 'icon-btn';
+        retry.textContent = '↻';
+        retry.title = '再試行';
+        retry.addEventListener('click', async () => {
+          retry.disabled = true;
+          const r = await api.retryKnowledge(f.file_id).catch(() => ({ ok: false, message: '通信エラー' }));
+          if (r.ok === false) {
+            const st = tr.querySelector('.st-error') as HTMLElement | null;
+            if (st) st.title = `再試行できません: ${r.message ?? ''}`;
+          }
+          await this.refresh();
+        });
+        td.appendChild(retry);
+      }
       const del = document.createElement('button');
       del.className = 'icon-btn';
       del.textContent = '×';

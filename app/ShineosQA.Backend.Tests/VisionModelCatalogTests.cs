@@ -2,8 +2,8 @@ using Xunit;
 
 namespace ShineosQA.Backend.Tests;
 
-/// <summary>視覚言語モデル（図面キャプチャAI読取）のカタログ登録。設定画面のモデル一覧に
-/// 自動表示されること（wizard.tsはカタログ全体を列挙する）が前提となる登録の検証</summary>
+/// <summary>視覚言語モデル（図面キャプチャAI読取）のカタログ登録。
+/// 本体+mmprojの2ファイルを1エントリ（1行・1クリックDL）として扱うことを検証する</summary>
 public class VisionModelCatalogTests
 {
     private sealed class NullLogger : ILogger
@@ -14,15 +14,18 @@ public class VisionModelCatalogTests
     }
 
     [Fact]
-    public void Catalog_ContainsVisionModelPair()
+    public void Catalog_ContainsVisionModelAsSingleEntry()
     {
         var mm = new ModelManager(
             new AppConfig { ModelsDir = Path.Combine(Path.GetTempPath(), "vision-cat-" + Guid.NewGuid().ToString("N")) },
             new NullLogger());
         var st = mm.Status();
-        Assert.Contains(st, m => m.Id == "vision-qwen3vl" && m.Kind == "vision");
-        Assert.Contains(st, m => m.Id == "vision-qwen3vl-mmproj" && m.Kind == "vision");
-        // 2ファイルとも未導入の状態では「視覚エンジンは起動しない」判断になることをPropertiesで確認
-        Assert.False(st.First(m => m.Id == "vision-qwen3vl").Installed);
+        // 1エントリで本体+mmproj（セット品）を扱う: ユーザー視点では1行・1クリックで導入完了
+        var vision = st.FirstOrDefault(m => m.Id == "vision-qwen3vl");
+        Assert.NotNull(vision);
+        Assert.Equal("vision", vision!.Kind);
+        Assert.False(vision.Installed);
+        // mmprojを別行にしない（ユーザーが2行の違いを意識しなくてよい設計）
+        Assert.DoesNotContain(st, m => m.Id == "vision-qwen3vl-mmproj");
     }
 }

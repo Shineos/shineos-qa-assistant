@@ -412,7 +412,7 @@ export class ChatView {
     const objectUrl = URL.createObjectURL(file);
     this.pendingCapture = { objectUrl, file };
     const host = document.getElementById('capture-host')!;
-    host.innerHTML = `<div class="chip"><img class="chip-thumb" src="${objectUrl}" alt=""><span class="chip-text">画像を読み取り中…</span><button type="button" class="icon-btn" title="キャンセル">✕</button></div>`;
+    host.innerHTML = `<div class="chip"><img class="chip-thumb" src="${objectUrl}" alt=""><span class="chip-text">画像を読み取り中…（AI読取は初回1分ほどかかることがあります）</span><button type="button" class="icon-btn" title="キャンセル">✕</button></div>`;
     host.querySelector('.icon-btn')!.addEventListener('click', () => this.clearCapture(true));
     try {
       const r = await api.ocr(file);
