@@ -495,9 +495,10 @@ public sealed class Ingest
         finally { try { File.Delete(tmp); } catch { } }
     }
 
-    /// <summary>指定ページをWindows.Data.Pdf（WinRT）でPNG描画する。Docnet黒つぶし対策の共通経路。
-    /// 戻り値のPNG寸法はBitmapDecoderで実測する（DestinationWidthは幅指定のみで高さは縦横比維持）</summary>
-    private static async Task<(byte[] Png, int W, int H)> RenderPageWinRtAsync(byte[] pdfBytes, int pageIndex, int targetWidth, CancellationToken ct)
+    /// <summary>指定ページをWindows.Data.Pdf（WinRT）でPNG描画する。Docnet黒つぶし対策の共通経路
+    /// （SourcePreviewの図上ハイライトでも使用）。戻り値のPNG寸法はBitmapDecoderで実測する
+    /// （DestinationWidthは幅指定のみで高さは縦横比維持）</summary>
+    public static async Task<(byte[] Png, int W, int H)> RenderPageWinRtAsync(byte[] pdfBytes, int pageIndex, int targetWidth, CancellationToken ct)
     {
         var tmp = Path.Combine(Path.GetTempPath(), "shineosqa-pdf-" + Guid.NewGuid().ToString("N") + ".pdf");
         try

@@ -230,3 +230,25 @@ button.small { padding: 5px 10px; font-size: 12px; }
 }
 .archive-toggle svg, .icon-btn svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
 .chat-item .icon-btn svg { margin-right: 0; }
+
+/* 図面プレビューモーダル: 元ページ画像＋該当領域ハイライト。ボタンは出典デザインに合わせた軽いボーダー風 */
+.src-modal-wide { width: min(880px, 94vw); }
+.preview-body { padding: 0; max-height: 68vh; overflow: auto; }
+.preview-wrap { position: relative; font-size: 0; }
+.preview-img { width: 100%; height: auto; display: block; }
+.preview-layer { position: absolute; inset: 0; pointer-events: none; }
+.preview-hl { position: absolute; background: rgba(250, 204, 21, 0.38); outline: 2px solid rgba(217, 119, 6, 0.75); border-radius: 2px; }
+.preview-loading { padding: 40px; text-align: center; color: var(--muted); }
+.preview-page { padding: 6px 14px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--border); }
+.open-original {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.open-original:hover { background: var(--hover); }

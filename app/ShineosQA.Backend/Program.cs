@@ -222,6 +222,35 @@ public static class Api
             return Results.File(file, ct);
         });
 
+        // 図面出典のプレビュー: 元PDFのシートページ画像＋スニペット該当領域の矩形（画像幅高の百分率）。
+        // テキスト層が無いスキャン図面は画像のみ（rects空）、PDF以外（DXF等）は404でUIがテキストモーダルへフォールバック
+        app.MapGet("/api/knowledge/{id}/preview", async (long id, string? snippet, HttpContext http) =>
+        {
+            if (string.IsNullOrWhiteSpace(snippet)) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "snippet required" });
+            if (!Directory.Exists(ingest.FilesDir)) return Results.NotFound();
+            var file = Directory.EnumerateFiles(ingest.FilesDir, $"{id}.*")
+                .FirstOrDefault(p => !p.EndsWith(".thumb.png") && p.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase));
+            if (file is null) return Results.NotFound();
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(file);
+                var result = await SourcePreview.BuildAsync(bytes, snippet, http.RequestAborted);
+                if (result is null) return Results.NotFound();
+                return Results.Json(new
+                {
+                    image = result.ImageDataUrl,
+                    image_width = result.ImageWidth,
+                    image_height = result.ImageHeight,
+                    page = result.Page,
+                    rects = result.Rects.Select(r => new { left = r.Left, top = r.Top, width = r.Width, height = r.Height }),
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { error = "SHINE_E_PREVIEW_FAILED", message = ex.Message }, statusCode: 500);
+            }
+        });
+
         app.MapPost("/api/knowledge", async (HttpRequest req) =>
         {
             if (!req.HasFormContentType) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "multipart/form-data が必要です" });

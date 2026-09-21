@@ -107,6 +107,44 @@ function openSourceModal(src: SourceInfo) {
   host.appendChild(ov);
 }
 
+/** 図面出典ビューア: 元PDFのシートページ画像を表示し、回答の根拠スニペットに対応する
+ *  領域を図上にハイライトする（矩形はサーバ側で単語座標から計算・画像幅高の百分率で返る）。
+ *  取得できない場合（DXF・テキスト層なし等）はテキストモーダルへフォールバック */
+async function openDrawingPreview(s: SourceInfo) {
+  const fid = s.file_id ?? s.fileId;
+  if (!fid) { openSourceModal(s); return; }
+  const host = document.getElementById('modal-host')!;
+  host.innerHTML = '';
+  const ov = document.createElement('div');
+  ov.className = 'src-overlay';
+  const openAttr = `<button class="open-original" data-open>元ファイルを開く</button>`;
+  ov.innerHTML = `
+    <div class="src-modal src-modal-wide">
+      <div class="src-head"><span class="src-file">${SVG_DOC} ${esc(s.zuban ? `【図】${s.zuban} / ${s.file}` : s.file)}</span>
+        ${openAttr}
+        <button class="icon-btn" data-close>✕ 閉じる</button></div>
+      <div class="src-body preview-body"><div class="preview-loading">図面を準備中…</div></div>
+    </div>`;
+  ov.addEventListener('click', e => { if (e.target === ov) host.innerHTML = ''; });
+  ov.querySelector('[data-close]')!.addEventListener('click', () => { host.innerHTML = ''; });
+  ov.querySelector('[data-open]')?.addEventListener('click', () => window.open(api.fileUrl(fid), '_blank'));
+  host.appendChild(ov);
+  try {
+    const resp = await fetch(`/api/knowledge/${fid}/preview?snippet=${encodeURIComponent(s.snippet)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const p = await resp.json() as { image: string; page?: number; rects?: { left: number; top: number; width: number; height: number }[] };
+    const body = ov.querySelector('.preview-body')!;
+    const rects = (p.rects ?? [])
+      .map(r => `<div class="preview-hl" style="left:${r.left}%;top:${r.top}%;width:${r.width}%;height:${r.height}%"></div>`)
+      .join('');
+    body.innerHTML = `<div class="preview-wrap"><img class="preview-img" src="${p.image}" alt="図面プレビュー">` +
+      `<div class="preview-layer">${rects}</div></div>` +
+      `<div class="preview-page">図面${p.page ?? 1}ページ目 ／ クリック箇所をハイライト表示（元ファイル: ${esc(s.file)}）</div>`;
+  } catch {
+    openSourceModal(s); // DXF等・描画不可: テキストモーダルへ
+  }
+}
+
 function sourceElement(s: SourceInfo): HTMLElement {
   // 図面フラグ・ファイルIDは保存時期により camelCase/fileId と snake_case/file_id が混在する（旧チャット互換）
   const fid = s.file_id ?? s.fileId;
@@ -121,8 +159,8 @@ function sourceElement(s: SourceInfo): HTMLElement {
       <div class="source-snippet">${esc(s.snippet.slice(0, 110))}…</div></div>`;
     row.addEventListener('click', () => window.open(s.url!, '_blank', 'noopener,noreferrer'));
   } else if (drawing && fid) {
-    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示。クリックで他出典と同じ該当箇所ハイライトの
-    // モーダルを開き、モーダルの「元ファイルを開く」で図面そのもの（画像・線を含むPDF/DXF）を確認できる
+    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示。クリックで**元ページ画像＋該当領域ハイライト**
+    // のモーダルを開く（図面は見た目が本体のため。取得できない場合はテキストモーダルへフォールバック）
     // 図番が抽出できない図面（スキャン図面・DXF等）はファイル名を見出しにして【図面】種別だけは示す
     const rev = s.revision ? `・改訂${esc(s.revision)}` : '';
     const heading = s.zuban
@@ -130,8 +168,8 @@ function sourceElement(s: SourceInfo): HTMLElement {
       : `<b>【図面】</b><span class="muted">${esc(s.file)}</span>`;
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main">${heading}` +
       `<div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
-    row.title = 'クリックで該当箇所を表示';
-    row.addEventListener('click', () => openSourceModal(s));
+    row.title = 'クリックで図面の該当箇所を表示';
+    row.addEventListener('click', () => void openDrawingPreview(s));
   } else {
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>${esc(s.file)}</b><div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
     row.addEventListener('click', () => openSourceModal(s));
