@@ -403,6 +403,10 @@ public sealed class Supervisor
 
     public bool IsLlmAlive => _llm is { } l && !l.Proc.HasExited;
 
+    /// <summary>リランクエンジンの稼働状態。未起動（モデル未DL・アイドル解放後）でも
+    /// Q&Aはハイブリッド順で続行できるため、ChatFlowはこれを見てリランクをスキップする</summary>
+    public bool IsRankAlive => _rank is { } r && !r.Proc.HasExited;
+
     public void StopAll()
     {
         lock (_lock)

@@ -370,26 +370,36 @@ public sealed class ChatFlow
                 }
                 else
                 {
-                    var ranked = await _gw.RerankAsync(_cfg.EnginePortRank, queryForRetrieval, docs, 2, ctx.RequestAborted);
-                    var top1 = ranked.Count > 0 ? ranked[0].Score.ToString("F2") : "none";
-                    _log.Info($"rerank: top1={top1} cos={top.Cos:F2} kw={top.Kw:F2} file={top.Rec.FileName}");
-                    if (ranked.Count == 0 || ranked[0].Score < Rag.GuardThreshold)
+                    // リランカは任意モデル（未DL環境では未起動）: 起動していなければ
+                    // ハイブリッド順の上位をそのまま採用する（該当なし判定はhits==0のガードが担う）
+                    if (!_sup.IsRankAlive)
                     {
-                        if (string.IsNullOrEmpty(webContext) && !timeSensitive)
-                        {
-                            var refusal = "該当する記載がありません。" + webNote;
-                            _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
-                            await Sse(ctx, "delta", new { content = refusal });
-                            await Sse(ctx, "done", new { cached = false, guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
-                            return;
-                        }
-                        chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
+                        _log.Info("rerank unavailable (rank model not installed) — using hybrid order");
+                        chosen = hits.Take(2).ToList();
                     }
                     else
                     {
-                        // 高信頼（top1スコア≥+2.0）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2
-                        var take = ranked[0].Score >= 2.0 ? 1 : 2;
-                        chosen = ranked.Take(take).Select(r => hits[r.Index]).ToList();
+                        var ranked = await _gw.RerankAsync(_cfg.EnginePortRank, queryForRetrieval, docs, 2, ctx.RequestAborted);
+                        var top1 = ranked.Count > 0 ? ranked[0].Score.ToString("F2") : "none";
+                        _log.Info($"rerank: top1={top1} cos={top.Cos:F2} kw={top.Kw:F2} file={top.Rec.FileName}");
+                        if (ranked.Count == 0 || ranked[0].Score < Rag.GuardThreshold)
+                        {
+                            if (string.IsNullOrEmpty(webContext) && !timeSensitive)
+                            {
+                                var refusal = "該当する記載がありません。" + webNote;
+                                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                                await Sse(ctx, "delta", new { content = refusal });
+                                await Sse(ctx, "done", new { cached = false, guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                                return;
+                            }
+                            chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
+                        }
+                        else
+                        {
+                            // 高信頼（top1スコア≥+2.0）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2
+                            var take = ranked[0].Score >= 2.0 ? 1 : 2;
+                            chosen = ranked.Take(take).Select(r => hits[r.Index]).ToList();
+                        }
                     }
                 }
             }
