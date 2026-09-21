@@ -291,13 +291,14 @@ public sealed class ChatFlow
             // 4) ハイブリッド検索 top8
             var qTokens = Rag.Tokenize(queryForRetrieval).ToHashSet();
             var hits = _index.Search(qEmb, qTokens, Rag.RerankPool);
+            // 図面チャンクの判別（意図ブーストとスニペット免除で共用。files は小型テーブルなので都度照会で即時反映）
+            var drawingIds = _db.Query("SELECT file_id FROM files WHERE kind='drawing'")
+                .Select(r => Convert.ToInt64(r["file_id"] ?? 0L)).ToHashSet();
             // 図面意図ブースト: 「図面/図番」や図番パターンを含む質問では、寸法数値ノイズでキーワード一致が
             // 希薄になる図面チャンクを広めのプールから上位へ浮上させる（実図面検証cr02の根本対策）。
             // リランク以降の判断は変わらないため、通常質問への影響はこの分岐の外に出ない
             if (Rag.HasDrawingIntent(queryForRetrieval))
             {
-                var drawingIds = _db.Query("SELECT file_id FROM files WHERE kind='drawing'")
-                    .Select(r => Convert.ToInt64(r["file_id"] ?? 0L)).ToHashSet();
                 var pool = _index.Search(qEmb, qTokens, Rag.RerankPool * 3);
                 foreach (var h in pool)
                     if (drawingIds.Contains(h.Rec.FileId)) h.Hybrid *= 1.4;
@@ -400,7 +401,12 @@ public sealed class ChatFlow
                 if (covered.Contains((h.Rec.FileId, h.Rec.Seq))) continue;
                 covered.Add((h.Rec.FileId, h.Rec.Seq));
                 if (_index.NextChunkText(h.Rec.FileId, h.Rec.Seq) is not null) covered.Add((h.Rec.FileId, h.Rec.Seq + 1));
-                ctxDocs.Add((h.Rec.FileName, Rag.Snippet(MergedChunkText(h.Rec), qTokens)));
+                var merged = MergedChunkText(h.Rec);
+                // 図面チャンク（1枚=1チャンク・テキスト量は取り込み時に DrawingIngest.MaxTextChars で上限）は
+                // スニペット化せず全文注入する: 240字の窓は寸法ノイズの間に散らばる表題欄・注記を切断し、
+                // 「チャンク内に記載があるのに模型に渡らない」実図面検証cr02（JIS B 0405-m）の原因だった
+                if (!drawingIds.Contains(h.Rec.FileId)) merged = Rag.Snippet(merged, qTokens);
+                ctxDocs.Add((h.Rec.FileName, merged));
             }
             var context = Rag.BuildContext(ctxDocs, webContext);
             var messages = new List<(string, string)> { ("system", Rag.SystemPrompt + Rag.CurrentDateLine()) };
