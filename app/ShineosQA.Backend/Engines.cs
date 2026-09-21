@@ -123,7 +123,15 @@ public sealed class Supervisor
                 if (_emb != null) DisposeEngine(_emb);
                 _emb = Start("embed", _cfg.EmbedModel, _cfg.EnginePortEmb, extra: new[] { "--embedding", "--pooling", "cls" });
             }
-            if (_rank is null || _rank.Proc.HasExited)
+            // リランカは任意モデル（README: 精度向上・任意）: 未DLでもQ&Aを止めない。
+            // 無いのに起動しようとするとFNFでチャット全体が死ぬため（軽量インストーラ実機検証で発覚）
+            var rankModelPath = Path.Combine(_cfg.ModelsDir, _cfg.RankModel);
+            if (!File.Exists(rankModelPath))
+            {
+                if (_rank != null) { DisposeEngine(_rank); _rank = null; }
+                _log.Warn("rank model not installed — running without reranker (hybrid search only)");
+            }
+            else if (_rank is null || _rank.Proc.HasExited)
             {
                 if (_rank != null) DisposeEngine(_rank);
                 _rank = Start("rank", _cfg.RankModel, _cfg.EnginePortRank, extra: new[] { "--rerank", "--pooling", "rank" });
