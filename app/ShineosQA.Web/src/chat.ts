@@ -18,6 +18,8 @@ const SVG_TROPHY = svgWrap('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18
 // メッセージカード時刻横のコピーアイコン（コピー完了時はチェックに差し替え）
 const SVG_COPY = svgWrap('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>');
 const SVG_CHECK = svgWrap('<polyline points="20 6 9 17 4 12"/>');
+const SVG_ARCHIVE = svgWrap('<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>');
+const SVG_ARCHIVE_RESTORE = svgWrap('<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/><path d="m9 16 3-3 3 3"/>');
 
 /** キャプチャ画像を data URL 化して送信Payloadに含める（サーバ側でローカル保存し過去チャットでも表示） */
 function fileToDataUrl(file: File): Promise<string> {
@@ -113,20 +115,17 @@ function sourceElement(s: SourceInfo): HTMLElement {
       <div class="source-snippet">${esc(s.snippet.slice(0, 110))}…</div></div>`;
     row.addEventListener('click', () => window.open(s.url!, '_blank', 'noopener,noreferrer'));
   } else if (drawing && fid) {
-    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示し、「開く」で元ファイルを別タブ表示。
+    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示。クリックで**元ファイル**を別タブに開く
+    // （PDF図面は画像・線を含むオリジナルそのもの。テキスト抽出チャンクは別物）。
     // 図番が抽出できない図面（スキャン図面・DXF等）はファイル名を見出しにして【図面】種別だけは示す
     const rev = s.revision ? `・改訂${esc(s.revision)}` : '';
     const heading = s.zuban
       ? `<b>【図】${esc(s.zuban)}</b>` + (s.hinmei ? `<span class="muted">（${esc(s.hinmei)}${rev}）</span>` : '')
       : `<b>【図面】</b><span class="muted">${esc(s.file)}</span>`;
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main">${heading}` +
-      `<div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>` +
-      `<button type="button" class="small open-drawing">開く</button>`;
-    row.addEventListener('click', () => openSourceModal(s));
-    row.querySelector('.open-drawing')!.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.open(api.fileUrl(fid), '_blank');
-    });
+      `<div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
+    row.title = 'クリックで元ファイルを開く';
+    row.addEventListener('click', () => window.open(api.fileUrl(fid), '_blank'));
   } else {
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>${esc(s.file)}</b><div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
     row.addEventListener('click', () => openSourceModal(s));
@@ -241,13 +240,13 @@ export class ChatView {
     if (!this.showArchived) {
       const archivedToggle = document.createElement('button');
       archivedToggle.className = 'archive-toggle';
-      archivedToggle.textContent = '📦 アーカイブ済みを表示';
+      archivedToggle.innerHTML = `${SVG_ARCHIVE} アーカイブ済みを表示`;
       archivedToggle.addEventListener('click', () => { this.showArchived = true; void this.refreshList(selectUuid); });
       list.appendChild(archivedToggle);
     } else {
       const backToggle = document.createElement('button');
       backToggle.className = 'archive-toggle';
-      backToggle.textContent = '← 通常のチャットに戻る';
+      backToggle.innerHTML = `${SVG_ARCHIVE_RESTORE} 通常のチャットに戻る`;
       backToggle.addEventListener('click', () => { this.showArchived = false; void this.refreshList(selectUuid); });
       list.appendChild(backToggle);
     }
@@ -260,7 +259,7 @@ export class ChatView {
       // アーカイブ ⇄ 復元（データは消さずに一覧の出し入れだけを行う）
       const arc = document.createElement('button');
       arc.className = 'icon-btn';
-      arc.textContent = this.showArchived ? '↩' : '📦';
+      arc.innerHTML = this.showArchived ? SVG_ARCHIVE_RESTORE : SVG_ARCHIVE;
       arc.title = this.showArchived ? 'アーカイブから戻す' : 'アーカイブ';
       arc.addEventListener('click', async (e) => {
         e.stopPropagation();

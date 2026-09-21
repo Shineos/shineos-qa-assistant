@@ -228,3 +228,5 @@ button.small { padding: 5px 10px; font-size: 12px; }
   background: var(--hover, #f1f5f9);
   color: var(--text, #1d2733);
 }
+.archive-toggle svg, .icon-btn svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
+.chat-item .icon-btn svg { margin-right: 0; }
