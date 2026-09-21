@@ -41,7 +41,7 @@ public static class Api
 
         app.MapGet("/api/status", () => Results.Json(new
         {
-            version = "2.0.0",
+            version = "2.1.8",
             tier = cfg.EffectiveTier,
             chat_model = cfg.ChatModelFile,
             chunks = index.Count,

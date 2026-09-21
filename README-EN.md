@@ -39,7 +39,11 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 | Stop on close | Closing the app stops the AI engine, backend and network ports completely and releases all memory (nothing stays resident) |
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
 | Web search (OFF by default) | Optional DuckDuckGo lookup (no API key). **Queries would be sent externally, so keep it OFF for company questions** |
-| Drawing PDF search & Q&A (manufacturing extension, enable in Settings) | Auto-reads the title block (part number, name, material, revision) of drawing PDFs at ingest; part-number variants (A-1234 / A1234 / full-width) match as the same token. Paste a screen capture to ask from a drawing number (on-device OCR). OFF by default |
+| Drawing PDF search & Q&A (manufacturing extension, enable in Settings) | Auto-reads the title block (part number, name, material, revision) of drawing PDFs at ingest; part-number variants (A-1234 / A1234 / full-width) match as the same token. **DXF (CAD exchange format)** files can also be ingested directly (DWG is not supported — export to DXF/PDF). Paste a screen capture to ask from a drawing number (on-device OCR). OFF by default |
+| AI reading of drawing captures (`Win+Shift+S` → paste) | The vision-language model (Qwen3-VL, processed on-device) reads part number, name, material and revision straight from the capture image and pre-fills the confirmation chip (more accurate than WinRT OCR; one-tap correction). Download from Settings → AI models (~2.1 GB, optional) |
+| Shape-only captures also work | Even a crop of just the drawing geometry (no text at all) works: the AI reads shape cues as search keywords, and sending with no typed text is supported |
+| Source preview with on-drawing highlight | Clicking a drawing source shows the original page with the cited region highlighted; "Open original file" opens the real PDF/DXF |
+| Chat management (stored captures & archive) | Captures are stored locally and shown again when you reopen old chats. Unused chats can be 📦 archived instead of deleted (restorable anytime) |
 
 ### Key changes from the previous release (Ollama + Open WebUI)
 

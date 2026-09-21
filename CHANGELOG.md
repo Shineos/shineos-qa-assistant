@@ -2,7 +2,7 @@
 
 本プロジェクトのバージョンごとの変更内容です。日本語の紹介ページは [README.md](README.md) / English page: [README-EN.md](README-EN.md) を参照してください。
 
-## 2026-09-21（実図面検証フィードバック・feature/drawing-realdata-fixes・未リリース）
+## 2026-09-21（v2.1.8・実図面検証フィードバック＋キャプチャAI読取・feature/drawing-realdata-fixes）
 
 > 国家検定レベルの実CAD図面（JAVADA技能検定 D24 機械製図CAD作業 3級の実技課題図・解答例、若年者ものづくり競技大会の課題図・金賞作品図面）をインターネットから実ダウンロードし、キャプチャ→OCR→図番検索→Q&Aの全経路を検証した結果の根本対応。詳細は docs/impl-drawing-search.md §7
 
