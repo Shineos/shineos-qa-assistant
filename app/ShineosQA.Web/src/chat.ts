@@ -196,10 +196,6 @@ export class ChatView {
       webBtn.classList.toggle('active', this.webSearch);
       this.packDrawing = !!s.extensions?.drawing;
       captureBtn.hidden = !this.packDrawing;
-      if (s.extensions?.spreadsheet) {
-        const ai = document.getElementById('attach-input') as HTMLInputElement;
-        if (!ai.accept.includes('.xlsx')) ai.accept = ai.accept + ',.xlsx,.csv,.tsv';
-      }
     } catch { /* 設定取得失敗時は現状維持 */ }
   }
   /** 現在のチャットのURLパス（タブ復帰用） */

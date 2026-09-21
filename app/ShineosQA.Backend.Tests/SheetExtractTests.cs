@@ -96,13 +96,11 @@ public class SheetExtractTests
     }
 
     [Fact]
-    public void SupportedExtensions_SheetPackGate()
+    public void SupportedExtensions_IncludeSheetFormats()
     {
-        // OFF: 本体の4形式のまま / ON: 表計算3形式が追加される
-        Assert.DoesNotContain(".xlsx", Ingest.SupportedExtensionsFor(false));
-        var on = Ingest.SupportedExtensionsFor(true);
-        Assert.Contains(".xlsx", on);
-        Assert.Contains(".csv", on);
-        Assert.Contains(".tsv", on);
+        // Excel・CSV取り込みは本体標準機能（設定不要）: 基本拡張子に常に含まれる
+        Assert.Contains(".xlsx", Ingest.SupportedExtensions);
+        Assert.Contains(".csv", Ingest.SupportedExtensions);
+        Assert.Contains(".tsv", Ingest.SupportedExtensions);
     }
 }

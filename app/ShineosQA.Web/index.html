@@ -36,7 +36,7 @@
           <form id="chat-form" class="composer">
             <textarea id="chat-input" rows="1" placeholder="質問を入力してください（Enterで送信 / Shift+Enterで改行）"></textarea>
             <div id="capture-host"></div>
-            <input type="file" id="attach-input" multiple accept=".pdf,.docx,.md,.txt" hidden />
+            <input type="file" id="attach-input" multiple accept=".pdf,.docx,.md,.txt,.xlsx,.csv,.tsv" hidden />
             <div class="composer-bar">
               <span class="model-wrap">
                 <button type="button" id="model-btn" class="tool-btn" title="回答に使うAIモデルを選択（未導入のモデルはここからダウンロードできます）">
@@ -44,7 +44,7 @@
                   <span id="model-btn-label">モデル</span>
                 </button>
               </span>
-              <button type="button" id="attach-btn" class="tool-btn" title="ナレッジにファイルを添付（PDF / Word / Markdown / テキストをその場で登録）">
+              <button type="button" id="attach-btn" class="tool-btn" title="ナレッジにファイルを添付（PDF / Word / Excel / CSV / Markdown / テキストをその場で登録）">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                 <span>添付</span>
               </button>
@@ -70,8 +70,8 @@
         <div class="pane-inner">
           <h2>ナレッジ管理</h2>
           <div id="dropzone" class="dropzone">
-            ここに PDF / Word / Markdown / テキスト をドラッグ＆ドロップ
-            または <label class="filelabel">ファイルを選択<input type="file" id="file-input" multiple accept=".pdf,.docx,.md,.txt" hidden /></label>
+            ここに PDF / Word / Excel / CSV / Markdown / テキスト をドラッグ＆ドロップ
+            または <label class="filelabel">ファイルを選択<input type="file" id="file-input" multiple accept=".pdf,.docx,.md,.txt,.xlsx,.csv,.tsv" hidden /></label>
           </div>
           <div id="ingest-status" class="muted"></div>
           <div class="kfilter"><input type="search" id="knowledge-filter" placeholder="図番・品名・ファイル名で絞り込み（図面拡張機能）" hidden /></div>

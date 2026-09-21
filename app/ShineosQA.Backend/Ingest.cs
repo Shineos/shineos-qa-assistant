@@ -29,12 +29,8 @@ public sealed class Ingest
     /// <summary>元ファイル保存先（拡張パックON時のみ使用）。Programのthumb/fileエンドポイントが参照する</summary>
     public string FilesDir => _filesDir;
 
-    public static readonly string[] SupportedExtensions = { ".md", ".txt", ".docx", ".pdf" };
-    public static readonly string[] SheetExtensions = { ".xlsx", ".csv", ".tsv" };
-
-    /// <summary>受付拡張子（Excel・CSV取り込みパックON時のみ表計算形式を追加）</summary>
-    public static string[] SupportedExtensionsFor(bool spreadsheetPackOn) =>
-        spreadsheetPackOn ? SupportedExtensions.Concat(SheetExtensions).ToArray() : SupportedExtensions;
+    public static readonly string[] SupportedExtensions = { ".md", ".txt", ".docx", ".pdf", ".xlsx", ".csv", ".tsv" };
+    private static readonly string[] SheetExtensions = { ".xlsx", ".csv", ".tsv" };
 
     public static string ExtractText(string fileName, Stream stream)
     {
@@ -195,7 +191,6 @@ public sealed class Ingest
             var bytes = ms.ToArray();
             var ext = Path.GetExtension(fileName).ToLowerInvariant();
             bool packOn = Extensions.IsEnabled(_db, Extensions.DrawingId);
-            bool sheetPackOn = Extensions.IsEnabled(_db, Extensions.SpreadsheetId);
 
             _db.Exec("INSERT INTO files(name, status) VALUES($n,'parsing')", ("$n", fileName));
             long fileId = _db.LastInsertId();
@@ -211,9 +206,9 @@ public sealed class Ingest
                     catch { text = ""; }
                     if (string.IsNullOrWhiteSpace(text)) { pdf = null; text = ExtractPdf(new MemoryStream(bytes)); }
                 }
-                else if (sheetPackOn && SheetExtensions.Contains(ext))
+                else if (SheetExtensions.Contains(ext))
                 {
-                    // 表計算ファイル: ヘッダ＋行バッチのチャンク列（Rag.Chunk不使用）
+                    // 表計算ファイル（本体標準機能）: ヘッダ＋行バッチのチャンク列（Rag.Chunk不使用）
                     sheetChunks = SheetExtract.ExtractChunks(fileName, bytes);
                 }
                 else
@@ -222,7 +217,7 @@ public sealed class Ingest
                 }
 
                 // 拡張パック: 元ファイルを保存（「開く」・サムネイル・データ資産化の前提。失敗しても取り込みは続行）
-                if (packOn || sheetPackOn) SaveOriginal(fileId, ext, bytes);
+                if (packOn) SaveOriginal(fileId, ext, bytes);
 
                 var chunks = new List<string>();
                 bool isDrawing = false;

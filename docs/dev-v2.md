@@ -88,4 +88,4 @@ $env:DOTNET_ROOT = "D:\dev\shineos-local-ai\tools\dotnet-sdk"
 - [ ] Web検索のマルチエンジン化
 - [x] テストのCI化 → **対応済み（feature/drawing-search）**: release.yml に `dotnet test` ゲート追加
 - [ ] 図面拡張のリリースゲート残件: 実機インストーラ（lite/full）検証・WACK・Pilot先の表題欄様式に合わせた `DrawingIngest` 閾値調整（docs/impl-drawing-search.md §4.4/§7）
-- [x] Excel・CSV取り込み → **対応済み（拡張パック第2弾・SheetExtract）**: .xlsx/.csv/.tsv、ヘッダ付き行バッチ化、UTF-8→Shift-JIS自動判別。既知限界: 日付セルはシリアル値のまま・.xls非対応
+- [x] Excel・CSV取り込み → **対応済み（本体標準機能・設定不要・SheetExtract）**: .xlsx/.csv/.tsv、ヘッダ付き行バッチ化、UTF-8→Shift-JIS自動判別。既知限界: 日付セルはシリアル値のまま・.xls非対応

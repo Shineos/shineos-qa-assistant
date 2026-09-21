@@ -4,9 +4,7 @@ const statusLabel: Record<string, string> = {
   pending: '待機中', parsing: '解析中', embedding: '埋め込み中', ready: '利用可能', error: 'エラー',
 };
 
-const ACCEPT_BASE = '.pdf,.docx,.md,.txt';
-const DROPZONE_TEXT_BASE = 'ここに PDF / Word / Markdown / テキスト をドラッグ＆ドロップ ';
-const DROPZONE_TEXT_SHEET = 'ここに PDF / Word / Markdown / テキスト / Excel / CSV をドラッグ＆ドロップ ';
+const ACCEPT = '.pdf,.docx,.md,.txt,.xlsx,.csv,.tsv';
 
 export class KnowledgeView {
   private packDrawing = false; // 拡張パック（図面）: OFFの間は列・フィルタを表示しない（本体UI不変の要求）
@@ -43,20 +41,14 @@ export class KnowledgeView {
     await this.refresh();
   }
 
-  /** タブ表示時・操作後に毎回呼ばれる。拡張パックの状態もここで再反映する
-   *  （設定画面でのトグル直後にナレッジ画面へ戻っても案内文・受け入れ形式が即座に切替わる） */
+  /** タブ表示時・操作後に毎回呼ばれる。拡張パック（図面）の状態もここで再反映する */
   async refresh() {
-    let spreadsheet = false;
     try {
       const s = await api.getSettings();
       this.packDrawing = !!s.extensions?.drawing;
-      spreadsheet = !!s.extensions?.spreadsheet;
     } catch { /* 設定取得失敗時は現状維持で一覧のみ更新 */ }
     const fi = document.getElementById('file-input') as HTMLInputElement;
-    const dz = document.getElementById('dropzone')!;
-    fi.accept = ACCEPT_BASE + (spreadsheet ? ',.xlsx,.csv,.tsv' : '');
-    const tn = dz.firstChild;
-    if (tn && tn.nodeType === Node.TEXT_NODE) tn.textContent = spreadsheet ? DROPZONE_TEXT_SHEET : DROPZONE_TEXT_BASE;
+    fi.accept = ACCEPT;
     const kf = document.getElementById('knowledge-filter') as HTMLInputElement | null;
     if (kf) kf.hidden = !this.packDrawing;
 

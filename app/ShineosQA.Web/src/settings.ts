@@ -41,13 +41,6 @@ export class SettingsView {
           </div>
           <label class="switch"><input type="checkbox" id="set-ext-drawing" ${settings.extensions?.drawing ? 'checked' : ''} /><span class="slider"></span></label>
         </div>
-        <div class="setting-row">
-          <div class="setting-text">
-            <b>Excel・CSV取り込み（表計算ファイル）</b>
-            <span>Excel（.xlsx）・CSV・TSVファイルをナレッジに取り込めるようにします。表はヘッダ付きのまとまりで検索されます。無効にしても取り込んだファイルは残ります。</span>
-          </div>
-          <label class="switch"><input type="checkbox" id="set-ext-sheet" ${settings.extensions?.spreadsheet ? 'checked' : ''} /><span class="slider"></span></label>
-        </div>
       </div>
       <div class="settings-card">
         <h3>AIエンジン</h3>
@@ -89,9 +82,6 @@ export class SettingsView {
     if (extText) extText.textContent += `（取り込み済み図面: ${extDrawingCount}件）`;
     document.getElementById('set-ext-drawing')!.addEventListener('change', async (e) => {
       await api.saveSettings({ extensions: { drawing: (e.target as HTMLInputElement).checked } });
-    });
-    document.getElementById('set-ext-sheet')!.addEventListener('change', async (e) => {
-      await api.saveSettings({ extensions: { spreadsheet: (e.target as HTMLInputElement).checked } });
     });
     // AIモデル管理セクション（初回DL・追加・削除）をカード内へ描画
     const modelsHost = document.getElementById('models-host')!;
