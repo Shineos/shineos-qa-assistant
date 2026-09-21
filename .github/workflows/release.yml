@@ -125,9 +125,12 @@ jobs:
         shell: pwsh
         run: |
           $ver = '${{ steps.ver.outputs.version }}'
-          # /DLiteBuild: モデルGGUFを同梱しない（初回起動時のウィザードでアプリ内DL）
+          # /DLiteBuild: モデルGGUFを同梱しない（初回起動時のウィザードでアプリ内DL）。
+          # Lite構成の出力名は -lite 接尾辞付きのため、正式名へ寄せる
           & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=$ver" '/DLiteBuild' 'installer/installer-v2.iss'
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          if (-not (Test-Path "dist/ShineosQA-Setup-$ver-lite.exe")) { throw "lite installer not found: dist/ShineosQA-Setup-$ver-lite.exe" }
+          Copy-Item "dist/ShineosQA-Setup-$ver-lite.exe" "dist/ShineosQA-Setup-$ver.exe" -Force
           $exe = "dist/ShineosQA-Setup-$ver.exe"
           if (-not (Test-Path $exe)) { throw "installer exe not found: $exe" }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
