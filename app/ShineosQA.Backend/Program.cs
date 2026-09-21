@@ -54,6 +54,7 @@ public static class Api
             tier = db.GetSetting("tier", "auto"),
             idle_unload_minutes = cfg.IdleUnloadMinutes,
             bg_friendly = bool.TryParse(db.GetSetting("bg_friendly", cfg.BgFriendly.ToString()), out var b) && b,
+            extensions = new { drawing = Extensions.IsEnabled(db, Extensions.DrawingId) },
         }));
 
         app.MapPost("/api/settings", async (HttpRequest req) =>
@@ -79,6 +80,13 @@ public static class Api
                     if (sup.SwitchLlmTier(eff))
                         _ = Task.Run(() => { try { sup.EnsureLlm(); } catch (Exception ex2) { ctx.Log.Warn($"llm reload after tier change failed: {ex2.Message}"); } });
                 }
+                // 拡張パック: {extensions:{drawing:true}} と 平坦キー ext.drawing の両方を受け付ける（即時反映）
+                if (p.Name == "extensions" && p.Value.ValueKind == JsonValueKind.Object)
+                    foreach (var e in p.Value.EnumerateObject())
+                        if (e.Name == Extensions.DrawingId && e.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                            Extensions.SetEnabled(db, Extensions.DrawingId, e.Value.GetBoolean());
+                if (p.Name == "ext.drawing" && p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    Extensions.SetEnabled(db, Extensions.DrawingId, p.Value.GetBoolean());
             }
             return Results.Ok(new { ok = true });
         });
@@ -150,8 +158,46 @@ public static class Api
         });
 
         // ---- ナレッジ ----
-        app.MapGet("/api/knowledge", () => Results.Json(db.Query(
-            "SELECT file_id, name, status, error, chunk_count, added_at FROM files ORDER BY file_id DESC")));
+        app.MapGet("/api/knowledge", (HttpRequest req) =>
+        {
+            // 拡張パック: 図面メタデータを結合。?q= で図番(正規形)・品名・材質・ファイル名の部分一致フィルタ
+            var q = (req.Query["q"].ToString() ?? "").Trim();
+            var like = $"%{q}%";
+            var norm = q.Length > 0 ? $"%{Rag.NormalizeZuban(q)}%" : "";
+            var sql = q.Length == 0
+                ? "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, f.added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
+                  "FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id ORDER BY f.file_id DESC"
+                : "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, f.added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
+                  "FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id " +
+                  "WHERE f.name LIKE $q OR d.zuban_norm LIKE $qn OR d.hinmei LIKE $q OR d.zairyo LIKE $q ORDER BY f.file_id DESC";
+            return Results.Json(db.Query(sql, ("$q", like), ("$qn", norm)));
+        });
+
+        // 拡張パック（図面）: サムネイルと元ファイル。パック有効時に取り込んだファイルのみ存在する
+        // （パックを後からOFFにしてもデータは残るため、ゲートせずファイルの有無で応答する）
+        app.MapGet("/api/knowledge/{id}/thumb", (HttpContext http, long id) =>
+        {
+            var path = Path.Combine(ingest.FilesDir, $"{id}.thumb.png");
+            if (!System.IO.File.Exists(path)) return Results.NotFound();
+            http.Response.Headers.CacheControl = "private, max-age=86400";
+            return Results.File(path, "image/png");
+        });
+
+        app.MapGet("/api/knowledge/{id}/file", (long id) =>
+        {
+            if (!Directory.Exists(ingest.FilesDir)) return Results.NotFound();
+            var file = Directory.EnumerateFiles(ingest.FilesDir, $"{id}.*")
+                .FirstOrDefault(p => !p.EndsWith(".thumb.png"));
+            if (file is null) return Results.NotFound();
+            var ct = Path.GetExtension(file).ToLowerInvariant() switch
+            {
+                ".pdf" => "application/pdf",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".md" => "text/markdown",
+                _ => "text/plain",
+            };
+            return Results.File(file, ct);
+        });
 
         app.MapPost("/api/knowledge", async (HttpRequest req) =>
         {
@@ -218,10 +264,30 @@ public static class Api
             return Results.Json(new { imported = count, failed = failures });
         });
 
+        // 拡張パック（図面）: キャプチャ画像のOCR（Windows内蔵エンジン・完全オフライン）
+        app.MapPost("/api/ocr", async (HttpRequest req) =>
+        {
+            if (!Extensions.IsEnabled(db, Extensions.DrawingId))
+                return Results.Json(new { error = "SHINE_E_EXTENSION_DISABLED", message = "図面拡張機能が無効です（設定で有効にしてください）" }, statusCode: 503);
+            if (!req.HasFormContentType) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "multipart/form-data が必要です" });
+            var form = await req.ReadFormAsync();
+            var f = form.Files.FirstOrDefault();
+            if (f is null || f.Length == 0 || f.Length > 20 * 1024 * 1024)
+                return Results.Json(new { error = "SHINE_E_BAD_REQUEST", message = "画像がありません" }, statusCode: 400);
+            if (!Ocr.IsAvailable())
+                return Results.Json(new { error = "SHINE_E_OCR_UNAVAILABLE", message = "日本語OCRエンジンが利用できません。Windowsの設定で日本語言語パックを導入してください。" }, statusCode: 503);
+            using var s = f.OpenReadStream();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            var (text, zubans) = await Ocr.RecognizeAsync(ms.ToArray());
+            return Results.Json(new { text, zubans });
+        });
+
         app.MapDelete("/api/knowledge/{id}", (long id) =>
         {
             db.Exec("DELETE FROM files WHERE file_id=$i", ("$i", id));
             index.RemoveFile(id);
+            ingest.DeleteStoredFiles(id); // 拡張パック: 元ファイル・サムネイルを掃除
             return Results.Ok(new { ok = true });
         });
     }

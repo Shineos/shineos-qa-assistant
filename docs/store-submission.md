@@ -183,9 +183,10 @@
 > ・すべての処理が自分のPC内で完結。社内文書・質問・回答が外部に送信されません（テレメトリもありません）
 > ・インストール後の初回起動時にAIモデル（クイック1.7B・合計約2.3GB）を取得します。以降は完全オフラインで動作します（モデルの取得時にだけ通信します）
 > ・速度と精度のバランスでモデルを切り替え可能（クイック1.7B／標準4B／高品質30B・追加モデルはアプリ内からダウンロード）
-> ・PDF・Word・Markdown・テキストをドラッグ＆ドロップでナレッジ化。追加した文書は即座に検索対象になります
+> ・PDF・Word・Excel・CSV・Markdown・テキストをドラッグ＆ドロップでナレッジ化。追加した文書は即座に検索対象になります
 > ・ハイブリッド検索（キーワード＋意味検索）で型番・規程番号・固有名詞も正確にヒット
 > ・閉じるとAIエンジンも完全停止。他アプリの作業を優先する低負荷モード搭載
+> ・製造業向け拡張（設定から有効・既定OFF）: 図面PDFの表題欄（図番・品名・材質・改訂）を自動読み取りし、図番の表記ゆれ（A-1234／A1234）も同一視して検索。画面キャプチャを貼って図番から質問もできます（OCRはPC内で処理）
 >
 > ■ 動作環境
 > Windows 10/11（64bit）・メモリ8GB以上・空き容量4GB以上（GPU不要）。初回起動時のモデル取得にのみインターネット接続が必要です
@@ -207,7 +208,7 @@
 > - All processing stays on your PC. Documents, questions and answers are never sent anywhere (no telemetry)
 > - On first launch, the app downloads the AI models (~2.3 GB); after that it runs fully offline
 > - Switch between Quick (1.7B) / Standard (4B) / Quality (30B) models right in the app; extra models download on demand
-> - Register PDF / Word / Markdown / text files by drag & drop; newly added documents are searchable immediately
+> - Register PDF / Word / Excel / CSV / Markdown / text files by drag & drop; newly added documents are searchable immediately
 > - Hybrid search (keyword + semantic) so model numbers and regulation IDs are found accurately
 > - Closing the app stops the AI engine completely; a low-load mode prioritizes your other apps
 >
@@ -218,7 +219,7 @@
 ### 7.3 検索キーワード（フォーム: 最大7個・合計21単語まで）
 
 ```
-社内QA, 社内文書検索, オフラインAI, ローカルAI, ナレッジベース, 社内規定, マニュアル検索
+社内QA, 社内文書検索, オフラインAI, ローカルAI, 図面検索, マニュアル検索, 社内規定
 ```
 
 ※第三者商標（ChatGPT等）はキーワード入力すると認証で却下されうるため使わない（Storeポリシー 10.1 関連）。
@@ -260,7 +261,7 @@
 | プライバシーポリシーURL | `shineos.com` 上に [PRIVACY.md](../PRIVACY.md) の内容を公開したURLを入力 ⚠️ 公開待ち |
 | データ収集宣言（Partner Center） | **「データの収集なし」**と宣言（テレメトリ・アナリティクス・クラッシュレポートなしのため） |
 | データ収集の開示 | 初回起動時のモデル取得（huggingface.co・質問や文書は送信しない）とWeb検索トグル（既定OFF・任意）のみ外部送信あり → 掲載文・審査メモに明記済み |
-| ローカルデータ | ナレッジ・履歴は `data\knowledge.db`（SQLite）にPC内保存。アンインストール時に削除確認あり |
+| ローカルデータ | ナレッジ・履歴は `data\knowledge.db`（SQLite）にPC内保存。図面拡張（設定で有効時）のみ取り込み元ファイルの原本を `data\files\` に保存（キャプチャ画像は保存されない）。アンインストール時に削除確認あり |
 
 ---
 

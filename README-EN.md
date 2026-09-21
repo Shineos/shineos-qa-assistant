@@ -19,7 +19,7 @@ ShineosQA is an internal Q&A tool provided by [Shineos Inc.](https://shineos.com
 - **bge-m3 / bge-reranker-v2-m3** (MIT) — local embedding and reranking models for retrieval
 - A lightweight **custom backend** (C#, single executable with embedded SQLite) serving a **TypeScript chat UI** inside a WebView2 desktop shell — a double-click desktop app with no URL entry
 
-Users register their company regulations and manuals (PDF/Word/Markdown/text) as "knowledge". Questions are answered **with citations** from those documents. When an answer is not found in the knowledge base, the assistant declines to answer instead of guessing (hallucination guardrails). The optional web-search toggle is strictly opt-in; by default nothing is sent to any external service.
+Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdown/text) as "knowledge". Questions are answered **with citations** from those documents. When an answer is not found in the knowledge base, the assistant declines to answer instead of guessing (hallucination guardrails). The optional web-search toggle is strictly opt-in; by default nothing is sent to any external service.
 
 **Network behavior:** Setup may download models from Hugging Face (or use the bundled 1.7B model, which needs no download). After installation, the application runs entirely on localhost (default port 8300) and makes **no outbound connections** unless the user explicitly enables the optional web-search toggle.
 
@@ -30,7 +30,7 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 | Feature | Description |
 |------|------|
 | Internal Q&A (RAG) | Answers with citations (document name and section) from your registered regulations and manuals |
-| Knowledge registration | Drag & drop files in the "Knowledge" tab (PDF / Word / Markdown / text), or attach them right from the composer |
+| Knowledge registration | Drag & drop files in the "Knowledge" tab (PDF / Word / Excel / CSV / Markdown / text), or attach them right from the composer |
 | Hybrid search | BM25 (keyword) + vector search (semantic) so model numbers and regulation IDs are found accurately |
 | Reranking | Candidates are re-scored with bge-reranker-v2-m3; high-confidence hits skip reranking for speed, and adjacent chunks are joined so context is never cut mid-sentence |
 | Three answer tiers | ⚡Quick (1.7B) / 🎯Standard (4B) / 🏆Quality (30B) — switch instantly from the composer; undownloaded models can be fetched from the same menu |
@@ -39,6 +39,7 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 | Stop on close | Closing the app stops the AI engine, backend and network ports completely and releases all memory (nothing stays resident) |
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
 | Web search (OFF by default) | Optional DuckDuckGo lookup (no API key). **Queries would be sent externally, so keep it OFF for company questions** |
+| Drawing PDF search & Q&A (manufacturing extension, enable in Settings) | Auto-reads the title block (part number, name, material, revision) of drawing PDFs at ingest; part-number variants (A-1234 / A1234 / full-width) match as the same token. Paste a screen capture to ask from a drawing number (on-device OCR). OFF by default |
 
 ### Key changes from the previous release (Ollama + Open WebUI)
 
@@ -86,7 +87,7 @@ Silent installation (`/VERYSILENT`) is supported.
 | [![First-launch model download](assets/screenshots/app-00-model-download.png)](assets/screenshots/app-00-model-download.png) | **First-launch model download (Microsoft Store build)** — a welcome wizard lets you pick ⚡Quick (1.7B) or 🎯Standard (4B), then downloads the required models (~2.3 GB for Quick) with a progress bar. Fully offline afterwards (the full installer bundles the models, so this step does not apply) |
 | [![Main screen](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **Main screen** — opens from the desktop icon in ~2 seconds, no URL entry needed |
 | [![Cited answer](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **Answer with citation** — the answer is shown together with its sources, and past Q&A can be reopened from the history |
-| [![Knowledge management](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **Knowledge management** — register and review company documents (PDF / Word / Markdown / text) by drag & drop |
+| [![Knowledge management](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **Knowledge management** — register and review company documents (PDF / Word / Excel / CSV / Markdown / text) by drag & drop |
 | [![Model selection](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **Model selection** — switch between ⚡Quick (1.7B) / 🎯Standard (4B) / 🏆Quality (30B) instantly; undownloaded models download from here |
 
 ## Measured performance (reference)

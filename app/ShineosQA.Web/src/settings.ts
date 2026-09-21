@@ -33,6 +33,16 @@ export class SettingsView {
         </div>
       </div>
       <div class="settings-card">
+        <h3>拡張機能</h3>
+        <div class="setting-row">
+          <div class="setting-text">
+            <b>図面PDF検索・Q&amp;A（製造業向け）</b>
+            <span>図面PDFの取り込み時に表題欄（図番・品名・材質・改訂）を自動で読み取り、図番・品名での検索を可能にします。無効にしても取り込んだ図面データは残ります。</span>
+          </div>
+          <label class="switch"><input type="checkbox" id="set-ext-drawing" ${settings.extensions?.drawing ? 'checked' : ''} /><span class="slider"></span></label>
+        </div>
+      </div>
+      <div class="settings-card">
         <h3>AIエンジン</h3>
         <div class="setting-row">
           <div class="setting-text"><b>モデル階級</b><span>変更はAIエンジンの再起動を伴います（数秒〜十数秒）</span></div>
@@ -65,6 +75,13 @@ export class SettingsView {
     });
     document.getElementById('set-bg')!.addEventListener('change', async (e) => {
       await api.saveSettings({ bg_friendly: (e.target as HTMLInputElement).checked });
+    });
+    // 拡張パック（図面検索・Excel/CSV）: 即時反映。取り込み済み図面件数をカード内に表示
+    const extDrawingCount = await api.knowledge().then(fs => fs.filter(f => f.kind === 'drawing').length).catch(() => 0);
+    const extText = document.querySelector('#settings-body .settings-card:nth-child(2) .setting-text span') as HTMLElement | null;
+    if (extText) extText.textContent += `（取り込み済み図面: ${extDrawingCount}件）`;
+    document.getElementById('set-ext-drawing')!.addEventListener('change', async (e) => {
+      await api.saveSettings({ extensions: { drawing: (e.target as HTMLInputElement).checked } });
     });
     // AIモデル管理セクション（初回DL・追加・削除）をカード内へ描画
     const modelsHost = document.getElementById('models-host')!;

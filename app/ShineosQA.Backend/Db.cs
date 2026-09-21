@@ -47,6 +47,15 @@ public sealed class Db : IDisposable
             """);
         // 旧DBからのマイグレーション: 回答キャッシュにモデル識別列を追加（初回のみ成功）
         try { Exec("ALTER TABLE answer_cache ADD COLUMN model TEXT NOT NULL DEFAULT ''"); } catch { }
+        // 拡張パック（図面検索）: files種別列 + 図面メタデータ（docs/impl-drawing-search.md §1.4）
+        try { Exec("ALTER TABLE files ADD COLUMN kind TEXT NOT NULL DEFAULT 'doc'"); } catch { }
+        Exec("""
+            CREATE TABLE IF NOT EXISTS drawing_meta(
+              file_id INTEGER PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,
+              zuban_raw TEXT, zuban_norm TEXT, hinmei TEXT, zairyo TEXT,
+              scale TEXT, revision TEXT, approved_at TEXT);
+            CREATE INDEX IF NOT EXISTS idx_drawing_meta_norm ON drawing_meta(zuban_norm);
+            """);
         MigrateChatsUuid();
     }
 

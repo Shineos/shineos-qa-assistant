@@ -98,6 +98,18 @@ function sourceElement(s: SourceInfo): HTMLElement {  const row = document.creat
       <div class="source-url">${esc(s.url)}</div>
       <div class="source-snippet">${esc(s.snippet.slice(0, 110))}…</div></div>`;
     row.addEventListener('click', () => window.open(s.url!, '_blank', 'noopener,noreferrer'));
+  } else if (s.zuban && s.file_id) {
+    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示し、「開く」で元PDFを別タブ表示
+    const rev = s.revision ? `・改訂${esc(s.revision)}` : '';
+    row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>【図】${esc(s.zuban)}</b>` +
+      (s.hinmei ? `<span class="muted">（${esc(s.hinmei)}${rev}）</span>` : '') +
+      `<div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>` +
+      `<button type="button" class="small open-drawing">開く</button>`;
+    row.addEventListener('click', () => openSourceModal(s));
+    row.querySelector('.open-drawing')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.open(api.fileUrl(s.file_id!), '_blank');
+    });
   } else {
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>${esc(s.file)}</b><div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
     row.addEventListener('click', () => openSourceModal(s));
@@ -112,6 +124,9 @@ export class ChatView {
   private selTier = '';
   private modelsById = new Map<string, ModelEntry>();
   private modelMenu: HTMLElement | null = null;
+  private packDrawing = false;               // 拡張パック（図面）: キャプチャ入力の表示条件
+  private pendingCapture: { objectUrl: string; file: File } | null = null;
+  private pendingZuban = '';
 
   constructor() {
     const form = document.getElementById('chat-form') as HTMLFormElement;
@@ -150,10 +165,11 @@ export class ChatView {
         this.setStatus(`📎 登録失敗: ${(ex as Error).message}`);
       }
     });
-    void api.getSettings().then(s => {
-      this.webSearch = s.web_search;
-      webBtn.classList.toggle('active', this.webSearch);
-    });
+    // 📸 キャプチャ（拡張パックON時のみ表示）: Win+Shift+S → Ctrl+V で図面の一部から質問
+    const captureBtn = document.getElementById('capture-btn') as HTMLButtonElement;
+    captureBtn.addEventListener('click', () =>
+      this.setStatus('📸 Win+Shift+S で画面（図面の表題欄など）を切り取り、入力欄に Ctrl+V で貼り付けてください'));
+    input.addEventListener('paste', (e) => this.onPaste(e));
 
     // モデルセレクター: 現在の階級を表示し、未導入モデルはその場でダウンロード可能
     document.getElementById('model-btn')!.addEventListener('click', () => void this.toggleModelMenu());
@@ -165,8 +181,23 @@ export class ChatView {
     // URLルーティング: /c/{uuid} で開く（リロード・共有で会話を復元）
     window.addEventListener('popstate', () => this.routeFromUrl());
     this.routeFromUrl();
+
+    void this.refresh();
   }
 
+  /** タブ表示時に呼ばれる（main.ts activateTab）。拡張パックの状態もここで再反映する
+   *  （設定画面でのトグル直後にチャットへ戻ってもキャプチャボタンが即座に切替わる） */
+  async refresh() {
+    const captureBtn = document.getElementById('capture-btn') as HTMLButtonElement;
+    const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
+    try {
+      const s = await api.getSettings();
+      this.webSearch = s.web_search;
+      webBtn.classList.toggle('active', this.webSearch);
+      this.packDrawing = !!s.extensions?.drawing;
+      captureBtn.hidden = !this.packDrawing;
+    } catch { /* 設定取得失敗時は現状維持 */ }
+  }
   /** 現在のチャットのURLパス（タブ復帰用） */
   currentPath(): string {
     return this.chatUuid ? `/c/${this.chatUuid}` : '/';
@@ -241,7 +272,7 @@ export class ChatView {
     m.scrollTop = m.scrollHeight;
   }
 
-  private appendMessage(role: string, content: string, sources: SourceInfo[] = [], time?: Date): HTMLElement {
+  private appendMessage(role: string, content: string, sources: SourceInfo[] = [], time?: Date, imageUrl?: string): HTMLElement {
     const m = document.getElementById('messages')!;
     const empty = m.querySelector('.empty');
     if (empty) empty.remove();
@@ -253,6 +284,13 @@ export class ChatView {
     body.className = 'msg-body';
     body.innerHTML = renderMarkdown(content);
     card.appendChild(body);
+    if (imageUrl) {
+      const img = document.createElement('img');
+      img.className = 'msg-image';
+      img.src = imageUrl;
+      img.alt = 'キャプチャ画像';
+      card.appendChild(img);
+    }
     if (sources.length > 0) {
       const src = document.createElement('details');
       src.className = 'sources';
@@ -265,6 +303,64 @@ export class ChatView {
     m.appendChild(wrap);
     m.scrollTop = m.scrollHeight;
     return card;
+  }
+
+  // ---- キャプチャ入力（拡張パック・図面）: ペースト画像 → OCR → 確認チップ → 図番前置きで送信 ----
+
+  private onPaste(e: ClipboardEvent) {
+    if (!this.packDrawing) return;
+    const items = e.clipboardData?.items ?? [];
+    for (const it of items) {
+      if (it.type.startsWith('image/')) {
+        const file = it.getAsFile();
+        if (file) { e.preventDefault(); void this.handleCapture(file); }
+        return;
+      }
+    }
+  }
+
+  private async handleCapture(file: File) {
+    this.clearCapture(true);
+    const objectUrl = URL.createObjectURL(file);
+    this.pendingCapture = { objectUrl, file };
+    const host = document.getElementById('capture-host')!;
+    host.innerHTML = `<div class="chip"><img class="chip-thumb" src="${objectUrl}" alt=""><span class="chip-text">画像を読み取り中…</span><button type="button" class="icon-btn" title="キャンセル">✕</button></div>`;
+    host.querySelector('.icon-btn')!.addEventListener('click', () => this.clearCapture(true));
+    try {
+      const r = await api.ocr(file);
+      this.pendingZuban = r.zubans[0]?.raw ?? '';
+      const textEl = host.querySelector('.chip-text')!;
+      if (this.pendingZuban) {
+        // 確認チップ: OCR結果を1タップで修正できるようにする（読み間違いを致命傷にしない設計）
+        textEl.textContent = '';
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'chip-input';
+        inp.value = this.pendingZuban;
+        inp.title = '図番（修正できます）';
+        inp.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); (document.getElementById('chat-input') as HTMLTextAreaElement).focus(); }
+        });
+        const lbl = document.createElement('span');
+        lbl.textContent = 'の図面について質問';
+        textEl.append(inp, lbl);
+        inp.focus();
+        inp.select();
+      } else {
+        textEl.textContent = '図番を読み取れませんでした（画像は質問に添付されます）';
+      }
+    } catch (ex) {
+      const textEl = host.querySelector('.chip-text');
+      if (textEl) textEl.textContent = `読み取り失敗: ${(ex as Error).message}`;
+    }
+  }
+
+  private clearCapture(revoke: boolean) {
+    if (this.pendingCapture && revoke) URL.revokeObjectURL(this.pendingCapture.objectUrl);
+    this.pendingCapture = null;
+    this.pendingZuban = '';
+    const host = document.getElementById('capture-host');
+    if (host) host.innerHTML = '';
   }
 
   /** 時刻行（カードの外・下）。時刻の横にコピーアイコン: rawTextはユーザーは入力テキスト、
@@ -494,10 +590,16 @@ export class ChatView {
     if (!text) return;
     input.value = '';
     input.style.height = 'auto';
+    // キャプチャ（拡張パック）: 確認チップの図番（修正可）を質問文に前置きする
+    const chipInput = document.querySelector('#capture-host .chip-input') as HTMLInputElement | null;
+    const zuban = this.pendingZuban ? (chipInput?.value.trim() || this.pendingZuban) : '';
+    const captureUrl = this.pendingCapture?.objectUrl;
+    const message = zuban ? `（図番: ${zuban}）${text}` : text;
+    this.clearCapture(false);
     this.sending = true;
     (document.getElementById('send-btn') as HTMLButtonElement).disabled = true;
     this.setStatus('', false); // 前回質問の残置ステータスを消す
-    this.appendMessage('user', text, [], new Date());
+    this.appendMessage('user', message, [], new Date(), captureUrl);
     const thinking = this.createThinking();
     let acc = '';
     let liveCard: HTMLElement | null = null;
@@ -506,7 +608,7 @@ export class ChatView {
 
     try {
       await streamChat(
-        { chat_uuid: this.chatUuid || undefined, message: text, web_search: this.webSearch, model: this.selTier || undefined },
+        { chat_uuid: this.chatUuid || undefined, message, web_search: this.webSearch, model: this.selTier || undefined },
         {
           meta: (d) => {
             if (!this.chatUuid && d.chat_uuid) { this.chatUuid = d.chat_uuid; history.replaceState({}, '', `/c/${this.chatUuid}`); }

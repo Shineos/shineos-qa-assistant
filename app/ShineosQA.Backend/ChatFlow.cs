@@ -53,6 +53,12 @@ public sealed class ChatFlow
         public string Text { get; set; } = "";
         public string Kind { get; set; } = "kb";   // kb=社内ナレッジ / web=Web検索
         public string? Url { get; set; }           // Web検索のみ
+        // 拡張パック（図面）: Kindはkbのまま、図面メタデータを別フィールドで運ぶ
+        // （出典行の正規化 NormalizeSourcesLine が Kind=="kb" 前提のため、種別フラグを分ける）
+        public long? FileId { get; set; }
+        public string? Zuban { get; set; }
+        public string? Hinmei { get; set; }
+        public string? Revision { get; set; }
     }
 
     // SSE/永続化JSONは camelCase に統一（他エンドポイントのASP.NET既定と同一契約）
@@ -105,6 +111,22 @@ public sealed class ChatFlow
     private static bool RegexHasAnaphora(string s) =>
         s.Contains("それ") || s.Contains("この") || s.Contains("その") || s.Contains("前の") ||
         s.Contains("さっき") || s.Contains("上記") || s.Contains("こちら") || s.Contains("同じ");
+
+    /// <summary>図面ファイルの出典にメタデータを付与（拡張パックOFFなら無変換）。クエリは最大2件なので都度問い合わせで十分</summary>
+    private SourceInfo EnrichDrawing(SourceInfo s, long fileId)
+    {
+        try
+        {
+            var rows = _db.Query("SELECT zuban_raw, hinmei, revision FROM drawing_meta WHERE file_id=$i", ("$i", fileId));
+            if (rows.Count == 0) return s;
+            s.FileId = fileId;
+            s.Zuban = rows[0]["zuban_raw"] as string;
+            s.Hinmei = rows[0]["hinmei"] as string;
+            s.Revision = rows[0]["revision"] as string;
+        }
+        catch { /* drawing_meta未作成環境（旧DB起動直下等）では無変換 */ }
+        return s;
+    }
 
     /// <summary>出典プレビュー用スニペット。語彙一致で特定できない場合（日英クロスリンガル等）は
     /// リランカーでチャンク内の該当窓を特定する（ハイライトが全文に掛かるのを防ぐ）</summary>
@@ -326,9 +348,24 @@ public sealed class ChatFlow
                 }
             }
             foreach (var h in chosen)
-                sources.Add(new SourceInfo { File = h.Rec.FileName, Snippet = await SnippetForSourceAsync(MergedChunkText(h.Rec), qTokens, message, ctx.RequestAborted), Text = MergedChunkText(h.Rec) });
+                    sources.Add(EnrichDrawing(new SourceInfo { File = h.Rec.FileName, Snippet = await SnippetForSourceAsync(MergedChunkText(h.Rec), qTokens, message, ctx.RequestAborted), Text = MergedChunkText(h.Rec) }, h.Rec.FileId));
             // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）
             await Sse(ctx, "refs", new { files = chosen.Select(h => h.Rec.FileName).ToArray(), web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList() });
+
+            // 対象ガード（生成前）: 「〜できますか/方法」等の手続き質問で、質問の対象語（助詞直前の漢語等）が
+            // 取得文書のどれにも現れない場合、QA文書の類似手続きを別対象へ転用した回答（t74型）になる前に
+            // 拒否へ倒す。Web検索時は規則①〜④が効くため適用しない。時間感応質問も対象外
+            if (sources.Count > 0 && string.IsNullOrEmpty(webContext) && !timeSensitive &&
+                Rag.ProcedureTargetMissing(message, chosen.Select(h => MergedChunkText(h.Rec))))
+            {
+                _log.Info($"target guard: subject of procedure question not found in sources: {Truncate(message, 40)}");
+                var refusal = "該当する記載がありません。" + webNote;
+                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                await Sse(ctx, "delta", new { content = refusal });
+                await Sse(ctx, "done", new { cached = false, guard = "target", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                return;
+            }
+
             // Web検索結果も出典として同一デザインで表示（URL＋プレビュー）
             foreach (var wr in webResults ?? new List<WebSearch.WebResult>())
                 sources.Add(new SourceInfo { File = wr.Title, Snippet = wr.Snippet, Text = wr.Snippet, Kind = "web", Url = wr.Url });

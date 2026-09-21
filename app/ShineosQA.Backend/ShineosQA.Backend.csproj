@@ -1,7 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- WinRT（Windows.Media.Ocr）のためwindows TFM。T8スパイクで自己完結publish動作を検証済み -->
+    <TargetFramework>net10.0-windows10.0.19041</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ShineosQA.Backend</AssemblyName>
@@ -11,7 +13,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Docnet.Core" Version="2.6.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <PackageReference Include="PdfPig" Version="0.1.16" />
     <!-- NU1903対応: GHSA-2m69-gcr7-jv3q を修正したSQLiteネイティブ版を明示ピン -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
   </ItemGroup>

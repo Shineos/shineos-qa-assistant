@@ -13,7 +13,12 @@ public static partial class Rag
     public const int RerankPool = 8;                // top8未満だと関連chunkが候補外に漏れる（実測）
     public const double RerankSkipCos = 0.62;       // 高信頼ショートカット: ベクトル一致が強ければリランク(~2秒)を省略
     public const double RerankSkipKw = 0.10;        // かつキーワード一致もある場合のみ（実測: hit問cos0.68-0.75 / nohit0.46）
-    public const string PromptVersion = "2026-09-20-fact-grounding"; // プロンプト/キャッシュ仕様変更時は回答キャッシュを無効化
+    public const string PromptVersion = "2026-09-20-fact-grounding-8"; // プロンプト/キャッシュ仕様変更時は回答キャッシュを無効化
+    // (-2: 混同禁止規則を独立文に復元。1文への圧縮合并で「長期出張の承認者」問が所属長/部長を混同する回帰が発生したため)
+    // (-3: 規則⑤追加。Web検索OFF時に【参照情報】が無いのに「参照情報によると晴天」等の外部状況を捏造する揺らぎ(s13)への防御)
+    // (-4〜-6: 規則⑥(前提質問の捏造防御・t76解消)と⑦(対象置換防御・t74へは効果薄)を試行
+    // -7: ⑦を撤回。規則リスト肥大により複数事実回答の網羅性が低下(s09/s11)したため。t74(対象置換)はmain既存の既知問題として
+    //     生成後バリデーションガードでの対応が正攻法(backlog))
 
     /// <summary>相対日時語を含む質問の判定（「今日は何日」等）。これらは回答が日付で変わるため
     /// 回答キャッシュの対象外とする（ChatFlowで読み書き両方をスキップ）。
@@ -45,23 +50,92 @@ public static partial class Rag
     [GeneratedRegex(@"[^。．.\n]+[。．.]?")]
     private static partial Regex SentenceRegex();
 
-    [GeneratedRegex(@"[\u3040-\u30FF\u4E00-\u9FFF]+|[A-Za-z0-9]+")]
-    private static partial Regex TokenRegex();
+    [GeneratedRegex(@"[\u3040-\u30FF\u4E00-\u9FFF]+")]
+    private static partial Regex CjkRegex();
 
-    /// <summary>日本語バイグラム＋英数字トークン（検証済みトークナイザと同一仕様）</summary>
+    /// <summary>記号を含む英数連結（図番・型番: ST-1042A / KB_305/2 等）。3番目の選択肢は1文字英数字の単独トークン。
+    /// 入力はNFKC正規化済みのため全角記号は登場しない</summary>
+    [GeneratedRegex(@"[A-Za-z0-9][A-Za-z0-9\-_/]{0,30}[A-Za-z0-9]|[A-Za-z0-9]")]
+    private static partial Regex JoinedAlnumRegex();
+
+    /// <summary>図番・型番の正規形（NFKC→小文字→英数以外除去）。「A-1234」「A1234」「Ａ−１２３４」を同一キー化する。
+    /// 索引（ChunkIndex）とクエリ（ChatFlow）の両方がTokenizeを通るため、両側へ自動適用される</summary>
+    public static string NormalizeZuban(string s)
+    {
+        var n = s.Normalize(NormalizationForm.FormKC).ToLowerInvariant();
+        var sb = new StringBuilder(n.Length);
+        foreach (var ch in n)
+            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) sb.Append(ch);
+        return sb.ToString();
+    }
+
+    // ---- 対象ガード（生成前の前提検証・t74/t76型「対象置換」捏造の防御） ----
+
+    /// <summary>手続き・可否を問う質問の判定（対象ガードの適用条件。一般名詞質問・口語質問には適用しない）。
+    /// 可能形（〜せますか/れますか）・可能表現（可能ですか）も対象（t76「落とせますか」実測）</summary>
+    [GeneratedRegex(@"できますか|方法|やり方|手順|手続き|再発行|利用したい|使いたい|可能ですか|せますか|れますか|ていいですか|てよいですか")]
+    public static partial Regex ProcedureQuestion();
+
+    /// <summary>質問の対象語: 助詞（を/は/が/の/って）直前の3文字以上の漢語または英数字。
+    /// ただし方法/手順/手続きで終わる語（質問の聞き方を示す語）は対象から除外する
+    /// （「連絡方法は?」の方法を対象と誤認すると、文書が「電話で連絡」とだけ書く場合に誤拒否になる・t18実測）</summary>
+    [GeneratedRegex(@"([\u4E00-\u9FFF]{3,}|[A-Za-z0-9][A-Za-z0-9\-_/]{2,})(?=を|は|が|の|って)")]
+    private static partial Regex TargetObjectRegex();
+
+    private static bool IsTargetObject(string run) =>
+        !(run.EndsWith("方法") || run.EndsWith("手順") || run.EndsWith("手続き"));
+
+    /// <summary>対象ガード: 手続き質問の対象語が取得文書のどれにも現れない場合true。
+    /// 例「健康保険証を再発行する方法」で文書に「健康保険証」が無ければ、QA文書の
+    /// パスワード再発行等の類似手続きを転用した回答になる前に拒否へ倒せる。
+    /// 対象語が1つでも文書に現れればfalse、対象語が抽出できない質問もfalse（保守的）。
+    /// 呼び出し側は手続き質問（ProcedureQuestion）かつWeb検索未使用の場合に限る</summary>
+    public static bool ProcedureTargetMissing(string question, IEnumerable<string> sourceTexts)
+    {
+        if (!ProcedureQuestion().IsMatch(question)) return false;
+        var hay = string.Join('\n', sourceTexts).Normalize(NormalizationForm.FormKC);
+        // 英数字対象（図番）は索引側と同じ正規形で照合するため、hay側も英数のみの小文字列を作る
+        // （区切りは削除: 索引側の NormalizeZuban が "A-1234"→"a1234" を含むため）
+        var hayAlnum = string.Concat(hay.Where(char.IsAsciiLetterOrDigit).Select(char.ToLowerInvariant));
+        bool any = false;
+        foreach (var m in TargetObjectRegex().Matches(question.Normalize(NormalizationForm.FormKC)).Cast<Match>())
+        {
+            var run = m.Groups[1].Value;
+            if (!IsTargetObject(run)) continue;
+            any = true;
+            var present = char.IsAsciiLetterOrDigit(run[0])
+                ? hayAlnum.Contains(NormalizeZuban(run), StringComparison.Ordinal)
+                : hay.Contains(run, StringComparison.Ordinal);
+            if (present) return false;
+        }
+        return any;
+    }
+
+    /// <summary>日本語バイグラム＋英数字トークン（検証済みトークナイザと同一仕様）
+    /// ＋記号結合英数の正規形トークン（図番表記ゆれ吸収・T5）。既存トークンも併存するため旧挙動は崩れない。
+    /// 冒頭のNFKCで全角英数・全角記号を半角化する（「ＳＴ－１０４２」など全角入力の図番も一致させる）</summary>
     public static List<string> Tokenize(string s)
     {
+        s = s.Normalize(NormalizationForm.FormKC);
         var tokens = new List<string>();
-        foreach (var m in TokenRegex().Matches(s).Cast<Match>())
+        foreach (var m in CjkRegex().Matches(s).Cast<Match>())
         {
             var v = m.Value;
-            bool isCjk = v.Length > 0 && v.All(ch => ch >= 0x3040 && ch <= 0x9FFF);
-            if (isCjk)
+            if (v.Length == 1) tokens.Add(v);
+            else for (int i = 0; i < v.Length - 1; i++) tokens.Add(v.Substring(i, 2));
+        }
+        foreach (var m in JoinedAlnumRegex().Matches(s).Cast<Match>())
+        {
+            var v = m.Value.ToLowerInvariant();
+            tokens.Add(v);
+            if (v.Length > 1 && (v.Contains('-') || v.Contains('_') || v.Contains('/')))
             {
-                if (v.Length == 1) tokens.Add(v);
-                else for (int i = 0; i < v.Length - 1; i++) tokens.Add(v.Substring(i, 2));
+                // 旧仕様トークン（区切りで切った英数連結: st / 1042a）も併存させ、既存の一致挙動を壊さない
+                foreach (var piece in Regex.Split(v, "[^a-z0-9]"))
+                    if (piece.Length > 0) tokens.Add(piece);
+                var norm = NormalizeZuban(v);
+                if (norm.Length >= 2) tokens.Add(norm); // "st-1042a" → "st1042a"
             }
-            else tokens.Add(v.ToLowerInvariant());
         }
         return tokens;
     }
@@ -126,9 +200,10 @@ public static partial class Rag
     public static readonly string SystemPrompt =
         "あなたは社内文書を主な根拠とするQ&Aアシスタント。日本語で結論から答える。" +
         "短い質問は1〜2文の文章で。手順・条件・金額など複数項目の長い回答のみ箇条書き（- ）と改行で整理（手段ごとの条件を混同しない）。" +
-        "社内文書になければ【参照情報】のWeb検索結果から回答してよい（根拠のサイト名を示す）。次の規則を守る。①参照情報に書かれた事実のみ答え、書かれていない日付・数値・天気・名前を作らない。②数字がサイトごとに異なる場合は各サイトの数字をそのまま併記し、新たな数字を作らない。③表の一部だけ読み取れた場合は読み取れた行のみ答え、載っていない地点・行を付け足さない。④具体的な事実が参照情報に無ければ「Web検索の結果からは具体的な情報が得られませんでした。最新の情報は各サイトをご確認ください」とだけ伝える。" +
+        "社内文書になければ【参照情報】のWeb検索結果から回答してよい（根拠のサイト名を示す）。次の規則を守る。①参照情報に書かれた事実のみ答え、書かれていない日付・数値・天気・名前を作らない。②数字がサイトごとに異なる場合は各サイトの数字をそのまま併記し、新たな数字を作らない。③表の一部だけ読み取れた場合は読み取れた行のみ答え、載っていない地点・行を付け足さない。④具体的な事実が参照情報に無ければ「Web検索の結果からは具体的な情報が得られませんでした。最新の情報は各サイトをご確認ください」とだけ伝える。⑤【参照情報】が提示されていないときはWeb検索結果は無いものとして扱い、天気・気温・ニュースなど外部の状況を推測で答えない（「該当する記載がありません」と伝える）。⑥「〜できますか」「〜する方法は？」など質問の前提が社内文書に明記されていないときは、類似の制度・手続きを援用して可能と判断したり手順を作ったりしない（文書に記載がなければ「該当する記載がありません」）。ただし質問と意味が同じ別の言い方（言い換え・表記の違い、例: 公差の問いに±0.2の記載）での記載は記載ありとして答えてよい。" +
         "【システム情報】として現在の日時が示されている場合、日付・時刻・曜日の質問はそれを根拠に正確に答える（社内文書・Web検索がなくても回答してよい）。" +
-        "どちらにもなければ「該当する記載がありません」。部分該当は該当部分のみ。推測と一般知識は禁止。社内文書から答えるときは金額・日付・回数を文書どおり正確に、承認者・期限など「○○の場合は△△」という条件と対象の対応を文書の記載どおり正確に答え、類似する別条件と混同しないこと。";
+        "どちらにもなければ「該当する記載がありません」。部分該当は該当部分のみ。推測と一般知識は禁止。金額・日付・回数は文書どおり正確に。" +
+        "承認者・期限など「○○の場合は△△」という条件と対象の対応は文書の記載どおり正確に答え、類似する別条件と混同しないこと。";
 
     public static string BuildContext(IReadOnlyList<(string doc, string snippet)> docs, string? webContext)
     {
