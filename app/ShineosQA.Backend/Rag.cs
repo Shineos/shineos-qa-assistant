@@ -176,13 +176,19 @@ public static partial class Rag
         return dot / Math.Sqrt(na * nb);
     }
 
+    /// <summary>文＋元の区切り文字（句点・改行）を含めて切り出す正規表現。Snippet専用:
+    /// 区切り込みで切り出せば再結合が元テキストの完全な部分文字列になり、出典モーダルの
+    /// 該当箇所ハイライト（indexOf照合）が必ず成功する（SentenceRegexは句点/改行を捨てるため不使用）</summary>
+    [GeneratedRegex(@"[^。．.\n]+[。．.]?\n?")]
+    private static partial Regex SnippetSentenceRegex();
+
     /// <summary>クエリ関連文を中心としたスニペット抽出。
     /// 語彙が重ならない場合（例: 日本語質問↔英語PDF）は関連文を特定できないため全文を返す
     /// （スニペット化による誤ガード回帰の防止: latency-verification §5）</summary>
     public static string Snippet(string text, IReadOnlySet<string> queryTokens, int max = SnippetMaxChars)
     {
         if (text.Length <= max) return text;
-        var sents = SentenceRegex().Matches(text).Cast<Match>().Select(m => m.Value).ToArray();
+        var sents = SnippetSentenceRegex().Matches(text).Cast<Match>().Select(m => m.Value).ToArray();
         if (sents.Length == 0) return text.Substring(0, max);
         int bestI = 0, bestScore = 0;
         for (int i = 0; i < sents.Length; i++)
@@ -196,6 +202,7 @@ public static partial class Rag
         var sb = new StringBuilder(sents[bestI]);
         while (sb.Length < max)
         {
+            // 区切り文字込みで結合するため、再結合結果は常に元テキストの部分文字列になる
             if (hi + 1 < sents.Length && sb.Length + sents[hi + 1].Length <= max) { hi++; sb.Append(sents[hi]); }
             else if (lo - 1 >= 0 && sb.Length + sents[lo - 1].Length <= max) { lo--; sb.Insert(0, sents[lo]); }
             else break;

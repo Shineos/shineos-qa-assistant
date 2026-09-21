@@ -76,7 +76,8 @@ function domainOf(u: string): string {
   try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; }
 }
 
-/** 出典ビューア: 該当箇所をハイライトして文書全体（チャンク）を表示 */
+/** 出典ビューア: 該当箇所をハイライトして文書全体（チャンク）を表示。
+ *  元ファイルを持つ出典（図面PDF/DXF等）は「元ファイルを開く」で実物を別タブに開ける */
 function openSourceModal(src: SourceInfo) {
   const host = document.getElementById('modal-host')!;
   host.innerHTML = '';
@@ -91,13 +92,18 @@ function openSourceModal(src: SourceInfo) {
   } else {
     highlighted = esc(body) + (src.snippet ? '<hr><b>該当箇所:</b> ' + esc(src.snippet) : '');
   }
+  const fid = src.file_id ?? src.fileId;
   ov.innerHTML = `
     <div class="src-modal">
-      <div class="src-head"><span class="src-file">${SVG_DOC} ${esc(src.file)}</span><button class="icon-btn" data-close>✕ 閉じる</button></div>
+      <div class="src-head"><span class="src-file">${SVG_DOC} ${esc(src.file)}</span>
+        ${fid ? `<button class="small open-original" data-open>元ファイルを開く</button>` : ''}
+        <button class="icon-btn" data-close>✕ 閉じる</button></div>
       <div class="src-body">${highlighted}</div>
     </div>`;
   ov.addEventListener('click', e => { if (e.target === ov) host.innerHTML = ''; });
   ov.querySelector('[data-close]')!.addEventListener('click', () => { host.innerHTML = ''; });
+  const openBtn = ov.querySelector('[data-open]');
+  if (openBtn) openBtn.addEventListener('click', () => window.open(api.fileUrl(src.file_id ?? src.fileId!), '_blank'));
   host.appendChild(ov);
 }
 
@@ -115,8 +121,8 @@ function sourceElement(s: SourceInfo): HTMLElement {
       <div class="source-snippet">${esc(s.snippet.slice(0, 110))}…</div></div>`;
     row.addEventListener('click', () => window.open(s.url!, '_blank', 'noopener,noreferrer'));
   } else if (drawing && fid) {
-    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示。クリックで**元ファイル**を別タブに開く
-    // （PDF図面は画像・線を含むオリジナルそのもの。テキスト抽出チャンクは別物）。
+    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示。クリックで他出典と同じ該当箇所ハイライトの
+    // モーダルを開き、モーダルの「元ファイルを開く」で図面そのもの（画像・線を含むPDF/DXF）を確認できる
     // 図番が抽出できない図面（スキャン図面・DXF等）はファイル名を見出しにして【図面】種別だけは示す
     const rev = s.revision ? `・改訂${esc(s.revision)}` : '';
     const heading = s.zuban
@@ -124,8 +130,8 @@ function sourceElement(s: SourceInfo): HTMLElement {
       : `<b>【図面】</b><span class="muted">${esc(s.file)}</span>`;
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main">${heading}` +
       `<div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
-    row.title = 'クリックで元ファイルを開く';
-    row.addEventListener('click', () => window.open(api.fileUrl(fid), '_blank'));
+    row.title = 'クリックで該当箇所を表示';
+    row.addEventListener('click', () => openSourceModal(s));
   } else {
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>${esc(s.file)}</b><div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
     row.addEventListener('click', () => openSourceModal(s));
