@@ -19,6 +19,16 @@ const SVG_TROPHY = svgWrap('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18
 const SVG_COPY = svgWrap('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>');
 const SVG_CHECK = svgWrap('<polyline points="20 6 9 17 4 12"/>');
 
+/** キャプチャ画像を data URL 化して送信Payloadに含める（サーバ側でローカル保存し過去チャットでも表示） */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
 /** クリップボードへコピー（WebView2のループバックはSecure ContextなのでClipboard APIが使える。
  *  不可な環境向けにexecCommandフォールバックも用意） */
 async function copyText(text: string): Promise<boolean> {
@@ -89,7 +99,11 @@ function openSourceModal(src: SourceInfo) {
   host.appendChild(ov);
 }
 
-function sourceElement(s: SourceInfo): HTMLElement {  const row = document.createElement('div');
+function sourceElement(s: SourceInfo): HTMLElement {
+  // 図面フラグ・ファイルIDは保存時期により camelCase/fileId と snake_case/file_id が混在する（旧チャット互換）
+  const fid = s.file_id ?? s.fileId;
+  const drawing = s.is_drawing ?? s.isDrawing;
+  const row = document.createElement('div');
   row.className = 'source' + (s.kind === 'web' ? ' web-source' : '');
   row.tabIndex = 0;
   if (s.kind === 'web' && s.url) {
@@ -98,17 +112,20 @@ function sourceElement(s: SourceInfo): HTMLElement {  const row = document.creat
       <div class="source-url">${esc(s.url)}</div>
       <div class="source-snippet">${esc(s.snippet.slice(0, 110))}…</div></div>`;
     row.addEventListener('click', () => window.open(s.url!, '_blank', 'noopener,noreferrer'));
-  } else if (s.zuban && s.file_id) {
-    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示し、「開く」で元PDFを別タブ表示
+  } else if (drawing && fid) {
+    // 図面出典（拡張パック）: 図番＋品名＋改訂を表示し、「開く」で元ファイルを別タブ表示。
+    // 図番が抽出できない図面（スキャン図面・DXF等）はファイル名を見出しにして【図面】種別だけは示す
     const rev = s.revision ? `・改訂${esc(s.revision)}` : '';
-    row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>【図】${esc(s.zuban)}</b>` +
-      (s.hinmei ? `<span class="muted">（${esc(s.hinmei)}${rev}）</span>` : '') +
+    const heading = s.zuban
+      ? `<b>【図】${esc(s.zuban)}</b>` + (s.hinmei ? `<span class="muted">（${esc(s.hinmei)}${rev}）</span>` : '')
+      : `<b>【図面】</b><span class="muted">${esc(s.file)}</span>`;
+    row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main">${heading}` +
       `<div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>` +
       `<button type="button" class="small open-drawing">開く</button>`;
     row.addEventListener('click', () => openSourceModal(s));
     row.querySelector('.open-drawing')!.addEventListener('click', (e) => {
       e.stopPropagation();
-      window.open(api.fileUrl(s.file_id!), '_blank');
+      window.open(api.fileUrl(fid), '_blank');
     });
   } else {
     row.innerHTML = `<span class="src-ic">${SVG_DOC}</span><div class="src-main"><b>${esc(s.file)}</b><div class="source-snippet">${esc(s.snippet.slice(0, 90))}…</div></div>`;
@@ -127,6 +144,7 @@ export class ChatView {
   private packDrawing = false;               // 拡張パック（図面）: キャプチャ入力の表示条件
   private pendingCapture: { objectUrl: string; file: File } | null = null;
   private pendingZuban = '';
+  private showArchived = false;              // サイドバー一覧のアーカイブビュー切替
 
   constructor() {
     const form = document.getElementById('chat-form') as HTMLFormElement;
@@ -216,15 +234,39 @@ export class ChatView {
   }
 
   private async refreshList(selectUuid = '') {
-    const chats: ChatSummary[] = await api.chats();
+    const chats: ChatSummary[] = await api.chats(this.showArchived);
     const list = document.getElementById('chat-list')!;
     list.innerHTML = '';
+    // アーカイブ切替ヘッダー（通常一覧の最上部にのみ出す）
+    if (!this.showArchived) {
+      const archivedToggle = document.createElement('button');
+      archivedToggle.className = 'archive-toggle';
+      archivedToggle.textContent = '📦 アーカイブ済みを表示';
+      archivedToggle.addEventListener('click', () => { this.showArchived = true; void this.refreshList(selectUuid); });
+      list.appendChild(archivedToggle);
+    } else {
+      const backToggle = document.createElement('button');
+      backToggle.className = 'archive-toggle';
+      backToggle.textContent = '← 通常のチャットに戻る';
+      backToggle.addEventListener('click', () => { this.showArchived = false; void this.refreshList(selectUuid); });
+      list.appendChild(backToggle);
+    }
     for (const c of chats) {
       const el = document.createElement('div');
       el.className = 'chat-item' + (c.uuid === (selectUuid || this.chatUuid) ? ' active' : '');
       const title = document.createElement('span');
       title.textContent = c.title;
       title.addEventListener('click', () => void this.openChat(c.uuid));
+      // アーカイブ ⇄ 復元（データは消さずに一覧の出し入れだけを行う）
+      const arc = document.createElement('button');
+      arc.className = 'icon-btn';
+      arc.textContent = this.showArchived ? '↩' : '📦';
+      arc.title = this.showArchived ? 'アーカイブから戻す' : 'アーカイブ';
+      arc.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await api.archiveChat(c.uuid, !this.showArchived);
+        await this.refreshList(selectUuid);
+      });
       const del = document.createElement('button');
       del.className = 'icon-btn';
       del.textContent = '×';
@@ -235,7 +277,7 @@ export class ChatView {
         if (c.uuid === this.chatUuid) { this.chatUuid = ''; history.pushState({}, '', '/'); this.clearMessages(); }
         await this.refreshList();
       });
-      el.append(title, del);
+      el.append(title, arc, del);
       list.appendChild(el);
     }
   }
@@ -266,7 +308,9 @@ export class ChatView {
       let sources: SourceInfo[] = [];
       try { sources = msg.sources_json ? JSON.parse(msg.sources_json) : []; } catch { /* ignore */ }
       const t = parseServerTime(msg.created_at);
-      this.appendMessage(msg.role, msg.content, sources, t ?? undefined);
+      // 過去チャットでもキャプチャ画像を表示する（ローカル保存された画像をサーバから配信）
+      const imageUrl = msg.image && msg.id ? api.messageImageUrl(msg.id) : undefined;
+      this.appendMessage(msg.role, msg.content, sources, t ?? undefined, imageUrl);
     }
     void this.refreshList(uuid);
     m.scrollTop = m.scrollHeight;
@@ -593,6 +637,7 @@ export class ChatView {
     // キャプチャ（拡張パック）: 確認チップの図番（修正可）を質問文に前置きする
     const chipInput = document.querySelector('#capture-host .chip-input') as HTMLInputElement | null;
     const zuban = this.pendingZuban ? (chipInput?.value.trim() || this.pendingZuban) : '';
+    const captureFile = this.pendingCapture?.file;
     const captureUrl = this.pendingCapture?.objectUrl;
     const message = zuban ? `（図番: ${zuban}）${text}` : text;
     this.clearCapture(false);
@@ -607,8 +652,10 @@ export class ChatView {
     const t0 = performance.now();
 
     try {
+      // キャプチャ画像をローカル保存用に送る（data URL。サーバ側で data/files/captures/ に保存し過去チャットでも表示）
+      const captureImage = captureFile ? await fileToDataUrl(captureFile) : undefined;
       await streamChat(
-        { chat_uuid: this.chatUuid || undefined, message, web_search: this.webSearch, model: this.selTier || undefined },
+        { chat_uuid: this.chatUuid || undefined, message, web_search: this.webSearch, model: this.selTier || undefined, capture_image: captureImage },
         {
           meta: (d) => {
             if (!this.chatUuid && d.chat_uuid) { this.chatUuid = d.chat_uuid; history.replaceState({}, '', `/c/${this.chatUuid}`); }

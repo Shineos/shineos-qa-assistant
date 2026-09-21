@@ -1,9 +1,9 @@
 // バックエンドREST/SSEクライアント（OpenAPI契約はフェーズ1で型生成に置換予定）
 
-export interface SourceInfo { file: string; snippet: string; text?: string; kind?: string; url?: string | null; file_id?: number; zuban?: string | null; hinmei?: string | null; revision?: string | null }
-export interface ChatSummary { uuid: string; id: number; title: string; updated_at: string }
-export interface ChatMessage { role: string; content: string; sources_json?: string | null; created_at?: string }
-export interface ChatDetail { id: number; title: string; messages: ChatMessage[] }
+export interface SourceInfo { file: string; snippet: string; text?: string; kind?: string; url?: string | null; file_id?: number; fileId?: number; zuban?: string | null; hinmei?: string | null; revision?: string | null; is_drawing?: boolean; isDrawing?: boolean }
+export interface ChatSummary { uuid: string; id: number; title: string; updated_at: string; archived?: number }
+export interface ChatMessage { id?: number; role: string; content: string; image?: string | null; sources_json?: string | null; created_at?: string }
+export interface ChatDetail { id: number; title: string; archived?: number; messages: ChatMessage[] }
 export interface KnowledgeFile { file_id: number; name: string; status: string; error?: string | null; chunk_count: number; added_at: string; kind?: string; zuban_raw?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null }
 export interface StatusInfo {
   version: string; tier: string; chat_model: string; chunks: number; ram_gb: number;
@@ -22,10 +22,13 @@ export const api = {
   getSettings: () => fetch('/api/settings').then(r => json<Settings>(r)),
   saveSettings: (patch: Record<string, unknown>) =>
     fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }),
-  chats: () => fetch('/api/chats').then(r => json<ChatSummary[]>(r)),
+  chats: (archived?: boolean) => fetch(`/api/chats${archived ? '?archived=1' : ''}`).then(r => json<ChatSummary[]>(r)),
   newChat: () => fetch('/api/chats', { method: 'POST' }).then(r => json<{ uuid: string }>(r)),
   chat: (uuid: string) => fetch(`/api/chats/${uuid}`).then(r => json<ChatDetail>(r)),
+  archiveChat: (uuid: string, archived: boolean) =>
+    fetch(`/api/chats/${uuid}/archive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }) }),
   deleteChat: (uuid: string) => fetch(`/api/chats/${uuid}`, { method: 'DELETE' }),
+  messageImageUrl: (messageId: number) => `/api/messages/${messageId}/image`,
   knowledge: (q?: string) => fetch(`/api/knowledge${q ? `?q=${encodeURIComponent(q)}` : ''}`).then(r => json<KnowledgeFile[]>(r)),
   thumbUrl: (id: number) => `/api/knowledge/${id}/thumb`,
   fileUrl: (id: number) => `/api/knowledge/${id}/file`,
@@ -60,7 +63,7 @@ export interface ModelEntry {
 
 /// POST /api/chat をSSE受信する。イベント: meta / model / web / delta / done / error
 export async function streamChat(
-  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string },
+  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string; capture_image?: string },
   handlers: {
     meta?: (d: { chat_id: number; chat_uuid: string }) => void;
     model?: (d: { tier: string; model_file: string }) => void;

@@ -30,7 +30,7 @@ public sealed class Ingest
     /// <summary>元ファイル保存先（拡張パックON時のみ使用）。Programのthumb/fileエンドポイントが参照する</summary>
     public string FilesDir => _filesDir;
 
-    public static readonly string[] SupportedExtensions = { ".md", ".txt", ".docx", ".pdf", ".xlsx", ".csv", ".tsv" };
+    public static readonly string[] SupportedExtensions = { ".md", ".txt", ".docx", ".pdf", ".xlsx", ".csv", ".tsv", ".dxf" };
     private static readonly string[] SheetExtensions = { ".xlsx", ".csv", ".tsv" };
 
     public static string ExtractText(string fileName, Stream stream)
@@ -41,6 +41,7 @@ public sealed class Ingest
             ".md" or ".txt" => ReadText(stream),
             ".docx" => ExtractDocx(stream),
             ".pdf" => ExtractPdfAny(stream),
+            ".dwg" => throw new NotSupportedException("DWG形式は直接検索できません。CADソフトからDXF形式でエクスポートするか、PDF形式で取り込んでください (SHINE_E_UNSUPPORTED_CAD)"),
             _ => throw new NotSupportedException($"unsupported file type: {ext} (SHINE_E_DOC_PARSE_FAILED)")
         };
     }
@@ -203,6 +204,7 @@ public sealed class Ingest
                 List<string>? sheetChunks = null;
                 bool scannedOcr = false;
                 List<(float W, float H)>? ocrPageDims = null;
+                List<DxfText.DxfRun>? dxfRuns = null;
                 if (ext == ".pdf")
                 {
                     try { pdf = PdfText.ExtractAll(bytes); text = pdf.Text; }
@@ -237,6 +239,16 @@ public sealed class Ingest
                     // 表計算ファイル（本体標準機能）: ヘッダ＋行バッチのチャンク列（Rag.Chunk不使用）
                     sheetChunks = SheetExtract.ExtractChunks(fileName, bytes);
                 }
+                else if (ext == ".dxf")
+                {
+                    // CAD図面（DXF）: 拡張パックON時のみ。TEXT/MTEXT/ATTRIBの文字と挿入点を抽出し
+                    // 表題欄抽出にそのまま渡す（DWGはクローズド形式のため対象外→明確な案内メッセージ）
+                    if (!packOn)
+                        throw new NotSupportedException("DXF（CAD図面）の取り込みには設定→拡張機能「図面PDF検索・Q&A」を有効にしてください (SHINE_E_EXTENSION_DISABLED)");
+                    var dxf = DxfText.Extract(bytes);
+                    text = dxf.Text;
+                    dxfRuns = dxf.Runs;
+                }
                 else
                 {
                     text = ExtractText(fileName, new MemoryStream(bytes));
@@ -266,6 +278,20 @@ public sealed class Ingest
                     var fullText = scannedOcr ? pdf.Text + "\n※このテキストはOCRによる読み取りです（誤読を含む場合があります）" : pdf.Text;
                     if (fullText.Trim().Length > 0)
                         chunks.Add(DrawingIngest.BuildChunkText(meta, fullText));
+                }
+                else if (dxfRuns != null)
+                {
+                    // DXF（CAD図面）: ヒューリスティック判定を介さず図面として取り込む（DXFは図面そのもの）。
+                    // 文字の挿入点（Y上向き正=PDF式と同向）から表題欄抽出を共用する
+                    isDrawing = true;
+                    var runs = DxfText.ToPdfRuns(dxfRuns);
+                    var (pw, ph) = DrawingIngest.PageDims(runs, 1);
+                    if (pw <= 0) { pw = 297; ph = 210; } // 空図面の保険（A3縦）
+                    meta = DrawingIngest.ExtractTitleBlock(runs, pw, ph);
+                    if (meta.ZubanRaw is null && Extensions.DrawingLlmEnabled(_db))
+                        meta = await TryLlmMetaAsync(meta, runs, pw, ph, text, ct);
+                    if (text.Trim().Length > 0)
+                        chunks.Add(DrawingIngest.BuildChunkText(meta, text));
                 }
                 else if (sheetChunks != null)
                 {
@@ -402,7 +428,7 @@ public sealed class Ingest
             return m with
             {
                 ZubanRaw = m.ZubanRaw ?? (DrawingIngest.IsPlausibleZuban(zuban) ? zuban!.Trim() : null),
-                Hinmei = m.Hinmei ?? (DrawingIngest.IsPlausibleHinmei(hinmei) ? hinmei!.Trim() : null),
+                Hinmei = m.Hinmei ?? (DrawingIngest.IsPlausibleHinmei(hinmei) && !DrawingIngest.IsMaterialToken(hinmei) ? hinmei!.Trim() : null),
                 Zairyo = m.Zairyo ?? (DrawingIngest.IsPlausibleZairyo(zairyo) ? zairyo!.Trim() : null),
                 Revision = m.Revision ?? (DrawingIngest.IsPlausibleRevision(revision) ? revision!.Trim() : null),
             };

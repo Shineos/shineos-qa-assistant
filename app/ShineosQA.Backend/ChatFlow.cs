@@ -55,7 +55,12 @@ public sealed class ChatFlow
         public string? Url { get; set; }           // Web検索のみ
         // 拡張パック（図面）: Kindはkbのまま、図面メタデータを別フィールドで運ぶ
         // （出典行の正規化 NormalizeSourcesLine が Kind=="kb" 前提のため、種別フラグを分ける）
+        // JsonPropertyName必須: CamelCaseポリシーだと fileId/isDrawing になりUI側（file_id/is_drawing）と
+        // 不一致し、図面出典の【図面】表示が一度も発火しなかった（出典表示不具合の根本原因）
+        [System.Text.Json.Serialization.JsonPropertyName("file_id")]
         public long? FileId { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("is_drawing")]
+        public bool IsDrawing { get; set; }        // drawing_meta に存在する図面ファイル（出典UIの【図面】表示に使用）
         public string? Zuban { get; set; }
         public string? Hinmei { get; set; }
         public string? Revision { get; set; }
@@ -120,6 +125,7 @@ public sealed class ChatFlow
             var rows = _db.Query("SELECT zuban_raw, hinmei, revision FROM drawing_meta WHERE file_id=$i", ("$i", fileId));
             if (rows.Count == 0) return s;
             s.FileId = fileId;
+            s.IsDrawing = true; // 図番が未抽出（null）の図面でも【図面】出典として表示できるように種別だけは立てる
             s.Zuban = rows[0]["zuban_raw"] as string;
             s.Hinmei = rows[0]["hinmei"] as string;
             s.Revision = rows[0]["revision"] as string;
@@ -160,6 +166,28 @@ public sealed class ChatFlow
     }
 
     // ---- SSEヘルパー ----
+    /// <summary>キャプチャ画像の保存（拡張パック）。data/files/captures/ 配下にPNGとして残し、
+    /// 直近のユーザーメッセージにパスを紐付ける（過去チャットでの再表示用。ローカルPC外へは送信しない）</summary>
+    private void SaveCaptureImage(long chatId, string dataUrl)
+    {
+        try
+        {
+            var comma = dataUrl.IndexOf(',');
+            if (!dataUrl.StartsWith("data:image/", StringComparison.Ordinal) || comma < 0) return;
+            var bytes = Convert.FromBase64String(dataUrl[(comma + 1)..]);
+            if (bytes.Length == 0 || bytes.Length > 20 * 1024 * 1024) return;
+            var dataRoot = Path.IsPathRooted(_cfg.DataDir) ? _cfg.DataDir : Path.Combine(AppContext.BaseDirectory, _cfg.DataDir);
+            var dir = Path.Combine(dataRoot, "files", "captures");
+            Directory.CreateDirectory(dir);
+            var rel = $"files/captures/{Guid.NewGuid():N}.png";
+            File.WriteAllBytes(Path.Combine(dataRoot, rel.Replace('/', Path.DirectorySeparatorChar)), bytes);
+            // 直前にINSERTしたユーザーメッセージへ紐付ける
+            _db.Exec("UPDATE messages SET image=$p WHERE id=(SELECT MAX(id) FROM messages WHERE chat_id=$c AND role='user')",
+                ("$p", rel), ("$c", chatId));
+        }
+        catch (Exception ex) { _log.Warn($"capture image save failed: {ex.Message}"); }
+    }
+
     private static async Task Sse(HttpContext ctx, string ev, object payload)
     {
         var json = JsonSerializer.Serialize(payload, JsonOpts);
@@ -174,6 +202,10 @@ public sealed class ChatFlow
         var root = body.RootElement;
         string chatUuid = root.TryGetProperty("chat_uuid", out var cu) && cu.ValueKind == JsonValueKind.String ? cu.GetString()! : "";
         var message = root.GetProperty("message").GetString() ?? throw new BadHttpRequestException("message required");
+        // キャプチャ画像（拡張パック）: data URL（data:image/png;base64,...）で受け取りローカルに保存して
+        // メッセージに紐付ける。画像は完全オフラインのローカルPC内に留まる（S3等への送信は無い）
+        string? captureImage = root.TryGetProperty("capture_image", out var ci) && ci.ValueKind == JsonValueKind.String
+            ? ci.GetString() : null;
         bool webOn = root.TryGetProperty("web_search", out var w) && (w.ValueKind == JsonValueKind.True || w.ValueKind == JsonValueKind.False)
             ? w.GetBoolean() : _cfg.WebSearch;
         // 送信フォームからのモデル指定（quick/standard/quality）。未指定なら現在の階級を使う
@@ -213,6 +245,7 @@ public sealed class ChatFlow
         string prevUser = history.LastOrDefault(h => h.Item1 == "user").Item2 ?? "";
 
         _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'user',$m)", ("$c", chatId), ("$m", message));
+        if (captureImage != null) SaveCaptureImage(chatId, captureImage);
 
         try
         {

@@ -48,7 +48,14 @@ export class KnowledgeView {
       this.packDrawing = !!s.extensions?.drawing;
     } catch { /* 設定取得失敗時は現状維持で一覧のみ更新 */ }
     const fi = document.getElementById('file-input') as HTMLInputElement;
-    fi.accept = ACCEPT;
+    fi.accept = ACCEPT + (this.packDrawing ? ',.dxf' : '');
+    const dz = document.getElementById('dropzone')!;
+    const tn = dz.firstChild;
+    if (tn && tn.nodeType === Node.TEXT_NODE) {
+      tn.textContent = this.packDrawing
+        ? 'ここに PDF / Word / Excel / CSV / Markdown / テキスト / DXF（CAD図面） をドラッグ＆ドロップ '
+        : 'ここに PDF / Word / Excel / CSV / Markdown / テキスト をドラッグ＆ドロップ ';
+    }
     const kf = document.getElementById('knowledge-filter') as HTMLInputElement | null;
     if (kf) kf.hidden = !this.packDrawing;
 

@@ -92,18 +92,41 @@ public static class Api
         });
 
         // ---- チャット履歴（uuidベース・URLルーティング /c/{uuid} 対応） ----
-        app.MapGet("/api/chats", () => Results.Json(db.Query(
-            "SELECT uuid, id, title, updated_at FROM chats ORDER BY updated_at DESC, id DESC LIMIT 200")));
+        app.MapGet("/api/chats", (HttpRequest req) => Results.Json(db.Query(
+            "SELECT uuid, id, title, updated_at, archived FROM chats WHERE archived = $a ORDER BY updated_at DESC, id DESC LIMIT 200",
+            ("$a", req.Query["archived"].ToString() == "1" ? 1 : 0))));
 
         app.MapPost("/api/chats", () => Results.Json(new { uuid = db.NewChatUuid() }));
+
+        // チャットのアーカイブ切替（サイドバーの既定一覧から外す。データは残る）
+        app.MapPost("/api/chats/{uuid}/archive", async (string uuid, HttpRequest req) =>
+        {
+            var id = db.ChatIdFromUuid(uuid);
+            if (id == 0) return Results.NotFound(new { error = "not found" });
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(req.Body);
+            bool archived = doc.RootElement.TryGetProperty("archived", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.True;
+            db.Exec("UPDATE chats SET archived=$v WHERE id=$i", ("$v", archived ? 1 : 0), ("$i", id));
+            return Results.Ok(new { ok = true, archived });
+        });
 
         app.MapGet("/api/chats/{uuid}", (string uuid) =>
         {
             var id = db.ChatIdFromUuid(uuid);
             if (id == 0) return Results.NotFound(new { error = "not found" });
-            var chat = db.Query("SELECT uuid, title FROM chats WHERE id=$i", ("$i", id));
-            var msgs = db.Query("SELECT role, content, sources_json, created_at FROM messages WHERE chat_id=$i ORDER BY id", ("$i", id));
-            return Results.Json(new { uuid, title = chat[0]["title"], messages = msgs });
+            var chat = db.Query("SELECT uuid, title, archived FROM chats WHERE id=$i", ("$i", id));
+            var msgs = db.Query("SELECT id, role, content, image, sources_json, created_at FROM messages WHERE chat_id=$i ORDER BY id", ("$i", id));
+            return Results.Json(new { uuid, title = chat[0]["title"], archived = chat[0]["archived"], messages = msgs });
+        });
+
+        // キャプチャ画像の配信（ローカル保存された過去チャット添付画像。messages.image は files/captures/{name}.png の相対パス）
+        app.MapGet("/api/messages/{id}/image", (long id) =>
+        {
+            var rows = db.Query("SELECT image FROM messages WHERE id=$i", ("$i", id));
+            if (rows.Count == 0 || rows[0]["image"] is not string rel || rel.Length == 0)
+                return Results.NotFound();
+            var path = Path.Combine(ingest.FilesDir, "captures", Path.GetFileName(rel));
+            if (!File.Exists(path)) return Results.NotFound();
+            return Results.File(path, "image/png");
         });
 
         app.MapDelete("/api/chats/{uuid}", (string uuid) =>
