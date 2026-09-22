@@ -123,6 +123,27 @@ public static partial class Rag
         return any;
     }
 
+    /// <summary>回答中の「捏造疑いのある数値」（出典・質問のいずれにも存在しない数値）を抽出する。
+    /// 生成後バリデーションガード（quick 1.7B等の小型モデルが文書に無い数値を混同・作話する実測への対策）。
+    /// 対象は2桁以上の整数と小数（1桁・箇条書き番号は誤検出のため除外）。カンマ区切り・全角数字は
+    /// 正規化して比較し、出典・質問のテキストに同一数値があれば捏造とみなさない</summary>
+    public static List<string> FabricatedNumbers(string answer, string evidence)
+    {
+        static string Norm(string s) => new string(s.Normalize(NormalizationForm.FormKC)
+            .Select(c => c is >= '０' and <= '９' ? (char)(c - '０' + '0') : c).ToArray())
+            .Replace(",", "").Replace("、", "");
+        var ev = Norm(evidence);
+        var ans = Norm(answer);
+        var bad = new List<string>();
+        foreach (Match m in Regex.Matches(ans, @"(?<![\d.])\d{2,}(?:\.\d+)?(?![\d.])|(?<![\d.])\d\.\d+(?![\d.])"))
+        {
+            var n = m.Value;
+            if (ev.Contains(n, StringComparison.Ordinal)) continue;
+            if (bad.All(b => b != n)) bad.Add(n);
+        }
+        return bad;
+    }
+
     /// <summary>日本語バイグラム＋英数字トークン（検証済みトークナイザと同一仕様）
     /// ＋記号結合英数の正規形トークン（図番表記ゆれ吸収・T5）。既存トークンも併存するため旧挙動は崩れない。
     /// 冒頭のNFKCで全角英数・全角記号を半角化する（「ＳＴ－１０４２」など全角入力の図番も一致させる）</summary>

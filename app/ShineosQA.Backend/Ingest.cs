@@ -447,7 +447,9 @@ public sealed class Ingest
     {
         if (!Ocr.IsAvailable())
             throw new InvalidDataException("pdf: 画像のみのPDFです。スキャン図面のOCR取り込みにはWindowsの日本語言語パックが必要です");
-        var target = (int)Math.Min(2200u, Ocr.MaxImageDimension);
+        // レンダ解像度はエンジン上限まで使用する（表題欄などの小さな文字の認識率が解像度に直結する。
+        // 従来の2200から上限2600へ引き上げ）
+        var target = (int)Math.Min(2600u, Ocr.MaxImageDimension);
         // ページ数だけ先に知る必要があるため全体を1回ロードして順に描画する
         var tmp = Path.Combine(Path.GetTempPath(), "shineosqa-ocr-" + Guid.NewGuid().ToString("N") + ".pdf");
         try

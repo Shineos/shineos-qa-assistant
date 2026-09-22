@@ -549,6 +549,47 @@ public sealed class ChatFlow
                 await Sse(ctx, "delta", new { content = delta });
             }, ctx.RequestAborted);
 
+            // 8) 生成後バリデーションガード（t74の正攻法）: 回答中の数値が出典・質問のどこにも
+            //    存在しない（＝捏造・取り違えの疑い）場合、修正を指示して1回だけ再生成し、
+            //    成功時はSSE patchで回答を差し替える。quick 1.7B等の小型モデルの数値取り違え対策。
+            //    再生成はサイレント収集（deltaを流すとクライアント側で回答が倍加するため）。
+            //    timeSensitive（日付応答）は検証対象外
+            var validationCorpus = string.Concat(chosen.Select(h => MergedChunkText(h.Rec))) + "\n" + message
+                + (string.IsNullOrEmpty(webContext) ? "" : "\n" + webContext);
+            if (!timeSensitive && (sources.Count > 0 || !string.IsNullOrEmpty(webContext)))
+            {
+                var badNums = Rag.FabricatedNumbers(answer.ToString(), validationCorpus);
+                if (badNums.Count > 0)
+                {
+                    _log.Warn($"validation guard: numbers not in sources [{string.Join(", ", badNums)}] — regenerating once");
+                    var retryMsgs = new List<(string, string)>(messages)
+                    {
+                        ("assistant", answer.ToString()),
+                        ("user", "先ほどの回答には参照情報に存在しない数値・事実が含まれています。推測や一般知識を使わず、【参照情報】に書かれた内容だけで答え直してください。参照情報に該当が無い場合は「該当する記載がありません」と答えてください。")
+                    };
+                    var retry = new StringBuilder();
+                    try
+                    {
+                        await _gw.ChatStreamAsync(_cfg.EnginePortLlm, retryMsgs, 0.0, 300, _ => Task.CompletedTask, ctx.RequestAborted);
+                        var fixedText = retry.ToString();
+                        if (fixedText.Trim().Length > 0 && Rag.FabricatedNumbers(fixedText, validationCorpus).Count == 0)
+                        {
+                            answer.Clear().Append(fixedText);
+                            await Sse(ctx, "patch", new { content = answer.ToString() });
+                            _log.Info("validation guard: answer regenerated and validated");
+                        }
+                        else
+                        {
+                            _log.Warn("validation guard: regenerated answer still invalid or empty — keeping original");
+                        }
+                    }
+                    catch (Exception ex2)
+                    {
+                        _log.Warn("validation regeneration failed: " + ex2.Message);
+                    }
+                }
+            }
+
             // 出典行を出典パネルと完全一致する正規形へ（モデルが省略・1件のみ記載するのを防止）
             var finalText = NormalizeSourcesLine(answer.ToString(), sources);
             if (finalText != answer.ToString())
