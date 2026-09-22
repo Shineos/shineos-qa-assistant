@@ -15,7 +15,8 @@
         <button data-tab="knowledge" class="tab">ナレッジ</button>
         <button data-tab="settings" class="tab">設定</button>
       </nav>
-      <a class="tab tab-contact" href="https://shineos.com/contact/" target="_blank" rel="noopener" title="お問い合わせ（Shineos.com）" aria-label="お問い合わせ">
+      <!-- 注意: .tab クラスは付けない（main.tsのタブクリックハンドラが data-tab 無しで発火し /undefined に遷移する） -->
+      <a class="tab-contact" href="https://shineos.com/contact/" target="_blank" rel="noopener" title="お問い合わせ（Shineos.com）" aria-label="お問い合わせ">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
       </a>
     </header>

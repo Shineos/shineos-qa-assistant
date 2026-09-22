@@ -22,9 +22,11 @@ body { font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-se
 .brand-sub:hover { text-decoration: underline; }
 .tabs { display: flex; gap: 4px; align-items: center; }
 .tab { border: none; background: transparent; padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--muted); }
-a.tab { display: inline-flex; align-items: center; text-decoration: none; }
-a.tab svg { width: 17px; height: 17px; }
-a.tab:hover { color: var(--text); }
+.tab:hover { background: var(--hover); }
+/* お問い合わせアイコン: ヘッダー最右端。タブのbutton前提スタイルに依存しない独立クラス */
+.tab-contact { margin-left: auto; display: inline-flex; align-items: center; border: none; background: transparent; padding: 7px 10px; border-radius: 8px; cursor: pointer; color: var(--muted); text-decoration: none; }
+.tab-contact svg { width: 17px; height: 17px; }
+.tab-contact:hover { background: var(--hover); color: var(--text); }
 /* お問い合わせアイコンはヘッダー最右端へ */
 .tab-contact { margin-left: auto; padding: 7px 10px; }
 .tab-contact:hover { background: var(--hover); }

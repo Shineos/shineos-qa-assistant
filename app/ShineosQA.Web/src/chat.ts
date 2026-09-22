@@ -345,6 +345,11 @@ export class ChatView {
     return this.chatUuid ? `/c/${this.chatUuid}` : '/';
   }
 
+  /** お問い合わせアイコン等から呼び出し: アプリ側を新規チャット画面へ切り替える */
+  showNewChat(): void {
+    this.newChat();
+  }
+
   private routeFromUrl() {
     const m = location.pathname.match(/^\/c\/([0-9a-zA-Z]+)/);
     if (m) void this.openChat(m[1]);

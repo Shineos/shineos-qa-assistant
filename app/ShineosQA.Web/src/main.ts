@@ -25,7 +25,7 @@ function route() {
   else activateTab('chat'); // '/' と /c/{uuid}（会話の復元はChatViewが処理）
 }
 
-document.querySelectorAll<HTMLButtonElement>('.tab').forEach(btn => {
+document.querySelectorAll<HTMLButtonElement>('button.tab').forEach(btn => {
   btn.addEventListener('click', () => {
     const name = btn.dataset.tab!;
     const path = name === 'chat' ? views.chat.currentPath() : `/${name}`;
@@ -33,6 +33,8 @@ document.querySelectorAll<HTMLButtonElement>('.tab').forEach(btn => {
     activateTab(name);
   });
 });
+// お問い合わせアイコン: 既定ブラウザでリンクを開きつつ、アプリ側は新規チャット画面へ切り替える
+document.querySelector('a.tab-contact')?.addEventListener('click', () => views.chat.showNewChat());
 window.addEventListener('popstate', route);
 route();
 
