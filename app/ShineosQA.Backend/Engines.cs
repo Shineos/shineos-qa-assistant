@@ -424,6 +424,20 @@ public sealed class Supervisor
         }
     }
 
+    /// <summary>指定モデルファイルを読み込んでいるエンジンだけを停止する（モデル削除前のファイルロック解放）。
+    /// 止めたエンジンは次回利用時に自動で再起動される</summary>
+    public void StopEnginesUsing(IEnumerable<string> modelFiles)
+    {
+        var set = modelFiles.Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        lock (_lock)
+        {
+            if (_llm is { } l && set.Contains(Path.GetFileName(l.File))) { DisposeEngine(l); _llm = null; }
+            if (_emb is { } e && set.Contains(Path.GetFileName(e.File))) { DisposeEngine(e); _emb = null; }
+            if (_rank is { } r && set.Contains(Path.GetFileName(r.File))) { DisposeEngine(r); _rank = null; }
+            if (_vision is { } v && set.Contains(Path.GetFileName(v.File))) { DisposeEngine(v); _vision = null; }
+        }
+    }
+
     public object Status() => new
     {
         tier = _cfg.EffectiveTier,

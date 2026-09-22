@@ -23,12 +23,19 @@
         <aside class="sidebar">
           <button id="new-chat" class="newchat">＋ 新規チャット</button>
           <input id="chat-search" class="chat-search" type="text" placeholder="履歴を検索" autocomplete="off" />
+          <button id="bookmark-toggle" class="archive-toggle" type="button"></button>
+          <button id="archive-toggle" class="archive-toggle" type="button"></button>
           <div id="chat-list" class="chat-list"></div>
         </aside>
         <div class="chat-main">
+          <div id="chat-header" class="chat-header" hidden>
+            <span id="chat-header-title" title="ダブルクリックで名前を変更"></span>
+            <button type="button" id="chat-header-rename" class="icon-btn" title="名前を変更"></button>
+            <button type="button" id="chat-header-star" class="icon-btn bookmark-btn" title="ブックマーク"></button>
+          </div>
           <div id="messages" class="messages">
             <div class="empty">
-              <div class="empty-icon">💬</div>
+              <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" role="img" aria-label="質問"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.5 7.2l1.15 2.45 2.45 1.15-2.45 1.15-1.15 2.45-1.15-2.45-2.45-1.15 2.45-1.15z" fill="#10a37f"/><path d="M16.2 12.4l.7 1.5 1.5.7-1.5.7-.7 1.5-.7-1.5-1.5-.7 1.5-.7z" fill="#10a37f" opacity=".55"/></svg></div>
               <h2>社内規定・業務マニュアルについて質問してください</h2>
               <p>回答には出典（文書名・該当箇所）が付きます。ナレッジにない質問には「該当する記載がありません」と回答します。</p>
             </div>

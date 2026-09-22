@@ -1,9 +1,9 @@
 // バックエンドREST/SSEクライアント（OpenAPI契約はフェーズ1で型生成に置換予定）
 
 export interface SourceInfo { file: string; snippet: string; text?: string; kind?: string; url?: string | null; file_id?: number; fileId?: number; zuban?: string | null; hinmei?: string | null; revision?: string | null; is_drawing?: boolean; isDrawing?: boolean }
-export interface ChatSummary { uuid: string; id: number; title: string; updated_at: string; archived?: number }
+export interface ChatSummary { uuid: string; id: number; title: string; updated_at: string; archived?: number; bookmarked?: number }
 export interface ChatMessage { id?: number; role: string; content: string; image?: string | null; sources_json?: string | null; created_at?: string }
-export interface ChatDetail { id: number; title: string; archived?: number; messages: ChatMessage[] }
+export interface ChatDetail { id: number; title: string; archived?: number; bookmarked?: number; messages: ChatMessage[] }
 export interface KnowledgeFile { file_id: number; name: string; status: string; error?: string | null; chunk_count: number; added_at: string; kind?: string; zuban_raw?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null }
 export interface StatusInfo {
   version: string; tier: string; chat_model: string; chunks: number; ram_gb: number;
@@ -22,9 +22,10 @@ export const api = {
   getSettings: () => fetch('/api/settings').then(r => json<Settings>(r)),
   saveSettings: (patch: Record<string, unknown>) =>
     fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }),
-  chats: (archived?: boolean, q?: string) => {
+  chats: (archived?: boolean, q?: string, bookmarked?: boolean) => {
     const ps = new URLSearchParams();
     if (archived) ps.set('archived', '1');
+    if (bookmarked) ps.set('bookmarked', '1');
     if (q) ps.set('q', q);
     const qs = ps.toString();
     return fetch(`/api/chats${qs ? '?' + qs : ''}`).then(r => json<ChatSummary[]>(r));
@@ -33,6 +34,10 @@ export const api = {
   chat: (uuid: string) => fetch(`/api/chats/${uuid}`).then(r => json<ChatDetail>(r)),
   archiveChat: (uuid: string, archived: boolean) =>
     fetch(`/api/chats/${uuid}/archive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archived }) }),
+  bookmarkChat: (uuid: string, bookmarked: boolean) =>
+    fetch(`/api/chats/${uuid}/bookmark`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookmarked }) }),
+  renameChat: (uuid: string, title: string) =>
+    fetch(`/api/chats/${uuid}/rename`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }),
   deleteChat: (uuid: string) => fetch(`/api/chats/${uuid}`, { method: 'DELETE' }),
   messageImageUrl: (messageId: number) => `/api/messages/${messageId}/image`,
   knowledge: (q?: string) => fetch(`/api/knowledge${q ? `?q=${encodeURIComponent(q)}` : ''}`).then(r => json<KnowledgeFile[]>(r)),

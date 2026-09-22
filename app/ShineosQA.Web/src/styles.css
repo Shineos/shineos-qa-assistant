@@ -34,6 +34,10 @@ main { flex: 1; min-height: 0; position: relative; }
 .sidebar { width: 248px; background: var(--panel); border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 button.newchat { width: 100%; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 14px; cursor: pointer; text-align: left; }
 button.newchat:hover { background: var(--hover); }
+/* 履歴検索: 質問入力フォーム（.composer）と同じフロートカード風デザイン */
+.chat-search { margin: 0 2px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); font-size: 13px; font-family: inherit; color: var(--text); outline: none; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.chat-search::placeholder { color: var(--muted); }
+.chat-search:focus { border-color: #d9d9e3; background: var(--panel); box-shadow: 0 3px 14px rgba(0,0,0,0.08); }
 .chat-list { overflow-y: auto; flex: 1; }
 .chat-item { display: flex; align-items: center; gap: 4px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
 .chat-item span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -43,10 +47,18 @@ button.newchat:hover { background: var(--hover); }
 .chat-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+/* chat-mainヘッダー: 開いているチャットの名前＋ブックマーク星（ダブルクリックで名前変更） */
+.chat-header { max-width: 768px; width: 100%; margin: 0 auto; padding: 12px 16px 0; display: flex; align-items: center; gap: 6px; box-sizing: border-box; }
+/* display:flex が hidden 属性の既定スタイルに勝つため、非表示時は明示的に display:none にする */
+.chat-header[hidden] { display: none; }
+.chat-header span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; color: var(--text); cursor: text; }
+.chat-header .icon-btn { flex-shrink: 0; }
+.chat-header .chat-rename-input { width: 100%; font-size: 15px; font-weight: 600; padding: 2px 6px; border: 1px solid var(--accent); border-radius: 6px; font-family: inherit; outline: none; background: var(--panel); color: var(--text); }
 .messages { flex: 1; overflow-y: auto; padding: 24px 16px 8px; }
 .messages > * { max-width: 768px; margin-left: auto; margin-right: auto; }
 .empty { margin: auto; text-align: center; color: var(--muted); padding: 40px 20px; }
-.empty-icon { font-size: 40px; margin-bottom: 8px; }
+.empty-icon { margin-bottom: 14px; color: var(--muted); }
+.empty-icon svg { width: 60px; height: 60px; display: block; margin: 0 auto; filter: drop-shadow(0 3px 6px rgba(16, 163, 127, 0.18)); }
 
 .msg { display: flex; flex-direction: column; margin-bottom: 16px; }
 .msg.user { align-items: flex-end; }
@@ -230,6 +242,12 @@ button.small { padding: 5px 10px; font-size: 12px; }
   background: var(--hover, #f1f5f9);
   color: var(--text, #1d2733);
 }
+.archive-toggle.active {
+  background: var(--user-bg, #ececf1);
+  color: var(--text, #1d2733);
+  border-style: solid;
+  font-weight: 600;
+}
 .archive-toggle svg, .icon-btn svg { width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; }
 .chat-item .icon-btn svg { margin-right: 0; }
 
@@ -277,5 +295,5 @@ button.small { padding: 5px 10px; font-size: 12px; }
 }
 .chat-rename-input:focus { outline: 1px solid var(--border, #d7dee6); }
 
-/* ブックマーク済みチャットの星アイコン */
-.bookmark-btn.bookmarked svg { fill: #f59e0b; stroke: #f59e0b; }
+/* ブックマーク済みチャットの星アイコン（currentColorで塗りと線の両方に効く） */
+.bookmark-btn.bookmarked { color: #f59e0b; }

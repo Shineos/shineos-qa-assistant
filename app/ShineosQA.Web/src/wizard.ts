@@ -148,8 +148,24 @@ export class Models {
         const btn = document.createElement('button');
         btn.className = 'icon-btn';
         btn.textContent = '×';
-        btn.title = '削除';
-        btn.addEventListener('click', async () => { await api.deleteModel(m.id); await Models.renderInto(list); });
+        btn.title = '削除（再度ダウンロードで元に戻せます）';
+        btn.addEventListener('click', async () => {
+          if (!confirm(`${m.name} を削除しますか？\nディスク容量を解放します。削除後も「ダウンロード」ボタンから再度導入できます。`)) return;
+          btn.disabled = true;
+          btn.textContent = '…';
+          try {
+            const r = await api.deleteModel(m.id);
+            if (!r.ok) {
+              const body = await r.json().catch(() => ({}) as { message?: string });
+              throw new Error(body.message || `HTTP ${r.status}`);
+            }
+            await Models.renderInto(list);
+          } catch (ex) {
+            alert(`削除に失敗しました: ${(ex as Error).message}`);
+            btn.disabled = false;
+            btn.textContent = '×';
+          }
+        });
         act.appendChild(btn);
       }
       row.append(info, st, act);

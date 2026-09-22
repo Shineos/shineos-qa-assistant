@@ -20,6 +20,11 @@ const SVG_COPY = svgWrap('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"
 const SVG_CHECK = svgWrap('<polyline points="20 6 9 17 4 12"/>');
 const SVG_ARCHIVE = svgWrap('<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>');
 const SVG_ARCHIVE_RESTORE = svgWrap('<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/><path d="m9 16 3-3 3 3"/>');
+// 星アイコン: ChatGPT風の細線5角星（lucide star）。塗り版は中身をcurrentColorで塗る
+const SVG_STAR = svgWrap('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>');
+const SVG_STAR_FILLED = svgWrap('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="currentColor"/>');
+// 鉛筆アイコン: チャット名変更（ヘッダー）
+const SVG_PENCIL = svgWrap('<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>');
 
 /** キャプチャ画像を data URL 化して送信Payloadに含める（サーバ側でローカル保存し過去チャットでも表示） */
 function fileToDataUrl(file: File): Promise<string> {
@@ -183,6 +188,8 @@ function sourceElement(s: SourceInfo): HTMLElement {
 
 export class ChatView {
   private chatUuid = '';
+  private chatTitle = '';                    // chat-mainヘッダーに表示中のチャット名
+  private headerBookmarked = false;          // ヘッダー星アイコンの状態
   private sending = false;
   private webSearch = false;
   private selTier = '';
@@ -193,6 +200,7 @@ export class ChatView {
   private pendingZuban = '';
   private pendingShape = '';                 // 文字なし図形キャプチャからAI読取した形状キーワード
   private showArchived = false;              // サイドバー一覧のアーカイブビュー切替
+  private showBookmarked = false;            // サイドバー一覧のブックマークビュー切替
   private chatSearchText = '';               // チャット履歴検索キーワード
 
   constructor() {
@@ -218,6 +226,37 @@ export class ChatView {
         this.chatSearchText = chatSearch.value;
         void this.refreshList();
       }, 300);
+    });
+    // ブックマーク一覧の表示切替（アーカイブビューとは排他）
+    const bookmarkToggle = document.getElementById('bookmark-toggle') as HTMLButtonElement;
+    bookmarkToggle.addEventListener('click', () => {
+      this.showBookmarked = !this.showBookmarked;
+      if (this.showBookmarked) this.showArchived = false;
+      this.chatSearchText = '';
+      chatSearch.value = '';
+      void this.refreshList();
+    });
+    // アーカイブ済み一覧の表示切替（静的ボタン・ラベルはrefreshListで更新）
+    const archiveToggle = document.getElementById('archive-toggle') as HTMLButtonElement;
+    archiveToggle.addEventListener('click', () => {
+      this.showArchived = !this.showArchived;
+      if (this.showArchived) this.showBookmarked = false;
+      this.chatSearchText = '';
+      chatSearch.value = '';
+      void this.refreshList();
+    });
+    // chat-mainヘッダー: チャット名の表示（鉛筆アイコン or ダブルクリックで変更）とブックマーク星
+    const headerTitle = document.getElementById('chat-header-title')!;
+    headerTitle.addEventListener('dblclick', () => this.startHeaderRename());
+    const renameBtn = document.getElementById('chat-header-rename') as HTMLButtonElement;
+    renameBtn.innerHTML = SVG_PENCIL;
+    renameBtn.addEventListener('click', () => this.startHeaderRename());
+    document.getElementById('chat-header-star')!.addEventListener('click', async () => {
+      if (!this.chatUuid) return;
+      this.headerBookmarked = !this.headerBookmarked;
+      try { await api.bookmarkChat(this.chatUuid, this.headerBookmarked); } catch { this.headerBookmarked = !this.headerBookmarked; return; }
+      this.setChatHeader(this.chatTitle, this.headerBookmarked);
+      void this.refreshList(); // ブックマークビュー中なら一覧の並びにも反映
     });
     webBtn.addEventListener('click', () => {
       this.webSearch = !this.webSearch;
@@ -275,8 +314,9 @@ export class ChatView {
       this.packDrawing = !!s.extensions?.drawing;
       captureBtn.hidden = !this.packDrawing;
       // 拡張パックON時は入力欄にキャプチャ機能の存在を案内する（ボタンだけでは気づきにくい）
+      // 絵文字は使わない（アイコンはコンポーザーのSVGボタンに統一）
       input.placeholder = this.packDrawing
-        ? '質問を入力してください（Enterで送信 / 📸図面キャプチャの貼り付けも可能）'
+        ? '質問を入力してください（Enterで送信 / 図面キャプチャの貼り付けも可能）'
         : '質問を入力してください（Enterで送信 / Shift+Enterで改行）';
     } catch { /* 設定取得失敗時は現状維持 */ }
   }
@@ -288,7 +328,7 @@ export class ChatView {
   private routeFromUrl() {
     const m = location.pathname.match(/^\/c\/([0-9a-zA-Z]+)/);
     if (m) void this.openChat(m[1]);
-    else { this.chatUuid = ''; this.clearMessages(); }
+    else { this.chatUuid = ''; this.clearMessages(); this.setChatHeader(null); }
     void this.refreshList();
   }
 
@@ -297,8 +337,69 @@ export class ChatView {
     if (location.pathname !== `/c/${uuid}`) history.pushState({}, '', uuid ? `/c/${uuid}` : '/');
   }
 
+  /** chat-mainヘッダーへの表示。title=nullで非表示（新規チャット時） */
+  private setChatHeader(title: string | null, bookmarked?: boolean) {
+    const header = document.getElementById('chat-header');
+    if (!header) return;
+    if (title === null) { header.hidden = true; return; }
+    header.hidden = false;
+    this.chatTitle = title;
+    if (bookmarked !== undefined) this.headerBookmarked = !!bookmarked;
+    const span = document.getElementById('chat-header-title')!;
+    if (span.querySelector('input') === null) span.textContent = title; // 編集中（inputあり）なら書き換えない
+    const star = document.getElementById('chat-header-star') as HTMLButtonElement;
+    star.innerHTML = this.headerBookmarked ? SVG_STAR_FILLED : SVG_STAR;
+    star.classList.toggle('bookmarked', this.headerBookmarked);
+    star.title = this.headerBookmarked ? 'ブックマークを解除' : 'ブックマーク';
+  }
+
+  /** ヘッダーのチャット名インライン変更（サイドバーのダブルクリック編集と同じ挙動） */
+  private startHeaderRename() {
+    if (!this.chatUuid) return;
+    const span = document.getElementById('chat-header-title')!;
+    if (span.querySelector('input')) return;
+    const inp = document.createElement('input');
+    inp.className = 'chat-rename-input';
+    inp.value = this.chatTitle;
+    span.textContent = '';
+    span.appendChild(inp);
+    inp.focus();
+    inp.select();
+    let closed = false;
+    const finish = async (save: boolean) => {
+      if (closed) return;
+      closed = true;
+      inp.remove(); // 先にinputを外さないとsetChatHeaderが編集中扱いして戻さない
+      const t = inp.value.trim();
+      if (save && t && t !== this.chatTitle) {
+        await api.renameChat(this.chatUuid, t);
+        this.chatTitle = t;
+        void this.refreshList();
+      }
+      this.setChatHeader(this.chatTitle); // 通常表示に戻す
+    };
+    inp.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); void finish(true); }
+      if (ev.key === 'Escape') { void finish(false); }
+    });
+    inp.addEventListener('blur', () => void finish(true));
+  }
+
   private async refreshList(selectUuid = '') {
-    const chats: ChatSummary[] = await api.chats(this.showArchived, this.chatSearchText);
+    const chats: ChatSummary[] = await api.chats(this.showArchived, this.chatSearchText, this.showBookmarked);
+    // 切替ボタンのラベルを現在のビューに合わせて更新（ブックマーク ⇄ アーカイブは排他ビュー）
+    const bookmarkToggle = document.getElementById('bookmark-toggle') as HTMLButtonElement | null;
+    if (bookmarkToggle) {
+      bookmarkToggle.innerHTML = `${this.showBookmarked ? SVG_STAR_FILLED : SVG_STAR} ブックマークのみ表示`;
+      bookmarkToggle.classList.toggle('active', this.showBookmarked);
+    }
+    const archiveToggle = document.getElementById('archive-toggle') as HTMLButtonElement | null;
+    if (archiveToggle) {
+      archiveToggle.innerHTML = this.showArchived
+        ? `${SVG_ARCHIVE_RESTORE} 通常のチャットに戻る`
+        : `${SVG_ARCHIVE} アーカイブ済みを表示`;
+      archiveToggle.classList.toggle('active', this.showArchived);
+    }
     const list = document.getElementById('chat-list')!;
     list.innerHTML = '';
     for (const c of chats) {
@@ -307,7 +408,28 @@ export class ChatView {
       const title = document.createElement('span');
       title.textContent = c.title;
       title.addEventListener('click', () => void this.openChat(c.uuid));
-      // アーカイブ ⇄ 復元（データは消さずに一覧の出し入れだけを行う）
+      // チャット名変更: ダブルクリックでインライン編集
+      title.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const inp = document.createElement('input');
+        inp.className = 'chat-rename-input';
+        inp.value = c.title;
+        inp.style.width = '100%';
+        title.replaceWith(inp);
+        inp.focus();
+        inp.select();
+        const save = async () => {
+          const t = inp.value.trim();
+          if (t && t !== c.title) { await api.renameChat(c.uuid, t); c.title = t; }
+          void this.refreshList(selectUuid);
+        };
+        inp.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+          if (ev.key === 'Escape') { void this.refreshList(selectUuid); }
+        });
+        inp.addEventListener('blur', () => save());
+      });
+      // アーカイブ ⇄ 復元（データは消さずに一覧の出し入れだけを行う）。星はchat-mainヘッダー侧に移したので一覧には出さない
       const arc = document.createElement('button');
       arc.className = 'icon-btn';
       arc.innerHTML = this.showArchived ? SVG_ARCHIVE_RESTORE : SVG_ARCHIVE;
@@ -324,7 +446,7 @@ export class ChatView {
       del.addEventListener('click', async (e) => {
         e.stopPropagation();
         await api.deleteChat(c.uuid);
-        if (c.uuid === this.chatUuid) { this.chatUuid = ''; history.pushState({}, '', '/'); this.clearMessages(); }
+        if (c.uuid === this.chatUuid) { this.chatUuid = ''; history.pushState({}, '', '/'); this.clearMessages(); this.setChatHeader(null); }
         await this.refreshList();
       });
       el.append(title, arc, del);
@@ -336,13 +458,15 @@ export class ChatView {
     this.chatUuid = '';
     history.pushState({}, '', '/');
     this.clearMessages();
+    this.setChatHeader(null);
     void this.refreshList();
     (document.getElementById('chat-input') as HTMLTextAreaElement).focus();
   }
 
   clearMessages() {
     const m = document.getElementById('messages')!;
-    m.innerHTML = `<div class="empty"><div class="empty-icon">💬</div>
+    // 絵文字の代わりにチャットバブル＋AIスパークルのSVG（index.htmlの初期状態と同一）
+    m.innerHTML = `<div class="empty"><div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" role="img" aria-label="質問"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.5 7.2l1.15 2.45 2.45 1.15-2.45 1.15-1.15 2.45-1.15-2.45-2.45-1.15 2.45-1.15z" fill="#10a37f"/><path d="M16.2 12.4l.7 1.5 1.5.7-1.5.7-.7 1.5-.7-1.5-1.5-.7 1.5-.7z" fill="#10a37f" opacity=".55"/></svg></div>
       <h2>社内規定・業務マニュアルについて質問してください</h2>
       <p>回答には出典（文書名・該当箇所）が付きます。ナレッジにない質問には「該当する記載がありません」と回答します。</p></div>`;
   }
@@ -350,7 +474,15 @@ export class ChatView {
   private async openChat(uuid: string) {
     this.nav(uuid);
     let detail;
-    try { detail = await api.chat(uuid); } catch { this.clearMessages(); return; }
+    try { detail = await api.chat(uuid); } catch {
+      // 読込失敗（削除済み等）: 新規チャット状態に戻し、ヘッダーの古いタイトルも消す
+      this.chatUuid = '';
+      history.replaceState({}, '', '/');
+      this.clearMessages();
+      this.setChatHeader(null);
+      return;
+    }
+    this.setChatHeader(detail.title, !!detail.bookmarked);
     const m = document.getElementById('messages')!;
     m.innerHTML = '';
     if (detail.messages.length === 0) { this.clearMessages(); }
@@ -720,7 +852,12 @@ export class ChatView {
         { chat_uuid: this.chatUuid || undefined, message, web_search: this.webSearch, model: this.selTier || undefined, capture_image: captureImage },
         {
           meta: (d) => {
-            if (!this.chatUuid && d.chat_uuid) { this.chatUuid = d.chat_uuid; history.replaceState({}, '', `/c/${this.chatUuid}`); }
+            if (!this.chatUuid && d.chat_uuid) {
+              this.chatUuid = d.chat_uuid;
+              history.replaceState({}, '', `/c/${this.chatUuid}`);
+              // 新規チャット: サーバと同じ先頭24文字を仮タイトルとしてヘッダーに即時表示
+              this.setChatHeader(message.length > 24 ? message.slice(0, 24) : message, false);
+            }
             thinking.setPhase('ナレッジを検索中…');
           },
           model: (d) => {

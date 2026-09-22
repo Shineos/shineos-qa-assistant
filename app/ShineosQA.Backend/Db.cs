@@ -53,6 +53,8 @@ public sealed class Db : IDisposable
         try { Exec("ALTER TABLE messages ADD COLUMN image TEXT"); } catch { }
         // チャットアーカイブ: 0=通常 / 1=アーカイブ済み（一覧の既定表示から除外）
         try { Exec("ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"); } catch { }
+        // チャットブックマーク: 0=通常 / 1=ブックマーク済み（⭐表示）
+        try { Exec("ALTER TABLE chats ADD COLUMN bookmarked INTEGER NOT NULL DEFAULT 0"); } catch { }
         Exec("""
             CREATE TABLE IF NOT EXISTS drawing_meta(
               file_id INTEGER PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,

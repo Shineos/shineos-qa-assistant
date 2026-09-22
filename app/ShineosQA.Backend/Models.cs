@@ -27,7 +27,7 @@ public sealed class ModelManager
         new("chat-quick", "クイック Qwen3-1.7B（8GB機向・約1.0GB）", "Qwen3-1.7B-IQ4_XS.gguf", "chat_quick", 1010383424,
             "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-IQ4_XS.gguf",
             "https://hf-mirror.com/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-IQ4_XS.gguf",
-            "a02e41d3208e97a7cb224297e8d3abb22e5bb8d664362c6be4f48948a3797eec", "Apache-2.0", false, 0),
+            "a02e41d3208e97a7cb224297e8d3abb22e5bb8d664362c6be4f48948a3797eec", "Apache-2.0", true, 0),
         new("chat-standard", "標準 Qwen3-4B-2507（16GB機向・約2.2GB）", "Qwen3-4B-Instruct-2507-IQ4_XS.gguf", "chat_standard", 2270751840,
             "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-IQ4_XS.gguf",
             "https://hf-mirror.com/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-IQ4_XS.gguf",
@@ -186,6 +186,9 @@ public sealed class ModelManager
     {
         var entry = Catalog.FirstOrDefault(e => e.Id == id) ?? throw new KeyNotFoundException($"unknown model id: {id}");
         if (entry.Required) throw new InvalidOperationException("required model cannot be deleted");
+        // 使用中（選択中の階級）のチャットモデルの削除は拒否する。階級を別モデルに変えてから削除してもらう
+        if (entry.Kind.StartsWith("chat_") && string.Equals(_cfg.ChatModelFile, entry.File, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("このチャットモデルは使用中です。設定の「モデル階級」を別のモデルに変更してから削除してください");
         var files = new List<string> { entry.File };
         files.AddRange((entry.Extras ?? Array.Empty<CompanionFile>()).Select(x => x.File));
         foreach (var f in files)
@@ -194,5 +197,14 @@ public sealed class ModelManager
             if (File.Exists(p)) File.Delete(p);
         }
         _log.Info($"model deleted: {entry.File} (+{files.Count - 1} companion file(s))");
+    }
+
+    /// <summary>モデルIDに対応するファイル一覧（本体＋セット品）。削除前にエンジン停止判断へ渡す</summary>
+    public string[] FilesFor(string id)
+    {
+        var entry = Catalog.FirstOrDefault(e => e.Id == id) ?? throw new KeyNotFoundException($"unknown model id: {id}");
+        var files = new List<string> { entry.File };
+        files.AddRange((entry.Extras ?? Array.Empty<CompanionFile>()).Select(x => x.File));
+        return files.ToArray();
     }
 }

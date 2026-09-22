@@ -41,7 +41,7 @@ public static class Api
         // ローカル/手動ビルドではフォールバック値
         var appVersion = File.Exists(Path.Combine(AppContext.BaseDirectory, "version.txt"))
             ? File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "version.txt")).Trim()
-            : "2.1.10";
+            : "2.1.12";
 
         app.MapGet("/health", () => Results.Json(new { status = true }));
 
@@ -98,25 +98,49 @@ public static class Api
             return Results.Ok(new { ok = true });
         });
 
-        // ---- チャット履歴（uuidベース・URLルーティング /c/{uuid} 対応）。q= でタイトル/本文の全文検索 ----
+        // ---- チャット履歴（uuidベース・URLルーティング /c/{uuid} 対応）。q= でタイトル/本文の全文検索、bookmarked=1 でブックマークのみ ----
         app.MapGet("/api/chats", (HttpRequest req) =>
         {
             var q = req.Query["q"].ToString().Trim();
             var archived = req.Query["archived"].ToString() == "1" ? 1 : 0;
+            var bookmarkedOnly = req.Query["bookmarked"].ToString() == "1";
+            var like = "%" + q.Replace("%", "").Replace("_", "") + "%";
+            if (bookmarkedOnly)
+            {
+                // ブックマークビュー: アーカイブ済みも含めて星を付けた会話だけを一覧する
+                if (q.Length > 0)
+                    return Results.Json(db.Query(
+                        "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived, c.bookmarked FROM chats c JOIN messages m ON m.chat_id = c.id " +
+                        "WHERE c.bookmarked = 1 AND (c.title LIKE $like OR m.content LIKE $like) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50",
+                        ("$like", like)));
+                return Results.Json(db.Query(
+                    "SELECT uuid, id, title, updated_at, archived, bookmarked FROM chats WHERE bookmarked = 1 ORDER BY updated_at DESC, id DESC LIMIT 200"));
+            }
             if (q.Length > 0)
             {
-                var like = "%" + q.Replace("%", "").Replace("_", "") + "%";
                 return Results.Json(db.Query(
-                    "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived FROM chats c JOIN messages m ON m.chat_id = c.id " +
+                    "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived, c.bookmarked FROM chats c JOIN messages m ON m.chat_id = c.id " +
                     "WHERE c.archived = $a AND (c.title LIKE $like OR m.content LIKE $like) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50",
                     ("$like", like), ("$a", archived)));
             }
             return Results.Json(db.Query(
-                "SELECT uuid, id, title, updated_at, archived FROM chats WHERE archived = $a ORDER BY updated_at DESC, id DESC LIMIT 200",
+                "SELECT uuid, id, title, updated_at, archived, bookmarked FROM chats WHERE archived = $a ORDER BY bookmarked DESC, updated_at DESC, id DESC LIMIT 200",
                 ("$a", archived)));
         });
 
         app.MapPost("/api/chats", () => Results.Json(new { uuid = db.NewChatUuid() }));
+
+        // チャット名変更
+        app.MapPost("/api/chats/{uuid}/rename", async (string uuid, HttpRequest req) =>
+        {
+            var id = db.ChatIdFromUuid(uuid);
+            if (id == 0) return Results.NotFound(new { error = "not found" });
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(req.Body);
+            var title = doc.RootElement.TryGetProperty("title", out var t) && t.ValueKind == System.Text.Json.JsonValueKind.String ? t.GetString() : null;
+            if (string.IsNullOrWhiteSpace(title)) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "title required" });
+            db.Exec("UPDATE chats SET title=$t WHERE id=$i", ("$t", title.Trim()), ("$i", id));
+            return Results.Ok(new { ok = true, title = title.Trim() });
+        });
 
         // チャットのアーカイブ切替（サイドバーの既定一覧から外す。データは残る）
         app.MapPost("/api/chats/{uuid}/archive", async (string uuid, HttpRequest req) =>
@@ -129,13 +153,24 @@ public static class Api
             return Results.Ok(new { ok = true, archived });
         });
 
+        // チャットのブックマーク切替（⭐トグル）
+        app.MapPost("/api/chats/{uuid}/bookmark", async (string uuid, HttpRequest req) =>
+        {
+            var id = db.ChatIdFromUuid(uuid);
+            if (id == 0) return Results.NotFound(new { error = "not found" });
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(req.Body);
+            bool bookmarked = doc.RootElement.TryGetProperty("bookmarked", out var b) && b.ValueKind == System.Text.Json.JsonValueKind.True;
+            db.Exec("UPDATE chats SET bookmarked=$v WHERE id=$i", ("$v", bookmarked ? 1 : 0), ("$i", id));
+            return Results.Ok(new { ok = true, bookmarked });
+        });
+
         app.MapGet("/api/chats/{uuid}", (string uuid) =>
         {
             var id = db.ChatIdFromUuid(uuid);
             if (id == 0) return Results.NotFound(new { error = "not found" });
-            var chat = db.Query("SELECT uuid, title, archived FROM chats WHERE id=$i", ("$i", id));
+            var chat = db.Query("SELECT uuid, title, bookmarked FROM chats WHERE id=$i", ("$i", id));
             var msgs = db.Query("SELECT id, role, content, image, sources_json, created_at FROM messages WHERE chat_id=$i ORDER BY id", ("$i", id));
-            return Results.Json(new { uuid, title = chat[0]["title"], archived = chat[0]["archived"], messages = msgs });
+            return Results.Json(new { uuid, title = chat[0]["title"], bookmarked = chat[0]["bookmarked"], messages = msgs });
         });
 
         // キャプチャ画像の配信（ローカル保存された過去チャット添付画像。messages.image は files/captures/{name}.png の相対パス）
@@ -196,7 +231,15 @@ public static class Api
         {
             using var doc = await JsonDocument.ParseAsync(req.Body);
             var id = doc.RootElement.GetProperty("id").GetString()!;
-            try { ctx.Models.Delete(id); return Results.Ok(new { ok = true }); }
+            try
+            {
+                // モデルを読み込んでいるエンジンを先に止めてファイルロックを解放してから削除する
+                // （止められたエンジンは次回利用時に自動再起動されるため、再ダウンロードすれば元に戻る）
+                var files = ctx.Models.FilesFor(id);
+                ctx.Sup.StopEnginesUsing(files);
+                ctx.Models.Delete(id);
+                return Results.Ok(new { ok = true });
+            }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, statusCode: 400); }
         });
 
