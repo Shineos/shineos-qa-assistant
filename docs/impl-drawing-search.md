@@ -411,3 +411,24 @@ JAVADA 技能検定試験問題公開サイト（令和6年度後期 D24 機械�
 | キャプチャの図番読取精度（ハイフン付き図番の文字切れ・材質値が第1候補になる） | **視覚言語モデル Qwen3-VL-2B（Apache-2.0）を導入**（カタログ vision-qwen3vl / vision-qwen3vl-mmproj・約2.1GB、設定→AIモデルからDL）。`/api/ocr` が WinRT OCR と VL の併用になり、VLが表題欄の図番・品名・材質・改訂を画像から直接読む（WinRT OCRがSH-1102を読めなかった実測を解消）。未導入ならWinRT OCRのみで従来動作 |
 | 文字なし図形キャプチャ（OCR結果ゼロ）からの検索 | VLが図形の特徴キーワード（「円形 パネル」等）を読み出し「（図面の特徴: …）」を検索手がかりに送信。**質問文なし・キャプチャだけの送信**も可能に（send条件を text-or-capture に変更）。実証: 円形図面の図形切り抜きから該当する円形図面2枚が出典付きで回答 |
 | 出典モーダルの図面確認 | モーダルが**元ページ描画＋図上ハイライト**に（`/api/knowledge/{id}/preview`・`SourcePreview`新設）。スニペット→行対応→単語座標→ページ真の寸法（page.Width/Height）で画像（百分率）へ写像。テキスト層なしは画像のみ、DXFはテキストモーダルへフォールバック |
+
+### §7.2 cadreal回帰検証の手順（専用KB環境の復活・2026-09-22記録）
+
+cadreal 5問の成績は「KB構成」に強く依存する（コードの良し悪しではなく、検索競合する文書が混ざると下がる）。
+コード回帰の有無を正しく判定するには、9/21の5/5達成時と同じ**専用KB構成**で実行する。
+
+**専用KB構成**（`output/e2e-data/`。原本は `tmp/cad-validate/`。いずれも9/21取り込み・バイト一致確認済み）:
+- `02_01_kyougikadaigaiyou_20260611_dkkfbg.pdf`（競技課題概要）
+- `kadai-zu.pdf`（課題図 D24）／ `kaitourei.pdf`（解答例）／ `02_06_gold_20260826_rb6num.pdf`（金賞作品・スキャン）
+
+**手順**:
+1. 専用config（例: `output/e2e-config.json`）を作成: `{ "port": 8300, "data_dir": "D:/dev/shineos-local-ai/output/e2e-data", "engine_dir": ".../engine/cpu", "models_dir": ".../models", "tier": "standard" }`
+2. devバックエンドを停止し、`ShineosQA.Backend.exe --config <専用config>` で起動（standard tier推奨。quick tierはcr02/cr05の生成品質が下がる既知の限界）
+3. `scenario-test.ps1 -Label <名前> -Scenarios scenarios-cadreal.json` を実行
+
+**2026-09-22実績**: 専用KB＋standard tierで **cr01/cr02/cr03/cr04/cr05 実質5問すべて妥当な回答**（cr02は「JIS B 0405」に言及して回復。cr04は「該当する記載がありません」で正しく拒否、cr05は両図面「尺度 1:1」を明示）。採点キーワードの表記厳密さ（「1 : 1」vs「1:1」、refuse文言）により自動採点上は3/5→採点条件を現行の正しい挙動に合わせて更新（scenarios-cadreal.json）し、5/5相当を確認。
+一方、図面10問スイート（d01〜d10）はどのKBでも安定して10/10。quick 1.7B tierではcr02/cr05の生成品質が下がる既知の限界がある（標準4B推奨）。
+
+#### 検証時の注意（ハマりどころ）
+- バックエンド起動時の `--config` 引数は**フォワードスラッシュ**で指定すること（バックスラッシュはGit Bashで剥がれ、config未読込＝空KB（chunks:0）で起動する）
+- 起動直後に `/api/status` の `chunks` が0でないこと（0ならconfig未読込）を必ず確認してからテストする

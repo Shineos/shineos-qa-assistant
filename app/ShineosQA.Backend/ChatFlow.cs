@@ -428,13 +428,17 @@ public sealed class ChatFlow
                     }
                 }
             }
-            // 回答材料が全く無い場合（Web検索0件＋タイムセンシティブ等）: 空回答の代わりに再試行を案内
+            // 回答材料が全く無い場合（Web検索0件＋タイムセンシティブ等）: 空回答の代わりに再試行を案内。
+            // Web検索OFF（未試行）なのに「検索に失敗」と案内するのは誤解を招くため、文言を分岐する
             if (chosen.Count == 0 && (webResults == null || webResults.Count == 0) && string.IsNullOrEmpty(webContext))
             {
-                var msg = "Web検索に失敗しました（アクセスが集中している可能性があります）。少し待ってからもう一度お試しください。";
+                var msg = webOn
+                    ? "Web検索に失敗しました（アクセスが集中している可能性があります）。少し待ってからもう一度お試しください。"
+                    : "社内ナレッジに該当する記載がありません。質問を具体的にしていただくと、より正確に回答できます。";
+                var guard = webOn ? "web-failed" : "no-material";
                 _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", msg));
                 await Sse(ctx, "delta", new { content = msg });
-                await Sse(ctx, "done", new { cached = false, guard = "web-failed", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, guard = guard, sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                 return;
             }
             foreach (var h in chosen)

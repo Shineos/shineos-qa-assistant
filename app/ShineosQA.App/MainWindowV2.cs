@@ -508,6 +508,12 @@ namespace ShineosQA
             ShellExecute(IntPtr.Zero, "open", "https://shineos.com/", null, null, 5 /* SW_SHOW */);
         }
 
+        void OpenInDefaultBrowser(string url)
+        {
+            // NewWindowRequestedからは実際のリンク先（例: shineos.com/contact/）をそのまま開く
+            ShellExecute(IntPtr.Zero, "open", url, null, null, 5 /* SW_SHOW */);
+        }
+
         bool WaitForHealth(int timeoutSeconds)
         {
             var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
@@ -587,9 +593,14 @@ namespace ShineosQA
             {
                 var wvEnv = await CoreWebView2Environment.CreateAsync(null, wvDataDir);
                 await webView.EnsureCoreWebView2Async(wvEnv);
-                // ヘッダーの「powered by Shineos」リンクは既定のブラウザで開く。
-                // 開けるURLは定数の公式サイトのみ（ページ側からの差し込みは受け付けない）。
-                // ホワイトリスト外の target=_blank は WebView2 既定の挙動に任せる
+                // 一般ユーザー向けデスクトップアプリとして、ブラウザ風の右クリックメニューと
+                // DevTools（F12/検査）は無効化する（誤操作・内部構造の露出を防ぐ）
+                webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                // ヘッダーの「powered by Shineos」・お問い合わせリンクは既定のブラウザで開く。
+                // 開けるのは公式サイト（shineos.com / www.shineos.com）のみで、リンク先URLそのまま
+                // （ページ側からの差し込みは受け付けない）。ホワイトリスト外の target=_blank は
+                // WebView2 既定の挙動に任せる
                 webView.CoreWebView2.NewWindowRequested += (s, e) =>
                 {
                     try
@@ -598,7 +609,7 @@ namespace ShineosQA
                         if (host == "shineos.com" || host == "www.shineos.com")
                         {
                             e.Handled = true;
-                            OpenInDefaultBrowser();
+                            OpenInDefaultBrowser(e.Uri);
                         }
                     }
                     catch (Exception ex) { Log("open external link failed: " + ex.Message); }
