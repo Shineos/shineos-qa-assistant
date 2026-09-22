@@ -186,6 +186,19 @@ function sourceElement(s: SourceInfo): HTMLElement {
   return row;
 }
 
+/** コピー用の出典ブロック（回答本文のあとに付ける）。
+ *  社内文書は「ファイル名＋該当箇所（スニペット）」、Web検索は「タイトル＋URL」。
+ *  スニペットの改行は図面表題欄などの構造を保つためそのまま残す */
+function buildSourcesText(sources: SourceInfo[]): string {
+  const lines = sources.map((s, i) => {
+    const head = `${i + 1}. ${s.file}`;
+    if (s.kind === 'web') return s.url ? `${head}  ${s.url}` : head;
+    const snip = s.snippet.trim();
+    return snip ? `${head}\n${snip}` : head;
+  });
+  return '──── 出典（該当箇所） ────\n' + lines.join('\n');
+}
+
 export class ChatView {
   private chatUuid = '';
   private chatTitle = '';                    // chat-mainヘッダーに表示中のチャット名
@@ -520,12 +533,14 @@ export class ChatView {
     if (sources.length > 0) {
       const src = document.createElement('details');
       src.className = 'sources';
-      src.innerHTML = `<summary>${SVG_CLIP} 出典 (${sources.length})</summary>`;
+      // どの文書の該当箇所か一目で分かるように、サマリーに出典ファイル名を併記
+      const names = sources.map(s => s.file).join('、');
+      src.innerHTML = `<summary>${SVG_CLIP} 出典 (${sources.length})${names ? '：' + esc(names) : ''}</summary>`;
       for (const s of sources) src.appendChild(sourceElement(s));
       card.appendChild(src);
     }
     wrap.appendChild(card);
-    this.appendTimeRow(wrap, time, content);
+    this.appendTimeRow(wrap, time, content, sources);
     m.appendChild(wrap);
     m.scrollTop = m.scrollHeight;
     return card;
@@ -597,8 +612,10 @@ export class ChatView {
   }
 
   /** 時刻行（カードの外・下）。時刻の横にコピーアイコン: rawTextはユーザーは入力テキスト、
-   *  AI回答はMarkdownソース（DB保存内容と同一）をそのままクリップボードへ */
-  private appendTimeRow(wrap: HTMLElement, time: Date | undefined, rawText: string): void {
+   *  AI回答はMarkdownソース（DB保存内容と同一）。sourcesがある回答は出典（ファイル名＋該当箇所）も
+   *  コピー本文に含める（画面の「出典」Detailsの中身と同じ情報をテキストで持たせる） */
+  private appendTimeRow(wrap: HTMLElement, time: Date | undefined, rawText: string, sources?: SourceInfo[]): void {
+    const copyBody = rawText + (sources && sources.length > 0 ? '\n\n' + buildSourcesText(sources) : '');
     const row = document.createElement('div');
     row.className = 'msg-time';
     if (time) {
@@ -610,18 +627,18 @@ export class ChatView {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'copy-btn';
-    btn.title = 'コピー';
+    btn.title = 'コピー（出典の該当箇所を含む）';
     btn.setAttribute('aria-label', 'メッセージをコピー');
     btn.innerHTML = SVG_COPY;
     btn.addEventListener('click', async () => {
-      if (!(await copyText(rawText))) return;
+      if (!(await copyText(copyBody))) return;
       btn.innerHTML = SVG_CHECK;
       btn.classList.add('copied');
       btn.title = 'コピーしました';
       window.setTimeout(() => {
         btn.innerHTML = SVG_COPY;
         btn.classList.remove('copied');
-        btn.title = 'コピー';
+        btn.title = 'コピー（出典の該当箇所を含む）';
       }, 1500);
     });
     row.appendChild(btn);
@@ -906,15 +923,18 @@ export class ChatView {
           },
           done: (d) => {
             if (liveCard && liveBody) {
-              if (d.sources && d.sources.length > 0) {
+              const sources = d.sources ?? [];
+              if (sources.length > 0) {
                 const src = document.createElement('details');
                 src.className = 'sources';
-                src.innerHTML = `<summary>${SVG_CLIP} 出典 (${d.sources.length})${d.cached ? '・キャッシュ' : ''}</summary>`;
-                for (const s of d.sources) src.appendChild(sourceElement(s));
+                // サマリーに出典ファイル名を併記（どの文書の該当箇所か一目で分かるように）
+                const names = sources.map(s => s.file).join('、');
+                src.innerHTML = `<summary>${SVG_CLIP} 出典 (${sources.length})${names ? '：' + esc(names) : ''}${d.cached ? '・キャッシュ' : ''}</summary>`;
+                for (const s of sources) src.appendChild(sourceElement(s));
                 liveCard.appendChild(src);
               }
-              // 時刻はカードの外（下）に追加。コピーアイコンは acc（patch適用後の最終Markdown）をコピー対象にする
-              this.appendTimeRow(liveCard.parentElement!, new Date(), acc);
+              // 時刻はカードの外（下）に追加。コピーは acc＋出典（ファイル名＋該当箇所）
+              this.appendTimeRow(liveCard.parentElement!, new Date(), acc, sources);
             } else {
               thinking.remove();
               this.appendMessage('assistant', acc || '', d.sources ?? [], new Date());
