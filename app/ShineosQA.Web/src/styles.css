@@ -25,6 +25,9 @@ body { font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-se
 a.tab { display: inline-flex; align-items: center; text-decoration: none; }
 a.tab svg { width: 17px; height: 17px; }
 a.tab:hover { color: var(--text); }
+/* お問い合わせアイコンはヘッダー最右端へ */
+.tab-contact { margin-left: auto; padding: 7px 10px; }
+.tab-contact:hover { background: var(--hover); }
 .tab:hover { background: var(--hover); }
 .tab.active { background: var(--user-bg); color: var(--text); font-weight: 600; }
 
