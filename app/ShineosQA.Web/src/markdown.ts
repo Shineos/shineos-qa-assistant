@@ -8,11 +8,14 @@ export function renderMarkdown(src: string): string {
   let inList = false;
   for (const raw of lines) {
     const line = raw.trimEnd();
-    const li = line.match(/^\s*[-•]\s+(.*)$/);
+    // ネストした箇条書き（モデルが文書ごとに子項目をインデントする）を
+    // 階層として見せる。インデント2スペース（orタブ）=1階層、最大4階層まで
+    const li = line.match(/^(\s*)[-•]\s+(.*)$/);
     const h = line.match(/^(#{1,4})\s+(.*)$/);
     if (li) {
       if (!inList) { out.push('<ul>'); inList = true; }
-      out.push(`<li>${inline(li[1])}</li>`);
+      const depth = Math.min(4, Math.floor(li[1].replace(/\t/g, '  ').length / 2));
+      out.push(`<li${depth > 0 ? ` style="margin-left:${depth * 18}px"` : ''}>${inline(li[2])}</li>`);
       continue;
     }
     if (inList) { out.push('</ul>'); inList = false; }
