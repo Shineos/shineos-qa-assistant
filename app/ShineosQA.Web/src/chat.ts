@@ -187,14 +187,21 @@ function sourceElement(s: SourceInfo): HTMLElement {
 }
 
 /** コピー用の出典ブロック（回答本文のあとに付ける）。
- *  社内文書は「ファイル名＋該当箇所（スニペット）」、Web検索は「タイトル＋URL」。
- *  スニペットの改行は図面表題欄などの構造を保つためそのまま残す */
+ *  画面の出典行（sourceElement）と同じ見出し・該当箇所をマークダウン式で再現する:
+ *  図面は【図】図番（品名・改訂）/【図面】ファイル名、通常文書はファイル名、Webはタイトル＋URL。
+ *  スニペットは画面同様に1行化（空白正規化）して切り詰める */
 function buildSourcesText(sources: SourceInfo[]): string {
   const lines = sources.map((s, i) => {
-    const head = `${i + 1}. ${s.file}`;
-    if (s.kind === 'web') return s.url ? `${head}  ${s.url}` : head;
-    const snip = s.snippet.trim();
-    return snip ? `${head}\n${snip}` : head;
+    const drawing = s.is_drawing ?? s.isDrawing;
+    const rev = s.revision ? `・改訂${s.revision}` : '';
+    let head: string;
+    if (drawing && s.zuban) head = `【図】${s.zuban}${s.hinmei ? `（${s.hinmei}${rev}）` : ''}`;
+    else if (drawing) head = `【図面】${s.file}`;
+    else head = s.file;
+    const snip = s.snippet.replace(/\s+/g, ' ').trim();
+    const body = snip ? (snip.length > 110 ? snip.slice(0, 110) + '…' : snip) : '';
+    const url = s.kind === 'web' && s.url ? `  ${s.url}` : '';
+    return `${i + 1}. **${head}**${url}${body ? `\n   ${body}` : ''}`;
   });
   return '──── 出典（該当箇所） ────\n' + lines.join('\n');
 }
