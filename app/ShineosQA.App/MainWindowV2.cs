@@ -614,6 +614,24 @@ namespace ShineosQA
                     }
                     catch (Exception ex) { Log("open external link failed: " + ex.Message); }
                 };
+                // メイン画面がローカルアプリ（チャット画面）以外へ遷移して白画面になるのを防ぐ。
+                // 外部URLの遷移はキャンセルして既定ブラウザで開くため、お問い合わせアイコンを
+                // クリックしてもチャット画面はそのまま維持される
+                webView.CoreWebView2.NavigationStarting += (s, e) =>
+                {
+                    try
+                    {
+                        var uri = new Uri(e.Uri);
+                        bool local = uri.Host == "127.0.0.1" || uri.Host == "localhost";
+                        if (!local && (uri.Scheme == "http" || uri.Scheme == "https"))
+                        {
+                            e.Cancel = true;
+                            OpenInDefaultBrowser(e.Uri);
+                            Log("external navigation redirected to default browser: " + e.Uri);
+                        }
+                    }
+                    catch (Exception ex) { Log("navigation guard failed: " + ex.Message); }
+                };
                 // ナレッジ登録案内の「進む」をWebViewロード前に押した場合、ロード完了後にタブ遷移する
                 webView.CoreWebView2.NavigationCompleted += (s, e) =>
                 {
