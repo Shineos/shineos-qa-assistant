@@ -82,6 +82,7 @@ export async function streamChat(
     patch?: (content: string) => void;
     delta?: (content: string) => void;
     done?: (d: { cached: boolean; guard?: string | null; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
+    clarify?: (d: { zuban: string; message: string; options: { file_id: number; file: string; zuban: string; revision: string | null; hinmei: string | null }[] }) => void;
     error?: (d: { code: string; message: string }) => void;
   },
   signal?: AbortSignal,
@@ -121,6 +122,7 @@ export async function streamChat(
           case 'patch': handlers.patch?.(parsed.content ?? ''); break;
           case 'delta': handlers.delta?.(parsed.content ?? ''); break;
           case 'done': handlers.done?.(parsed); break;
+          case 'clarify': handlers.clarify?.(parsed); break;
           case 'error': handlers.error?.(parsed); break;
         }
       } catch { /* 不完全フレームは無視 */ }

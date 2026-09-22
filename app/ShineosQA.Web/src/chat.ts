@@ -296,7 +296,7 @@ export class ChatView {
     searchBox.id = 'chat-search';
     searchBox.className = 'chat-search';
     searchBox.type = 'text';
-    searchBox.placeholder = '🔍 履歴を検索';
+    searchBox.placeholder = '履歴を検索';
     searchBox.value = this.chatSearchText;
     searchBox.addEventListener('input', () => {
       this.chatSearchText = (searchBox as HTMLInputElement).value;
@@ -801,6 +801,37 @@ export class ChatView {
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setStatus(`⏱ ${secs}s${d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
             void this.refreshList(this.chatUuid);
+          },
+          clarify: (d) => {
+            // 同一図番・改訂違いの選択肢を表示（ユーザーがクリックで改訂を指定）
+            thinking.remove();
+            const wrap = document.createElement('div');
+            wrap.className = 'msg assistant';
+            const card = document.createElement('div');
+            card.className = 'msg-card clarify-card';
+            const body = document.createElement('div');
+            body.className = 'msg-body';
+            body.innerHTML = `<p>同一図番（${esc(d.zuban)}）の図面が複数あります。選択してください：</p>`;
+            card.appendChild(body);
+            const btnRow = document.createElement('div');
+            btnRow.className = 'clarify-options';
+            for (const opt of d.options) {
+              const btn = document.createElement('button');
+              btn.className = 'clarify-btn';
+              const revLabel = opt.revision ? `改訂${opt.revision}` : '改訂なし';
+              btn.innerHTML = `${SVG_DOC} ${esc(opt.file)}${opt.revision ? `（${esc(opt.revision)}）` : ''}`;
+              btn.addEventListener('click', () => {
+                wrap.remove();
+                const prefixed = `（図番: ${d.zuban}・${revLabel}）${d.message}`;
+                (document.getElementById('chat-input') as HTMLTextAreaElement).value = prefixed;
+                this.send();
+              });
+              btnRow.appendChild(btn);
+            }
+            card.appendChild(btnRow);
+            wrap.appendChild(card);
+            document.getElementById('messages')!.appendChild(wrap);
+            document.getElementById('messages')!.scrollTop = document.getElementById('messages')!.scrollHeight;
           },
           error: (e) => {
             thinking.remove();

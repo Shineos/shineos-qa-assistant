@@ -255,3 +255,13 @@ button.small { padding: 5px 10px; font-size: 12px; }
 
 /* 図面プレビューのページ区切り */
 .preview-sep { border: none; border-top: 1px dashed var(--border); margin: 12px 0; }
+
+/* 同一図番・改訂違いの選択肢ボタン */
+.clarify-card .clarify-options { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
+.clarify-btn {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border, #d7dee6); background: var(--panel, #fff);
+  color: var(--text, #1d2733); border-radius: 8px; padding: 8px 12px;
+  font-size: 13px; cursor: pointer; text-align: left; width: 100%;
+}
+.clarify-btn:hover { background: var(--hover, #f1f5f9); border-color: var(--muted, #8a92a3); }
