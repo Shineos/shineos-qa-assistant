@@ -252,12 +252,17 @@ export class ChatView {
   async refresh() {
     const captureBtn = document.getElementById('capture-btn') as HTMLButtonElement;
     const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement;
     try {
       const s = await api.getSettings();
       this.webSearch = s.web_search;
       webBtn.classList.toggle('active', this.webSearch);
       this.packDrawing = !!s.extensions?.drawing;
       captureBtn.hidden = !this.packDrawing;
+      // 拡張パックON時は入力欄にキャプチャ機能の存在を案内する（ボタンだけでは気づきにくい）
+      input.placeholder = this.packDrawing
+        ? '質問を入力してください（Enterで送信 / 📸図面キャプチャの貼り付けも可能）'
+        : '質問を入力してください（Enterで送信 / Shift+Enterで改行）';
     } catch { /* 設定取得失敗時は現状維持 */ }
   }
   /** 現在のチャットのURLパス（タブ復帰用） */

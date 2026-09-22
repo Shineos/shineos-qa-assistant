@@ -72,6 +72,8 @@ jobs:
           dotnet publish app/ShineosQA.Backend -c Release -r win-x64 --self-contained true -o output/backend-pub
           if ($LASTEXITCODE -ne 0) { throw "backend publish failed" }
           if (-not (Test-Path 'output/backend-pub/ShineosQA.Backend.dll')) { throw "backend dll missing" }
+          # /api/status のバージョン表示用（タグから導出されたバージョン）
+          Set-Content -Path output/backend-pub/version.txt -Value '${{ steps.ver.outputs.version }}'
 
       # ---- 3) WebView2 ラッパー（.NET Framework csc + NuGet抽出DLL） ----
       - name: Build WebView2 wrapper

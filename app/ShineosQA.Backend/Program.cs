@@ -37,11 +37,17 @@ public static class Api
         var cfg = ctx.Cfg; var db = ctx.Db; var sup = ctx.Sup; var index = ctx.Index; var ingest = ctx.Ingest; var flow = ctx.Flow;
         var gw = ctx.Gateway; var log = ctx.Log;
 
+        // バージョン表示: CI（release.yml）がタグから version.txt を_publishへ書き出す。
+        // ローカル/手動ビルドではフォールバック値
+        var appVersion = File.Exists(Path.Combine(AppContext.BaseDirectory, "version.txt"))
+            ? File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "version.txt")).Trim()
+            : "2.1.10";
+
         app.MapGet("/health", () => Results.Json(new { status = true }));
 
         app.MapGet("/api/status", () => Results.Json(new
         {
-            version = "2.1.8",
+            version = appVersion,
             tier = cfg.EffectiveTier,
             chat_model = cfg.ChatModelFile,
             chunks = index.Count,

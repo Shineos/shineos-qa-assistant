@@ -483,6 +483,10 @@ public sealed class ChatFlow
             // 日付感応質問にはシステム日時（時刻込み）を明示。参照情報が無い場合は【参照情報】欄を省略
             string sysInfo = timeSensitive ? "\n\n" + Rag.SystemInfoLine() : "";
             string ctxPart = context.TrimEnd().Length > 0 ? "\n\n【参照情報】\n" + context.TrimEnd() : "";
+            // 複数の図面が出典の場合: 図面ごとに値を分けて答えさせる（同一図番の改訂違いや
+            // 複数図面での検索競合により、1つの図面の値だけを断定する誤回答を防ぐ）
+            if (chosen.Count(h => drawingIds.Contains(h.Rec.FileId)) >= 2)
+                ctxPart += "\n\n※複数の図面が出典です。図面ごと（図番・改訂つき）に値を分けて回答し、1つの図面の値だけを断定しないでください。";
             messages.Add(("user", message + sysInfo + ctxPart));
             // 7) ストリーム生成。Web参照ありの回答は日付・項目の列挙が長くなるため上限を緩める
             //    （14日分の予報列挙で400トークンでは途切れる実測。prompt込みでもctx=2048内に収まる）
