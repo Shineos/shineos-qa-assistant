@@ -648,10 +648,8 @@ public sealed class Program
         var savedTier = db.GetSetting("tier", "");
         if (savedTier is "auto" or "standard" or "quick") cfg.Tier = savedTier;
         else db.SetSetting("tier", cfg.Tier); // 初回はconfig.jsonの階級を永続化
-        if (bool.TryParse(db.GetSetting("bg_friendly", ""), out var savedBg)) cfg.BgFriendly = savedBg;
-        // web_searchもDB設定を起動時に反映する（トグルON→再起動で黙ってOFFに戻るのを防ぐ。
-        // ChatFlowはリクエスト未指定時にcfg.WebSearchへフォールバックするため、ここが一致している必要がある）
-        if (bool.TryParse(db.GetSetting("web_search", ""), out var savedWeb)) cfg.WebSearch = savedWeb;
+        // 永続設定（web_search/tier/bg_friendly）をcfgへ一括反映。新キーはSettingsSyncへの追加を忘れないこと
+        SettingsSync.ApplyPersisted(db, cfg);
 
         var gw = new LlmGateway();
         var sup = new Supervisor(cfg, gw, log);
