@@ -112,6 +112,18 @@ public sealed class ChatFlow
         }
     }
 
+    /// <summary>図面メタデータの取得（clarify検出用）。レコードが無い（図面でない/拡張OFF）ならnull</summary>
+    private (string? Zuban, string? Revision, string? Hinmei)? DrawingMetaOfFile(long fileId)
+    {
+        try
+        {
+            var rows = _db.Query("SELECT zuban_raw, hinmei, revision FROM drawing_meta WHERE file_id=$i", ("$i", fileId));
+            if (rows.Count == 0) return null;
+            return (rows[0]["zuban_raw"]?.ToString(), rows[0]["revision"]?.ToString(), rows[0]["hinmei"]?.ToString());
+        }
+        catch { return null; }
+    }
+
     /// <summary>指示語（前方照応）を含むか: 「それ/この/その/前の/さっき/上記/さよう」等</summary>
     private static bool RegexHasAnaphora(string s) =>
         s.Contains("それ") || s.Contains("この") || s.Contains("その") || s.Contains("前の") ||
@@ -429,6 +441,35 @@ public sealed class ChatFlow
                     sources.Add(EnrichDrawing(new SourceInfo { File = h.Rec.FileName, Snippet = await SnippetForSourceAsync(MergedChunkText(h.Rec), qTokens, message, ctx.RequestAborted), Text = MergedChunkText(h.Rec) }, h.Rec.FileId));
             // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）
             await Sse(ctx, "refs", new { files = chosen.Select(h => h.Rec.FileName).ToArray(), web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList() });
+
+            // 同一図番・改訂違いの図面が複数ヒットした場合: 単断定を避け、ユーザーに改訂を選んでもらう
+            // （UI選択式フロー。選択後は（図番: X・改訂Y）付きで再質問され、該当図面に絞った回答になる）
+            var drawChosen = chosen.Where(h => drawingIds.Contains(h.Rec.FileId))
+                .Select(h => (hit: h, meta: DrawingMetaOfFile(h.Rec.FileId)))
+                .Where(x => x.meta != null && x.meta.Value.Zuban != null).ToList();
+            if (drawChosen.Count >= 2)
+            {
+                var zubanGroups = drawChosen
+                    .GroupBy(x => x.meta!.Value.Zuban)
+                    .Where(g => g.Select(x => x.hit.Rec.FileId).Distinct().Count() >= 2)
+                    .ToList();
+                if (zubanGroups.Count > 0)
+                {
+                    _log.Info($"clarify: same zuban across multiple files ({zubanGroups[0].Key})");
+                    var options = zubanGroups[0].DistinctBy(x => x.hit.Rec.FileId).Select(x => new
+                    {
+                        file_id = x.hit.Rec.FileId,
+                        file = x.hit.Rec.FileName,
+                        revision = x.meta!.Value.Revision,
+                        hinmei = x.meta.Value.Hinmei,
+                    }).ToList();
+                    var zub = zubanGroups[0].Key;
+                    await Sse(ctx, "clarify", new { zuban = zub, message, options });
+                    await Sse(ctx, "done", new { cached = false, guard = "clarify", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                    _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", $"CLARIFY:{zub}"));
+                    return;
+                }
+            }
 
             // 対象ガード（生成前）: 「〜できますか/方法」等の手続き質問で、質問の対象語（助詞直前の漢語等）が
             // 取得文書のどれにも現れない場合、QA文書の類似手続きを別対象へ転用した回答（t74型）になる前に

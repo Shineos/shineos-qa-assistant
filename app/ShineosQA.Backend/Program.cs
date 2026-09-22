@@ -98,10 +98,23 @@ public static class Api
             return Results.Ok(new { ok = true });
         });
 
-        // ---- チャット履歴（uuidベース・URLルーティング /c/{uuid} 対応） ----
-        app.MapGet("/api/chats", (HttpRequest req) => Results.Json(db.Query(
-            "SELECT uuid, id, title, updated_at, archived FROM chats WHERE archived = $a ORDER BY updated_at DESC, id DESC LIMIT 200",
-            ("$a", req.Query["archived"].ToString() == "1" ? 1 : 0))));
+        // ---- チャット履歴（uuidベース・URLルーティング /c/{uuid} 対応）。q= でタイトル/本文の全文検索 ----
+        app.MapGet("/api/chats", (HttpRequest req) =>
+        {
+            var q = req.Query["q"].ToString().Trim();
+            var archived = req.Query["archived"].ToString() == "1" ? 1 : 0;
+            if (q.Length > 0)
+            {
+                var like = "%" + q.Replace("%", "").Replace("_", "") + "%";
+                return Results.Json(db.Query(
+                    "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived FROM chats c JOIN messages m ON m.chat_id = c.id " +
+                    "WHERE c.archived = $a AND (c.title LIKE $like OR m.content LIKE $like) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50",
+                    ("$like", like), ("$a", archived)));
+            }
+            return Results.Json(db.Query(
+                "SELECT uuid, id, title, updated_at, archived FROM chats WHERE archived = $a ORDER BY updated_at DESC, id DESC LIMIT 200",
+                ("$a", archived)));
+        });
 
         app.MapPost("/api/chats", () => Results.Json(new { uuid = db.NewChatUuid() }));
 
@@ -245,11 +258,15 @@ public static class Api
                 if (result is null) return Results.NotFound();
                 return Results.Json(new
                 {
-                    image = result.ImageDataUrl,
-                    image_width = result.ImageWidth,
-                    image_height = result.ImageHeight,
-                    page = result.Page,
-                    rects = result.Rects.Select(r => new { left = r.Left, top = r.Top, width = r.Width, height = r.Height }),
+                    hit_page = result.HitPage,
+                    pages = result.Pages.Select(p => new
+                    {
+                        page = p.Page,
+                        image = p.ImageDataUrl,
+                        width = p.Width,
+                        height = p.Height,
+                        rects = p.Rects.Select(r => new { left = r.Left, top = r.Top, width = r.Width, height = r.Height }),
+                    }),
                 });
             }
             catch (Exception ex)
