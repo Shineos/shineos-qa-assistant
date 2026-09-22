@@ -22,7 +22,13 @@ export const api = {
   getSettings: () => fetch('/api/settings').then(r => json<Settings>(r)),
   saveSettings: (patch: Record<string, unknown>) =>
     fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }),
-  chats: (archived?: boolean) => fetch(`/api/chats${archived ? '?archived=1' : ''}`).then(r => json<ChatSummary[]>(r)),
+  chats: (archived?: boolean, q?: string) => {
+    const ps = new URLSearchParams();
+    if (archived) ps.set('archived', '1');
+    if (q) ps.set('q', q);
+    const qs = ps.toString();
+    return fetch(`/api/chats${qs ? '?' + qs : ''}`).then(r => json<ChatSummary[]>(r));
+  },
   newChat: () => fetch('/api/chats', { method: 'POST' }).then(r => json<{ uuid: string }>(r)),
   chat: (uuid: string) => fetch(`/api/chats/${uuid}`).then(r => json<ChatDetail>(r)),
   archiveChat: (uuid: string, archived: boolean) =>

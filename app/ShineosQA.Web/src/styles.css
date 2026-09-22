@@ -252,3 +252,6 @@ button.small { padding: 5px 10px; font-size: 12px; }
   white-space: nowrap;
 }
 .open-original:hover { background: var(--hover); }
+
+/* 図面プレビューのページ区切り */
+.preview-sep { border: none; border-top: 1px dashed var(--border); margin: 12px 0; }

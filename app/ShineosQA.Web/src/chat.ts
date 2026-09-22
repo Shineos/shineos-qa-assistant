@@ -132,14 +132,18 @@ async function openDrawingPreview(s: SourceInfo) {
   try {
     const resp = await fetch(`/api/knowledge/${fid}/preview?snippet=${encodeURIComponent(s.snippet)}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const p = await resp.json() as { image: string; page?: number; rects?: { left: number; top: number; width: number; height: number }[] };
+    const p = await resp.json() as {
+      pages: { page: number; image: string; width: number; height: number; rects: { left: number; top: number; width: number; height: number }[] }[];
+    };
     const body = ov.querySelector('.preview-body')!;
-    const rects = (p.rects ?? [])
-      .map(r => `<div class="preview-hl" style="left:${r.left}%;top:${r.top}%;width:${r.width}%;height:${r.height}%"></div>`)
-      .join('');
-    body.innerHTML = `<div class="preview-wrap"><img class="preview-img" src="${p.image}" alt="図面プレビュー">` +
-      `<div class="preview-layer">${rects}</div></div>` +
-      `<div class="preview-page">図面${p.page ?? 1}ページ目 ／ クリック箇所をハイライト表示（元ファイル: ${esc(s.file)}）</div>`;
+    body.innerHTML = p.pages.map(pg => {
+      const hl = (pg.rects ?? [])
+        .map(r => `<div class="preview-hl" style="left:${r.left}%;top:${r.top}%;width:${r.width}%;height:${r.height}%"></div>`)
+        .join('');
+      return `<div class="preview-wrap"><img class="preview-img" src="${pg.image}" alt="図面${pg.page}ページ目">` +
+        `<div class="preview-layer">${hl}</div></div>` +
+        `<div class="preview-page">${pg.page}ページ目${pg.rects.length ? '（ハイライト箇所が回答の根拠）' : ''}</div>`;
+    }).join('<hr class="preview-sep">');
   } catch {
     openSourceModal(s); // DXF等・描画不可: テキストモーダルへ
   }
@@ -189,6 +193,7 @@ export class ChatView {
   private pendingZuban = '';
   private pendingShape = '';                 // 文字なし図形キャプチャからAI読取した形状キーワード
   private showArchived = false;              // サイドバー一覧のアーカイブビュー切替
+  private chatSearchText = '';               // チャット履歴検索キーワード
 
   constructor() {
     const form = document.getElementById('chat-form') as HTMLFormElement;
@@ -283,9 +288,21 @@ export class ChatView {
   }
 
   private async refreshList(selectUuid = '') {
-    const chats: ChatSummary[] = await api.chats(this.showArchived);
+    const chats: ChatSummary[] = await api.chats(this.showArchived, this.chatSearchText);
     const list = document.getElementById('chat-list')!;
     list.innerHTML = '';
+    // 履歴検索ボックス（サイドバー最上部）
+    const searchBox = document.createElement('input');
+    searchBox.id = 'chat-search';
+    searchBox.className = 'chat-search';
+    searchBox.type = 'text';
+    searchBox.placeholder = '🔍 履歴を検索';
+    searchBox.value = this.chatSearchText;
+    searchBox.addEventListener('input', () => {
+      this.chatSearchText = (searchBox as HTMLInputElement).value;
+      void this.refreshList(selectUuid);
+    });
+    list.appendChild(searchBox);
     // アーカイブ切替ヘッダー（通常一覧の最上部にのみ出す）
     if (!this.showArchived) {
       const archivedToggle = document.createElement('button');
