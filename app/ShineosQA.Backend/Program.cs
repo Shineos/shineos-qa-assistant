@@ -41,7 +41,7 @@ public static class Api
         // ローカル/手動ビルドではフォールバック値
         var appVersion = File.Exists(Path.Combine(AppContext.BaseDirectory, "version.txt"))
             ? File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "version.txt")).Trim()
-            : "2.1.12";
+            : "2.1.13";
 
         app.MapGet("/health", () => Results.Json(new { status = true }));
 
