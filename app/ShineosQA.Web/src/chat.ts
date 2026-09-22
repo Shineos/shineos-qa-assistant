@@ -209,6 +209,16 @@ export class ChatView {
       input.style.height = Math.min(input.scrollHeight, 160) + 'px';
     });
     document.getElementById('new-chat')!.addEventListener('click', () => this.newChat());
+    // チャット履歴検索: 入力するたびにリストを絞り込む
+    const chatSearch = document.getElementById('chat-search') as HTMLInputElement;
+    let searchTimer: ReturnType<typeof setTimeout>;
+    chatSearch.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        this.chatSearchText = chatSearch.value;
+        void this.refreshList();
+      }, 300);
+    });
     webBtn.addEventListener('click', () => {
       this.webSearch = !this.webSearch;
       webBtn.classList.toggle('active', this.webSearch);
@@ -291,32 +301,6 @@ export class ChatView {
     const chats: ChatSummary[] = await api.chats(this.showArchived, this.chatSearchText);
     const list = document.getElementById('chat-list')!;
     list.innerHTML = '';
-    // 履歴検索ボックス（サイドバー最上部）
-    const searchBox = document.createElement('input');
-    searchBox.id = 'chat-search';
-    searchBox.className = 'chat-search';
-    searchBox.type = 'text';
-    searchBox.placeholder = '履歴を検索';
-    searchBox.value = this.chatSearchText;
-    searchBox.addEventListener('input', () => {
-      this.chatSearchText = (searchBox as HTMLInputElement).value;
-      void this.refreshList(selectUuid);
-    });
-    list.appendChild(searchBox);
-    // アーカイブ切替ヘッダー（通常一覧の最上部にのみ出す）
-    if (!this.showArchived) {
-      const archivedToggle = document.createElement('button');
-      archivedToggle.className = 'archive-toggle';
-      archivedToggle.innerHTML = `${SVG_ARCHIVE} アーカイブ済みを表示`;
-      archivedToggle.addEventListener('click', () => { this.showArchived = true; void this.refreshList(selectUuid); });
-      list.appendChild(archivedToggle);
-    } else {
-      const backToggle = document.createElement('button');
-      backToggle.className = 'archive-toggle';
-      backToggle.innerHTML = `${SVG_ARCHIVE_RESTORE} 通常のチャットに戻る`;
-      backToggle.addEventListener('click', () => { this.showArchived = false; void this.refreshList(selectUuid); });
-      list.appendChild(backToggle);
-    }
     for (const c of chats) {
       const el = document.createElement('div');
       el.className = 'chat-item' + (c.uuid === (selectUuid || this.chatUuid) ? ' active' : '');
