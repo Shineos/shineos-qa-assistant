@@ -662,6 +662,21 @@ public sealed class Program
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>(), ContentRootPath = AppContext.BaseDirectory, WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot") });
         builder.WebHost.ConfigureKestrel(o => o.Listen(System.Net.IPAddress.Loopback, cfg.Port));
         var app = builder.Build();
+        // リクエストJSONの文字コード不正（クライアントがCP932等で日本語を送信）を、
+        // 説明のない500ではなく原因の分かる400にする。SSE応答の書き出し前のみ到達する
+        app.Use(async (http, next) =>
+        {
+            try { await next(); }
+            catch (Exception ex) when (JsonBodyGuard.IsEncodingError(ex))
+            {
+                if (!http.Response.HasStarted)
+                {
+                    http.Response.StatusCode = 400;
+                    http.Response.ContentType = "application/json; charset=utf-8";
+                    await http.Response.WriteAsync("{\"ok\":false,\"error\":\"SHINE_E_BAD_REQUEST\",\"message\":\"リクエストJSONの文字コードが不正です（UTF-8で送信してください）\"}");
+                }
+            }
+        });
         app.UseDefaultFiles();
         app.UseStaticFiles();
         Api.MapRoutes(app, ctx);
