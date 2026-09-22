@@ -69,7 +69,13 @@ public static class Api
             using var doc = await JsonDocument.ParseAsync(req.Body);
             foreach (var p in doc.RootElement.EnumerateObject())
             {
-                if (p.Name == "web_search") db.SetSetting("web_search", p.Value.GetBoolean().ToString());
+                if (p.Name == "web_search")
+                {
+                    db.SetSetting("web_search", p.Value.GetBoolean().ToString());
+                    // ChatFlowはリクエストにweb_searchが無い場合cfg.WebSearchへフォールバックするため、
+                    // メモリ上の値も即時更新する（トグルOFFが次の質問から効く）
+                    cfg.WebSearch = p.Value.GetBoolean();
+                }
                 if (p.Name == "bg_friendly")
                 {
                     var v = p.Value.GetBoolean();
@@ -643,6 +649,9 @@ public sealed class Program
         if (savedTier is "auto" or "standard" or "quick") cfg.Tier = savedTier;
         else db.SetSetting("tier", cfg.Tier); // 初回はconfig.jsonの階級を永続化
         if (bool.TryParse(db.GetSetting("bg_friendly", ""), out var savedBg)) cfg.BgFriendly = savedBg;
+        // web_searchもDB設定を起動時に反映する（トグルON→再起動で黙ってOFFに戻るのを防ぐ。
+        // ChatFlowはリクエスト未指定時にcfg.WebSearchへフォールバックするため、ここが一致している必要がある）
+        if (bool.TryParse(db.GetSetting("web_search", ""), out var savedWeb)) cfg.WebSearch = savedWeb;
 
         var gw = new LlmGateway();
         var sup = new Supervisor(cfg, gw, log);
