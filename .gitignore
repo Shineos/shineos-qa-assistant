@@ -35,3 +35,11 @@ output/
 app/ShineosQA.Backend.Tests/bin/
 app/ShineosQA.Backend.Tests/obj/
 spikes/phase0/ui-smoke/out/
+
+# シナリオテスト出力・スクラッチファイル
+spikes/phase0/latency-cmp/answers/
+app/chat-out.txt
+app/q-web.json
+q-web.json
+app/ShineosQA.Web/q-lite.json
+app/ShineosQA.Web/q-md.json
