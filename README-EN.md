@@ -33,8 +33,8 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 | Knowledge registration | Drag & drop files in the "Knowledge" tab (PDF / Word / Excel / CSV / Markdown / text), or attach them right from the composer |
 | Hybrid search | BM25 (keyword) + vector search (semantic) so model numbers and regulation IDs are found accurately |
 | Reranking | Candidates are re-scored with bge-reranker-v2-m3; high-confidence hits skip reranking for speed, and adjacent chunks are joined so context is never cut mid-sentence |
-| Three answer tiers | ⚡Quick (1.7B) / 🎯Standard (4B) / 🏆Quality (30B) — switch instantly from the composer; undownloaded models can be fetched from the same menu |
-| Hallucination guardrails | If the knowledge base has no answer, it says so — it never invents document names or numbers |
+| Three answer tiers | ⚡Quick (1.7B) / 🎯Standard (4B) / 🏆Quality (30B) — switch instantly from the composer; undownloaded models can be fetched from the same menu, and **unneeded models can be deleted from Settings → AI models** (required models and the active tier are protected; re-download restores them) |
+| Hallucination guardrails | If the knowledge base has no answer, it says so — it never invents document names or numbers. **Post-generation validation**: numbers in an answer that do not appear in the cited sources are detected automatically and the answer is regenerated from the sources only |
 | Fast responses | Preload + warm-up at startup, stable prompt prefix (prefix caching), and an answer cache for repeated questions |
 | Stop on close | Closing the app stops the AI engine, backend and network ports completely and releases all memory (nothing stays resident) |
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
@@ -43,7 +43,7 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 | AI reading of drawing captures (`Win+Shift+S` → paste) | The vision-language model (Qwen3-VL, processed on-device) reads part number, name, material and revision straight from the capture image and pre-fills the confirmation chip (more accurate than WinRT OCR; one-tap correction). Download from Settings → AI models (~2.1 GB, optional) |
 | Shape-only captures also work | Even a crop of just the drawing geometry (no text at all) works: the AI reads shape cues as search keywords, and sending with no typed text is supported |
 | Source preview with on-drawing highlight | Clicking a drawing source shows the original page with the cited region highlighted; "Open original file" opens the real PDF/DXF |
-| Chat management (stored captures & archive) | Captures are stored locally and shown again when you reopen old chats. Unused chats can be 📦 archived instead of deleted (restorable anytime) |
+| Chat management (rename, bookmark, stored captures & archive) | Rename chats with the pencil icon in the chat header and ⭐ bookmark them. Captures are stored locally and shown again when you reopen old chats. The sidebar can filter ⭐ bookmarked only / 📦 archived only, and unused chats can be 📦 archived instead of deleted (restorable anytime) |
 
 ### Key changes from the previous release (Ollama + Open WebUI)
 
