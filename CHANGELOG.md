@@ -2,6 +2,13 @@
 
 本プロジェクトのバージョンごとの変更内容です。日本語の紹介ページは [README.md](README.md) / English page: [README-EN.md](README-EN.md) を参照してください。
 
+## 2026-09-28（VC++ランタイム同梱・クリーンPCでのエンジン起動失敗修正）
+
+- **VC++ランタイム（CRT）をエンジンフォルダにアプリローカル同梱**（`msvcp140.dll` / `vcruntime140.dll` / `vcruntime140_1.dll`、14.50.35719.0・Microsoft署名付き）。llama.cpp公式プリビルド（b10936）はCRT動的リンクのため、VC++再頒布可能パッケージ未導入のクリーンなWindows 10/11では「MSVCP140.dll not found」で llama-server.exe が起動せず、全エンジンが `SHINE_E_ENGINE_DOWN`（「AIエンジンの起動に失敗しました」／取り込み時は port 8302 のエラー）になっていた。実行ファイルと同じフォルダに配置することでローダーがシステムより優先して解決し、外部依存を解消
+- 発覚経緯: Microsoft Store審査（2026-09-28、ポリシー 10.1.2.10 Functionality／10.2.4.1 Security - Software Dependencies「Undisclosed software: Microsoft Visual C++」）。CRTを同梱することで両ポリシーとも解消（外部依存がなくなるため説明文の開示も不要）
+- v2.1.0（Store申請中バージョン）への適用: `hotfix/v2.1.0-engine-crt` ブランチで同修正を適用し `ShineosQA-Setup-2.1.0-lite.exe` を再ビルド（実機検証済み: インストール→エンジン起動→文書取り込み→Q&A）
+- MSIX経路にも同修正を適用（release.ymlのステージングで `installer/crt/*.dll` を `{engine}` 配下へコピー）
+
 ## 2026-09-23（v2.1.16・生成後バリデーションガード＋スキャンOCR解像度向上・PR #5）
 
 - **生成後バリデーションガード**: 回答中の数値が出典・質問のいずれにも存在しない場合（小型モデルの捏造・取り違え）、修正指示付きで1回だけ再生成し、成功時のみ回答を差し替える（SSE patch）。誤検知時は元回答を維持。検証器 `Rag.FabricatedNumbers`（カンマ・全角の正規化、1桁/箇条書き番号は除外）＋回帰テスト5件
