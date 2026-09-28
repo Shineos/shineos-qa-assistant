@@ -1,0 +1,145 @@
+# 社内知恵袋 v2 - インストーラ署名ワークフロー（SignPath Foundation）
+#
+# - 手動実行（workflow_dispatch）: 軽量インストーラをビルドし、SignPath REST API
+#   （scripts/sign_with_signpath.ps1）で SignPath Foundation のコード署名証明書で署名する。
+#   Microsoft Store ポリシー 10.2.9（Microsoft Trusted Root Program 参加CA発行の
+#   コード署名証明書）対応用。
+# - 署名ポリシーが手動承認を要求する場合、signpath.io で Approver が承認するまで
+#   このワークフローは待機する（最大60分）。
+# - 成果物: 署名済み ShineosQA-Setup-<version>-lite.exe（Actions artifact）
+name: sign-installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'インストーラのバージョン（例: 2.1.0）'
+        required: false
+        default: '2.1.0'
+      sign_timeout_seconds:
+        description: '署名完了待ち上限秒（手動承認待ちを含む）'
+        required: false
+        default: '3600'
+
+permissions:
+  contents: read
+
+env:
+  LLAMA_RELEASE_URL: https://github.com/ggml-org/llama.cpp/releases/download/b10936/llama-b10936-bin-win-cpu-x64.zip
+  WEBVIEW2_NUGET: https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4129.50/microsoft.web.webview2.1.0.4129.50.nupkg
+
+jobs:
+  build-sign:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build Web UI
+        shell: pwsh
+        run: |
+          cd app/ShineosQA.Web
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "web build failed" }
+
+      - name: Publish backend
+        shell: pwsh
+        run: |
+          dotnet publish app/ShineosQA.Backend -c Release -r win-x64 --self-contained true -o output/backend-pub
+          if ($LASTEXITCODE -ne 0) { throw "backend publish failed" }
+          Set-Content -Path output/backend-pub/version.txt -Value '${{ inputs.version || '2.1.0' }}'
+
+      - name: Build WebView2 wrapper
+        shell: pwsh
+        run: |
+          $dst = 'dist/ShineosQA.App'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          $tmp = Join-Path $env:RUNNER_TEMP 'wv2.zip'
+          curl.exe -L --fail --retry 3 -o $tmp $env:WEBVIEW2_NUGET
+          if ($LASTEXITCODE -ne 0) { throw "webview2 nuget download failed" }
+          $pkg = Join-Path $env:RUNNER_TEMP 'wv2'
+          Expand-Archive $tmp -DestinationPath $pkg -Force
+          Copy-Item "$pkg/lib/net462/Microsoft.Web.WebView2.Core.dll" $dst -Force
+          Copy-Item "$pkg/lib/net462/Microsoft.Web.WebView2.Wpf.dll" $dst -Force
+          Copy-Item "$pkg/runtimes/win-x64/native/WebView2Loader.dll" $dst -Force
+          pwsh -NoProfile -ExecutionPolicy Bypass -File app/ShineosQA.App/build-v2.ps1
+          if ($LASTEXITCODE -ne 0) { throw "wrapper build failed" }
+
+      - name: Download llama.cpp engine
+        shell: pwsh
+        run: |
+          $dst = 'spikes/phase0/engine/cpu'
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          $tmp = Join-Path $env:RUNNER_TEMP 'llama.zip'
+          curl.exe -L --fail --retry 3 -o $tmp $env:LLAMA_RELEASE_URL
+          if ($LASTEXITCODE -ne 0) { throw "llama.cpp download failed" }
+          Expand-Archive $tmp -DestinationPath $dst -Force
+          if (-not (Test-Path "$dst/llama-server.exe")) { throw "llama-server.exe missing after extract" }
+
+      - name: Install Inno Setup 6.7.3
+        shell: pwsh
+        run: |
+          $iscc = 'C:\InnoSetup\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            curl.exe -L --fail --retry 3 -o "$env:TEMP\innosetup.exe" https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup download failed" }
+            $p = Start-Process -FilePath "$env:TEMP\innosetup.exe" `
+              -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/DIR=C:\InnoSetup') `
+              -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "Inno Setup installer exit code: $($p.ExitCode)" }
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+
+      - name: Build installer (lite)
+        shell: pwsh
+        run: |
+          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=${{ inputs.version || '2.1.0' }}" '/DLiteBuild' 'installer/installer-v2.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          if (-not (Test-Path "dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe")) { throw "installer not found" }
+
+      - name: Sign with SignPath
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/sign_with_signpath.ps1 `
+            -ArtifactPath $exe -OutputPath $exe `
+            -TimeoutSeconds ([int]'${{ inputs.sign_timeout_seconds || '3600' }}')
+          if ($LASTEXITCODE -ne 0) { throw "signing failed" }
+
+      - name: Verify signature
+        shell: pwsh
+        run: |
+          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe"
+          $sig = Get-AuthenticodeSignature $exe
+          Write-Output "Status: $($sig.Status)"
+          Write-Output "StatusMessage: $($sig.StatusMessage)"
+          Write-Output "Signer: $($sig.SignerCertificate.Subject)"
+          Write-Output "Issuer: $($sig.SignerCertificate.Issuer)"
+          Write-Output "Algorithm: $($sig.SignerCertificate.SignatureAlgorithm.FriendlyName)"
+          Write-Output "NotAfter: $($sig.SignerCertificate.NotAfter)"
+          if ($sig.Status -ne 'Valid') { throw "signature invalid: $($sig.Status) / $($sig.StatusMessage)" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          Write-Output "SHA256: $hash"
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Upload signed installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite-signed
+          path: dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe
+          if-no-files-found: error
+          compression-level: 0

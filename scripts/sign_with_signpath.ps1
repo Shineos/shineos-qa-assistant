@@ -10,7 +10,8 @@
 # 終了コード: 0 = 成功 / 非0 = 失敗
 param(
     [string]$ArtifactPath,   # 署名対象（未署名exe）
-    [string]$OutputPath      # 署名済みexeの保存先
+    [string]$OutputPath,     # 署名済みexeの保存先
+    [int]$TimeoutSeconds = 600  # 承認待ち込みの完了待ち上限（手動承認ポリシーでは長めに）
 )
 
 $ErrorActionPreference = 'Stop'
