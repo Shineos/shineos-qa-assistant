@@ -27,7 +27,7 @@ public sealed class Ingest
         {
             ".md" or ".txt" => ReadText(stream),
             ".docx" => ExtractDocx(stream),
-            ".pdf" => ExtractPdf(stream),
+            ".pdf" => ExtractPdfAny(stream),
             _ => throw new NotSupportedException($"unsupported file type: {ext} (SHINE_E_DOC_PARSE_FAILED)")
         };
     }
@@ -70,7 +70,23 @@ public sealed class Ingest
         return text;
     }
 
-    /// <summary>簡易PDFテキスト抽出（FlateDecode＋Tj/TJ演算子）。CJK CIDフォント非対応のベストエフォート</summary>
+    /// <summary>PDF抽出: PdfPig（ToUnicode CMap対応・日本語PDF可）を本体に、従来の自製抽出器を
+    /// フォールバックに（mainからバックポート）。自製抽出器はCIDフォント（日本語PDFの大多数）で
+    /// 文字化けを抽出し、そのバイト列がembedの物理バッチ上限（512トークン）を超えて
+    /// SHINE_E_ENGINE_DOWN系の500になっていた実害がある。両方失敗で従来どおりのエラー</summary>
+    private static string ExtractPdfAny(Stream s)
+    {
+        using var ms = new MemoryStream();
+        s.CopyTo(ms);
+        var bytes = ms.ToArray();
+        string? modern = null;
+        try { modern = PdfText.ExtractAll(bytes); } catch { }
+        if (!string.IsNullOrWhiteSpace(modern)) return modern;
+        return ExtractPdf(new MemoryStream(bytes));
+    }
+
+    /// <summary>簡易PDFテキスト抽出（FlateDecode＋Tj/TJ演算子）。CJK CIDフォント非対応のベストエフォート。
+    /// PdfPig失敗時のフォールバックとして残す</summary>
     private static string ExtractPdf(Stream s)
     {
         using var ms = new MemoryStream();
