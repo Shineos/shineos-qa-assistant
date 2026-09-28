@@ -1,0 +1,39 @@
+# SignPath 組織の診断: 利用可能な証明書とポリシー構成を出力する（読み取りのみ）
+# 10.2.9 対応: ポリシーに Foundation 本番証明書が紐付いているかを確認するためのもの
+name: diagnose-signpath
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - name: Query SignPath API
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          $base = "https://app.signpath.io/api/v1/$env:SIGNPATH_ORG_ID"
+          $h = @{ Authorization = "Bearer $env:SIGNPATH_API_TOKEN" }
+          Write-Output "=== SigningCertificates ==="
+          try {
+            $certs = Invoke-RestMethod -Headers $h -Uri "$base/SigningCertificates"
+            $certs | ConvertTo-Json -Depth 5
+          } catch { Write-Output "certificates query failed: $($_.Exception.Message)" }
+          Write-Output "=== SigningPolicies ==="
+          try {
+            $pol = Invoke-RestMethod -Headers $h -Uri "$base/SigningPolicies"
+            $pol | ConvertTo-Json -Depth 5
+          } catch { Write-Output "policies query failed: $($_.Exception.Message)" }
+          Write-Output "=== Project ==="
+          try {
+            $p = Invoke-RestMethod -Headers $h -Uri "$base/Projects/$env:SIGNPATH_PROJECT_SLUG"
+            $p | ConvertTo-Json -Depth 5
+          } catch { Write-Output "project query failed: $($_.Exception.Message)" }
