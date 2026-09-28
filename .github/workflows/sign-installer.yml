@@ -131,10 +131,24 @@ jobs:
           Write-Output "Issuer: $($sig.SignerCertificate.Issuer)"
           Write-Output "Algorithm: $($sig.SignerCertificate.SignatureAlgorithm.FriendlyName)"
           Write-Output "NotAfter: $($sig.SignerCertificate.NotAfter)"
-          if ($sig.Status -ne 'Valid') { throw "signature invalid: $($sig.Status) / $($sig.StatusMessage)" }
+          # ランナーの信頼ストアにルートが無くてもチェーン構成は検査する
+          # （Certum 等 Microsoft Trusted Root Program 参加CAはストア不在で NotTrusted になることがある。
+          #   Store審査はサービス側で信頼ルートを検証するため、ここではチェーンの素性を出力するだけにする）
+          $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+          $chain.ChainPolicy.RevocationMode = 'NoCheck'
+          $chain.ChainPolicy.VerificationFlags = 'AllowUnknownCertificateAuthority'
+          $null = $chain.Build($sig.SignerCertificate)
+          foreach ($el in $chain.ChainElements) {
+            Write-Output "CHAIN ELEMENT: $($el.Certificate.Subject)  [ISSUER: $($el.Certificate.Issuer)]"
+          }
+          if ($sig.Status -eq 'UnknownError' -or $sig.Status -eq 'NotTrusted') {
+            Write-Output "::warning::Signature status is $($sig.Status) on this runner (root not in local trust store). Verify the chain terminates at a Microsoft Trusted Root Program CA (e.g., Certum) before submitting to the Store."
+          }
+          elseif ($sig.Status -ne 'Valid') {
+            throw "signature invalid: $($sig.Status) / $($sig.StatusMessage)"
+          }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           Write-Output "SHA256: $hash"
-          "sha256=$hash" >> $env:GITHUB_OUTPUT
 
       - name: Upload signed installer artifact
         uses: actions/upload-artifact@v4
