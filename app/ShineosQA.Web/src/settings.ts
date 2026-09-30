@@ -1,5 +1,6 @@
 import { api, type StatusInfo } from './api';
 import { Models } from './wizard';
+import { REPORT_CONTACT_URL } from './report';
 
 export class SettingsView {
   private busy = false; // 初期ロードとタブ切替の二重refreshによるDOM競合（detachされた方に描く）を防ぐ
@@ -54,6 +55,16 @@ export class SettingsView {
       <div class="settings-card">
         <h3>システム状態</h3>
         <div id="status-rows" class="status-rows"></div>
+      </div>
+      <div class="settings-card">
+        <h3>サポート</h3>
+        <div class="setting-row">
+          <div class="setting-text">
+            <b>問題を報告</b>
+            <span>AIの回答に不適切な内容や誤りを見つけた場合は、チャット画面の各回答の下にある「問題を報告」から報告できます（質問と回答の抜粋を含む報告内容をコピーして問い合わせフォームから送信します）。</span>
+          </div>
+          <button type="button" class="primary small" id="set-report">問い合わせフォーム</button>
+        </div>
       </div>`;
     document.getElementById('set-web')!.addEventListener('change', async (e) => {
       await api.saveSettings({ web_search: (e.target as HTMLInputElement).checked });
@@ -65,6 +76,9 @@ export class SettingsView {
     });
     document.getElementById('set-bg')!.addEventListener('change', async (e) => {
       await api.saveSettings({ bg_friendly: (e.target as HTMLInputElement).checked });
+    });
+    document.getElementById('set-report')!.addEventListener('click', () => {
+      window.open(REPORT_CONTACT_URL, '_blank', 'noopener,noreferrer');
     });
     // AIモデル管理セクション（初回DL・追加・削除）をカード内へ描画
     const modelsHost = document.getElementById('models-host')!;

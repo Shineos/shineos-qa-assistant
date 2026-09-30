@@ -270,6 +270,7 @@ Microsoft Store Policies（v7.19）は**生成AIが作る動的コンテンツ�
 | AI生成コンテンツのポリシー準拠 | ナレッジ登録文書のみから回答（RAG）。ナレッジ外は「該当する記載がありません」と推測しない（ハルシネーションガード・回答ガード閾値運用） |
 | 有害コンテンツ | 一般知識の質問には応答しない設計（社内文書Q&A特化）。UGC・共有機能なし |
 | AIであることの透明性 | 掲載文に「AIで検索」「AIモデル（Qwen3）同梱」と明記 |
+| **11.16 報告メカニズム（2026-09-30認定不合格の対応済み項目）** | **各AI回答の下に「問題を報告」ボタン**（旗アイコン＋ラベル）。クリックで報告ダイアログ: 問題の種類（不適切・有害な内容／事実と異なる・誤解を招く内容／その他）＋詳細入力＋報告内容（質問とAI回答の抜粋・バージョン・日時を含む）のコピー、または `https://shineos.com/contact/` をブラウザで開く。設定タブ「サポート」にも「問題を報告」リンクあり。**アプリ自身は何も自動送信しない**（報告はユーザー自身のコピー／フォーム送信のみ。PRIVACY.mdの「外部通信なし」主張と整合） |
 
 **審査リスクと対策**: 審査員が一般知識の質問（「富士山の高さは？」等）をすると「該当なし」が返る。これは仕様だが、説明がないと「機能しないアプリ」と誤判定されうる → **審査メモ（§13）に使い方を必ず記載する**。
 
@@ -310,6 +311,7 @@ MicrosoftのEXE認証テスト項目（[MSI/EXE認証プロセス](https://learn
 > 5. The web-search toggle is OFF by default. When explicitly turned ON, only the typed query is sent to DuckDuckGo.
 > 6. Closing the app stops all backend/engine processes and releases localhost port 8300 — nothing stays resident.
 > 7. **First-launch model download**: the installer downloads nothing. On the first app launch, a welcome wizard downloads the required AI models (~2.3 GB total: embedding, chat 1.7B, reranker) from huggingface.co with SHA-256 verification. **An internet connection is required on first launch**; after that the app is fully offline. Download progress is shown; if it fails, relaunching retries.
+> 8. **Reporting AI-generated content (Store policy 11.16 compliance)**: every AI answer has a 「問題を報告」 (Report an Issue) button below it. Clicking it opens a dialog to pick a reason (inappropriate content / factual error / other), optionally add details, and copy a pre-filled report (question + answer excerpt + app version + timestamp) to send via the official contact form at https://shineos.com/contact/ — the same form also opens directly from the button and from Settings > サポート (Support). The app itself never transmits anything automatically; the user sends the report themselves.
 >
 > Silent install (EXE form): `ShineosQA-Setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`
 

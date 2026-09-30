@@ -55,9 +55,19 @@ button.newchat:hover { background: var(--hover); }
 .msg-body p:last-child { margin-bottom: 0; }
 .msg-body ul { margin: 4px 0; padding-left: 20px; }
 .cite { color: var(--accent); font-weight: 600; }
-.msg-time { font-size: 11px; color: var(--muted); margin-top: 3px; padding: 0 2px; cursor: default; }
+.msg-time { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); margin-top: 3px; padding: 0 2px; cursor: default; }
 .msg-time:hover { color: var(--text); }
-.msg.user .msg-time { text-align: right; }
+.msg.user .msg-time { justify-content: flex-end; }
+/* 時刻横のコピーアイコン（ユーザーはテキスト、AI回答はMarkdownソースをコピー） */
+.copy-btn { border: 0; background: none; padding: 1px; margin: 0; cursor: pointer; color: var(--muted); display: inline-flex; line-height: 0; }
+.copy-btn svg { width: 12px; height: 12px; }
+.copy-btn:hover { color: var(--text); }
+.copy-btn.copied { color: var(--accent); }
+.msg-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 0 2px; }
+.report-btn { display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 11.5px; padding: 2px 8px; border-radius: 6px; }
+.report-btn svg { width: 12.5px; height: 12.5px; }
+.report-btn:hover { color: #dc2626; background: #fee2e2; }
+.msg-actions .msg-time { margin-top: 0; }
 
 /* 思考中インジケータ */
 .thinking-block .thinking { display: inline-flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 14px; padding: 6px 4px; }
@@ -87,6 +97,20 @@ button.newchat:hover { background: var(--hover); }
 .src-file { font-weight: 600; }
 .src-body { padding: 16px 20px; overflow-y: auto; font-size: 13.5px; line-height: 1.8; white-space: pre-wrap; }
 .src-body mark { background: #fef08a; padding: 0 2px; border-radius: 3px; }
+
+/* ── 問題報告ダイアログ（11.16 Live Generative AI Content対応） ── */
+.rpt-modal { width: min(600px, 94vw); }
+.rpt-body { white-space: normal; font-size: 13.5px; display: flex; flex-direction: column; }
+.rpt-lead { margin: 0 0 8px; line-height: 1.7; }
+.rpt-lead a { color: var(--accent); }
+.rpt-label { font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
+.rpt-body select, .rpt-body textarea { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13.5px; font-family: inherit; background: var(--panel); color: var(--text); }
+.rpt-body textarea { resize: vertical; }
+.rpt-summary { border: 1px solid var(--border); border-radius: 8px; background: var(--bg); padding: 10px 12px; font-size: 12.5px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto; margin-top: 4px; }
+.rpt-note { font-size: 11.5px; color: var(--muted); margin: 8px 0 0; line-height: 1.6; }
+.rpt-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.btn-secondary { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 8px; padding: 9px 14px; font-size: 13px; cursor: pointer; }
+.btn-secondary:hover { background: var(--hover); }
 
 /* ステータス行 */
 .chat-status { max-width: 768px; margin: 0 auto; padding: 2px 20px; font-size: 12px; color: var(--muted); min-height: 18px; }
