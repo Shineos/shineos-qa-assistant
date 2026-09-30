@@ -61,7 +61,7 @@ export class SettingsView {
         <div class="setting-row">
           <div class="setting-text">
             <b>問題を報告</b>
-            <span>AIの回答に不適切な内容や誤りを見つけた場合は、チャット画面の各回答の下にある「問題を報告」から報告できます（質問と回答の抜粋を含む報告内容をコピーして問い合わせフォームから送信します）。</span>
+            <span>AIの回答に不適切な内容や誤りを見つけた場合は、チャット画面の各回答の下にある「問題を報告」から報告できます（報告内容は問い合わせフォームに自動入力されます。社名・お名前・メールアドレスのご記入と送信はご自身で行います）。</span>
           </div>
           <button type="button" class="primary small" id="set-report">問い合わせフォーム</button>
         </div>
