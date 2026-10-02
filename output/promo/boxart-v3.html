@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>box art 1080 v3 — app.ico design</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1080px; overflow: hidden; }
+  body { background: #0a4a3a; }
+  .canvas {
+    position: relative; width: 1080px; height: 1080px;
+    background: linear-gradient(135deg, #041d18 0%, #0a4a3a 46%, #0f8a6c 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .glow {
+    position: absolute; width: 1000px; height: 1000px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(126,226,196,.16) 0%, rgba(126,226,196,0) 60%);
+    right: -200px; top: -200px;
+  }
+  .mark { position: relative; width: 760px; height: 760px; }
+  svg { display: block; width: 760px; height: 760px; }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="glow"></div>
+    <div class="mark">
+      <svg viewBox="0 0 760 760" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="spark" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#eafff7"/>
+            <stop offset="1" stop-color="#9fe3cb"/>
+          </linearGradient>
+        </defs>
+        <!-- 4点スパーク（生成AIスパーク・中央） -->
+        <path d="M380 90
+                 C398 226 428 256 564 274
+                 C428 292 398 322 380 458
+                 C362 322 332 292 196 274
+                 C332 256 362 226 380 90 Z"
+              fill="url(#spark)"/>
+        <!-- 小スパーク（左上・斜め） -->
+        <path d="M212 130
+                 C221 186 236 201 292 210
+                 C236 219 221 234 212 290
+                 C203 234 188 219 132 210
+                 C188 201 203 186 212 130 Z"
+              fill="url(#spark)" opacity=".85"/>
+        <!-- 白い吹き出し（左下・丸＋尾） -->
+        <circle cx="290" cy="500" r="122" fill="#ffffff"/>
+        <path d="M218 594 L176 676 C170 690 186 701 197 694 L272 648 Z" fill="#ffffff"/>
+        <!-- 吹き出しの中の小スパーク（緑） -->
+        <path d="M290 448
+                 C296 476 308 488 336 494
+                 C308 500 296 512 290 540
+                 C284 512 272 500 244 494
+                 C272 488 284 476 290 448 Z"
+              fill="#0f8a6c"/>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

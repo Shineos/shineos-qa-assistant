@@ -28,7 +28,18 @@ app/ShineosQA.Web/dist/
 app/ShineosQA.Backend/bin/
 app/ShineosQA.Backend/obj/
 tools/dotnet-sdk/
-output/
+
+# output/ は作業出力（数GB）。プロモ動画制作キット（output/promo）のみ git 管理する
+output/*
+!output/promo/
+output/promo/recordings/
+output/promo/final-frames/
+output/promo/frames/
+output/promo/work/
+output/promo/node_modules/
+output/promo/backup-data-2.1.3-dev/
+output/promo/chat-resp.txt
+output/promo/chat-ids.json
 
 # v2 test artifacts
 app/ShineosQA.Backend.Tests/bin/

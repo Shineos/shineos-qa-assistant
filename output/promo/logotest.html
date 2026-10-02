@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin:0; padding:0; }
+  html, body { width: 512px; height: 512px; overflow: hidden; }
+  body { background: #0a4a3a; display: flex; align-items: center; justify-content: center; }
+  svg { width: 440px; height: 440px; }
+</style></head>
+<body>
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#33b489"/>
+        <stop offset="1" stop-color="#1b7a55"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="100" height="100" rx="23" fill="url(#tile)"/>
+    <rect x="20" y="22" width="60" height="40" rx="13" fill="#ffffff"/>
+    <path d="M42 60 L38 69 L50 61 Z" fill="#ffffff" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+    <circle cx="36" cy="42" r="6.5" fill="#10a37f"/>
+    <circle cx="50" cy="42" r="6.5" fill="#10a37f"/>
+    <circle cx="64" cy="42" r="6.5" fill="#10a37f"/>
+  </svg>
+</body></html>

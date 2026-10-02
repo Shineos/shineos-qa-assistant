@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>box art 1080 v4 — app.ico bag on green</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1080px; overflow: hidden; }
+  body { background: #0a4a3a; }
+  .canvas {
+    position: relative; width: 1080px; height: 1080px;
+    background: linear-gradient(135deg, #041d18 0%, #0a4a3a 46%, #0f8a6c 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .glow {
+    position: absolute; width: 1000px; height: 1000px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(126,226,196,.14) 0%, rgba(126,226,196,0) 60%);
+    right: -160px; top: -160px;
+  }
+  .mark { position: relative; width: 760px; height: 760px; }
+  svg { display: block; width: 760px; height: 760px; }
+  .shadow {
+    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+    width: 420px; height: 42px; border-radius: 50%;
+    background: rgba(3,40,30,.35); filter: blur(12px);
+  }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="glow"></div>
+    <div class="mark">
+      <div class="shadow"></div>
+      <svg viewBox="0 0 760 760" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- 胴体: つやのあるクリーム -->
+          <radialGradient id="body" cx="0.38" cy="0.30" r="1.0">
+            <stop offset="0" stop-color="#fdf6e8"/>
+            <stop offset="0.55" stop-color="#f3e6c8"/>
+            <stop offset="1" stop-color="#d9c397"/>
+          </radialGradient>
+          <!-- 首・口のひだ: 少し濃いめ -->
+          <linearGradient id="neck" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#f7ecd2"/>
+            <stop offset="1" stop-color="#e6d3ab"/>
+          </linearGradient>
+        </defs>
+        <!-- 影（袋の下) -->
+        <ellipse cx="380" cy="672" rx="205" ry="26" fill="#04241c" opacity=".28"/>
+        <!-- 胴体（ふっくら俵型） -->
+        <path d="M380 282
+                 C268 282 178 372 178 486
+                 C178 596 268 664 380 664
+                 C492 664 582 596 582 486
+                 C582 372 492 282 380 282 Z"
+              fill="url(#body)" stroke="#c9b183" stroke-width="3"/>
+        <!-- 胴体のつや（ハイライト） -->
+        <ellipse cx="312" cy="404" rx="74" ry="46" fill="#ffffff" opacity=".5" transform="rotate(-24 312 404)"/>
+        <!-- 首のひだ（口を絞った扇形） -->
+        <path d="M380 236
+                 C332 236 296 254 282 282
+                 C312 300 344 308 380 308
+                 C416 308 448 300 478 282
+                 C464 254 428 236 380 236 Z"
+              fill="url(#neck)" stroke="#c9b183" stroke-width="3"/>
+        <!-- 絞った上の耳（左右の小さな角） -->
+        <path d="M332 240 C322 218 330 204 348 200 C342 216 348 228 360 236 Z" fill="#f3e6c8" stroke="#c9b183" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M428 240 C438 218 430 204 412 200 C418 216 412 228 400 236 Z" fill="#f3e6c8" stroke="#c9b183" stroke-width="3" stroke-linejoin="round"/>
+        <!-- 首ひも（結び目・緑の帯） -->
+        <path d="M292 292 C330 316 430 316 468 292 L462 322 C428 342 332 342 298 322 Z"
+              fill="#10a37f" stroke="#0b6b52" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M300 330 C266 352 246 376 240 400 L268 406 C276 382 292 362 314 348 Z" fill="#10a37f" stroke="#0b6b52" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M460 330 C494 352 514 376 520 400 L492 406 C484 382 468 362 446 348 Z" fill="#10a37f" stroke="#0b6b52" stroke-width="3" stroke-linejoin="round"/>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>
