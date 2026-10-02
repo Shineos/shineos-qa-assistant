@@ -34,3 +34,12 @@ output/
 app/ShineosQA.Backend.Tests/bin/
 app/ShineosQA.Backend.Tests/obj/
 spikes/phase0/ui-smoke/out/
+
+# 作業テンポラリ・ローカルツール・デバッグdump（git管理しない）
+/tmp/
+tools/ffmpeg/
+app/chat-out.txt
+/q-web.json
+app/q-web.json
+app/ShineosQA.Web/q-lite.json
+app/ShineosQA.Web/q-md.json
