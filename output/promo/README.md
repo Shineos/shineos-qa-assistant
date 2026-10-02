@@ -13,22 +13,22 @@
 片方だけ更新されて食い違うことがありません。
 
 ```
-cards/title.html  ──(1920x1080で撮影)──▶  cards/title.png  ──┬─▶ 動画の冒頭カード（01-title）
-                                                └─(1280x720へ縮小)─▶ thumbnail-1280x720.png
+cards/title.html ─(1920x1080で撮影)→ cards/title.png ─(MS Store公式バッジ+QRをoverlay)→ cards/title-final.png ─┬→ 動画の冒頭カード（01-title）
+                                                                                              └─(1280x720へ縮小)→ thumbnail-1280x720.png
 ```
 
 文言や配色を変えたい場合は `cards/title.html` を編集し、**1920x1080** のスクリーンショットを
 撮って `cards/title.png` として保存 → `node build-promo.js` を実行してください
-（動画の冒頭カードとサムネイルの両方に反映されます）。
+（バッジの合成と動画の冒頭カード・サムネイルの両方への反映は自動です）。
 
 見出しの文字サイズは `title.html` 内のスクリプトが**幅に合わせて最大サイズへ自動調整**するため、
 文言を変えても手動でのサイズ調整は不要です（左右に90pxずつ余白を確保した最大値になります）。
 
-## URL（エンドカードの表示とQRコード）を差し替える
+## QRコードの参照先（エンドカード）を差し替える
 
-1. **`promo-config.json` の `siteUrl` を書き換える**
+1. **`promo-config.json` の `siteUrl` を書き換える**（現在は Microsoft Store の Web ストアページ）
    ```json
-   { "siteUrl": "https://shineos.com" }
+   { "siteUrl": "https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F" }
    ```
 2. **ビルドする**（QRコード生成 → エンドカード合成 → 動画全体の再生成まで自動）
    ```bash
@@ -37,10 +37,8 @@ cards/title.html  ──(1920x1080で撮影)──▶  cards/title.png  ──�
    ```
 
 QRコードは `siteUrl` から毎回自動生成されるので、画像を用意する必要はありません。
-URLの緑カードは**文字幅を実測して幅とフォントサイズを自動調整**するため、URLの長さが
-変わっても文字がはみ出しません。位置や大きさを変えたい場合は `build-promo.js` の
-`END_CARD` を調整してください（エンドカードのQRとURLは下地画像に合成されるので、
-カード画像を撮り直す必要はありません）。
+位置や大きさを変えたい場合は `build-promo.js` の `END_CARD` / `TITLE_CARD` を調整してください
+（QRとバッジは下地画像に合成されるので、カード画像を撮り直す必要はありません）。
 
 ### エンドカードの仕様
 
@@ -49,7 +47,16 @@ URLの緑カードは**文字幅を実測して幅とフォントサイズを自
   Google レンズなど反転に対応したスキャナが必要です（多くの最新端末は対応）。
   標準の暗色モジュールにしたい場合は `buildEndCard()` の `color` を
   `{ dark: "#0d2b23", light: "#ffffff" }` に戻し、下地に白い角丸カードを復活させてください。
-- **URL**: 緑の角丸カード（`#10a37f`）に白文字。文字幅に合わせてカード幅が決まります。
+- **Microsoft Store公式バッジ**: `cards/msstore-badge-*.png`。公式SVG
+  （`https://get.microsoft.com/images/ja dark.svg` / `ja light.svg`）を `rasterize-badges.js`
+  で10倍解像度にラスタライズしたもの。エンドカード（暗い背景）には **light（白）版**、
+  タイトルカード（明るい背景）には **dark（黒）版**を、Microsoftのガイドラインに従って使い分け。
+  バッジを差し替えるときは SVG を `cards/` に保存して `node rasterize-badges.js` を実行。
+- **QRコードは2種類**: エンドカード＝白モジュール透過（`qr.png`・反転QR）、
+  タイトルカード＝濃色モジュール透過（`qr-dark.png`・標準QR）。どちらも同じ `siteUrl` から
+  自動生成され、**両カードともバッジの横に並べられます**（`END_CARD` / `TITLE_CARD` の
+  `pairCenterY` / `pairGap` / `qrSize` で配置調整）。
+- **URLテキスト**: 旧来の緑の角丸カードは廃止。参照先はQRコードが担います。
 
 ### 確認だけしたいとき（動画全体を作り直さずエンドカードだけ再生成）
 
@@ -68,12 +75,12 @@ PROMO_SITE_URL="https://example.com" node build-promo.js --endcard-only
 
 | ショット | 素材 | 内容 |
 |---|---|---|
-| 01 | `cards/title.png` | 冒頭カード（＝サムネイルの元画像） |
+| 01 | `cards/title-final.png` | 冒頭カード（＝サムネイルの元画像。公式バッジ合成済み） |
 | 02-06 | `recordings/sceneB-question.webm` | 質問→回答→出典→原文ハイライト |
 | 07-08 | `recordings/sceneC-knowledge.webm` | ナレッジ登録（ドラッグ＆ドロップ） |
 | 09-12 | `recordings/sceneD-ask-new.webm` | 追加資料への質問→出典 |
 | 13-16 | `recordings/sceneEF-models-settings.webm` | モデル切替・設定画面 |
-| 17 | `cards/end.png` | エンドカード（ロゴ＋QR＋URL） |
+| 17 | `cards/end.png` | エンドカード（ロゴ＋QR＋Microsoft Storeバッジ） |
 
 - テロップ文言は `build-promo.js` の `captions` オブジェクト（`caps/*.txt` に書き出されます）
 - カット位置・速度・ズームは `build-promo.js` の `shots` 配列
@@ -88,7 +95,8 @@ PROMO_SITE_URL="https://example.com" node build-promo.js --endcard-only
    HTMLとロゴを置いて配信
 3. ブラウザで開いてスクリーンショット（`title.html` は1920x1080、`end.html` は1920x1080）を撮り、
    `cards/title.png` / `cards/end-base.png` として保存
-4. `node build-promo.js`（エンドカードは `end-base.png` にQRとURLを合成して `end.png` を作る）
+4. `node build-promo.js`（エンドカードは `end-base.png` にQRと公式バッジを合成して `end.png` を作り、
+   `title.png` にQR（濃色版）と公式バッジを合成して `title-final.png` を作る）
 
-> `end-base.png` はQRとURLを**含まない**白いカードの状態です。QRとURLはビルド時に
+> `end-base.png` はQRとバッジを**含まない**状態です。QR・バッジはビルド時に
 > 合成されるので、URL変更のたびにカードを撮り直す必要はありません。

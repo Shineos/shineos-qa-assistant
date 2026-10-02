@@ -11,6 +11,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "jsqr": "^1.4.0",
     "pngjs": "^7.0.0",
     "qrcode": "^1.5.4"

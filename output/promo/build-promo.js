@@ -2,8 +2,9 @@
 // 大きいテロップ + 急なズームイン（パンチイン）演出 / 1.2倍速 / 音声なし / 1920x1080 25fps H.264
 //
 // 使い方（これだけで全部やり直せる）:
-//   1) promo-config.json の siteUrl を書き換える（エンドカードのURLとQRコードが変わる）
+//   1) promo-config.json の siteUrl を書き換える（エンドカードのQRコードの参照先。現在はMicrosoft StoreのWebストアページ）
 //   2) node build-promo.js
+// ※ Microsoft Store公式バッジのSVG差し替え時は node rasterize-badges.js を先に実行
 //
 // 生成物:
 //   shineos-qa-usecase-1080p.mp4   … 完成動画
@@ -32,11 +33,20 @@ const SITE_URL = process.env.PROMO_SITE_URL || config.siteUrl;
 // --endcard-only: エンドカードだけを再生成（URL変更の確認用。動画全体は再生成しない）
 const ENDCARD_ONLY = process.argv.includes("--endcard-only");
 
-// エンドカードのQR・URLカードの配置（cards/end.html の要素位置と対応）
+// エンドカードの配置（cards/end-base.png の要素位置と対応）
+// 下部に「QRコード + Microsoft Store公式バッジ」の横並びペアを置く
+// バッジは rasterize-badges.js でSVG→PNG化済み。dark=黒背景・light=白背景で、
+// Microsoftのガイドラインに従い暗い背景にはlight(白)版、明るい背景にはdark(黒)版を使う
+// QRも同様に背景色で使い分け: 暗い背景=白モジュール(反転QR) / 明るい背景=濃色モジュール(標準QR)
 const END_CARD = {
-  qrSize: 360, qrTop: 502,
-  pillTop: 876, pillH: 106, pillPadX: 70, pillColor: "#10a37f",
-  urlFontSize: 62, urlMaxWidth: 880, urlColor: "#ffffff",
+  qrSize: 320, pairCenterY: 750, pairGap: 60,
+  badgeH: 120,
+  badgeFile: "msstore-badge-light.png",
+};
+const TITLE_CARD = {
+  qrSize: 190, pairCenterY: 970, pairGap: 50,
+  badgeW: 480,
+  badgeFile: "msstore-badge-dark.png",
 };
 
 function run(args) {
@@ -49,95 +59,77 @@ function run(args) {
   }
 }
 
-// 1) 設定からQRコードを生成してエンドカードを合成（URLを変えたらここで反映される）
-//    - QR: 背景を透過（白モジュール）。暗い背景に直接置く
-//    - URL: 緑のカード（角丸）の中に白文字。文字幅を実測してカード幅を決める
-function hexToRgb(hex) {
-  const h = hex.replace("#", "");
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+// 1) QRコード生成（siteUrl から2種類）
+//    - qr.png:     白モジュール透過 = 反転QR。エンドカード（暗い背景）用
+//    - qr-dark.png: 濃色モジュール透過 = 標準QR。タイトルカード（明るい背景）用
+async function buildQrCodes() {
+  const size = 4 * Math.max(END_CARD.qrSize, TITLE_CARD.qrSize);
+  await QRCode.toFile(path.join(CARDS, "qr.png"), SITE_URL, {
+    width: size, margin: 2, errorCorrectionLevel: "M",
+    color: { dark: "#ffffff", light: "#00000000" },
+  });
+  await QRCode.toFile(path.join(CARDS, "qr-dark.png"), SITE_URL, {
+    width: size, margin: 2, errorCorrectionLevel: "M",
+    color: { dark: "#0d2b23", light: "#00000000" },
+  });
 }
 
-// 角丸（両端が半円のスタジアム型）カードをPNGで生成。アンチエイリアス付き
-function makePillPng(width, height, hex, outPath) {
+// PNGの寸法を読む（バッジのアスペクト比維持用）
+function pngSize(p) {
   const { PNG } = require("pngjs");
-  const png = new PNG({ width, height });
-  const [cr, cg, cb] = hexToRgb(hex);
-  const r = height / 2, x0 = r, x1 = width - r, cy = height / 2;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const sx = Math.min(Math.max(x + 0.5, x0), x1);
-      const d = Math.hypot(x + 0.5 - sx, y + 0.5 - cy);
-      const a = Math.min(1, Math.max(0, r - d + 0.5));
-      const i = (width * y + x) << 2;
-      png.data[i] = cr; png.data[i + 1] = cg; png.data[i + 2] = cb;
-      png.data[i + 3] = Math.round(a * 255);
-    }
-  }
-  fs.writeFileSync(outPath, PNG.sync.write(png));
+  const png = PNG.sync.read(fs.readFileSync(p));
+  return { width: png.width, height: png.height };
 }
 
-// 文字を透明背景で描画して、実際の描画幅を測る（カード幅を文字に合わせるため）
-function measureText(text, fontSize) {
-  const { PNG } = require("pngjs");
-  const capPath = path.join(CAPS, "measure.txt");
-  fs.writeFileSync(capPath, text, "utf8");
-  const tf = "'" + capPath.replace(/\\/g, "/").replace(/:/g, "\\:") + "'";
-  const pngPath = path.join(WORK, "measure.png");
-  run(["-y", "-f", "lavfi", "-i", "color=c=black@0.0:s=2000x220,format=rgba",
-    "-vf", `drawtext=fontfile=${FONT}:textfile=${tf}:fontsize=${fontSize}:fontcolor=white:x=0:y=0`,
-    "-frames:v", "1", pngPath]);
-  const png = PNG.sync.read(fs.readFileSync(pngPath));
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (let y = 0; y < png.height; y++) {
-    for (let x = 0; x < png.width; x++) {
-      if (png.data[(png.width * y + x) * 4 + 3] > 8) {
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-      }
-    }
-  }
-  return { width: maxX - minX + 1, height: maxY - minY + 1, ascentOffset: minY };
+// 「QR + バッジ」横並びペアの overlay 座標（中央揃え・垂直は中心线で揃える）
+function pairCoords(cfg, badgeW) {
+  const groupW = cfg.qrSize + cfg.pairGap + badgeW;
+  const x0 = Math.round((1920 - groupW) / 2);
+  return {
+    qrX: x0,
+    qrY: Math.round(cfg.pairCenterY - cfg.qrSize / 2),
+    badgeX: x0 + cfg.qrSize + cfg.pairGap,
+    badgeY: Math.round(cfg.pairCenterY - cfg.badgeH / 2),
+  };
 }
 
 async function buildEndCard() {
-  // (a) QRコード（背景透過・白モジュール）。高解像度で生成しffmpegで縮小
-  const qrPath = path.join(CARDS, "qr.png");
-  await QRCode.toFile(qrPath, SITE_URL, {
-    width: END_CARD.qrSize * 4, margin: 2, errorCorrectionLevel: "M",
-    color: { dark: "#ffffff", light: "#00000000" },
-  });
-
-  // (b) URL文字幅を実測 → 収まるフォントサイズとカード幅を決める
-  let fontSize = END_CARD.urlFontSize;
-  let m = measureText(SITE_URL, fontSize);
-  while (m.width > END_CARD.urlMaxWidth && fontSize > 24) {
-    fontSize -= 2;
-    m = measureText(SITE_URL, fontSize);
-  }
-  const pillW = m.width + END_CARD.pillPadX * 2;
-  const pillX = Math.round((1920 - pillW) / 2);
-  const pillPath = path.join(CARDS, "url-pill.png");
-  makePillPng(pillW, END_CARD.pillH, END_CARD.pillColor, pillPath);
-
-  const qrX = Math.round((1920 - END_CARD.qrSize) / 2);
-  const urlTxt = path.join(CAPS, "endurl.txt");
-  fs.writeFileSync(urlTxt, SITE_URL, "utf8");
-  const tf = "'" + urlTxt.replace(/\\/g, "/").replace(/:/g, "\\:") + "'";
-  // 文字の実際の描画開始位置(ascentOffset)を差し引いてカード内で垂直中央に置く
-  const urlY = Math.round(END_CARD.pillTop + (END_CARD.pillH - m.height) / 2 - m.ascentOffset);
+  const badgePath = path.join(CARDS, END_CARD.badgeFile);
+  const b = pngSize(badgePath);
+  const badgeW = Math.round(END_CARD.badgeH * b.width / b.height);
+  const { qrX, qrY, badgeX, badgeY } = pairCoords(END_CARD, badgeW);
 
   run(["-y",
     "-i", path.join(CARDS, "end-base.png"),
-    "-i", qrPath,
-    "-i", pillPath,
+    "-i", path.join(CARDS, "qr.png"),
+    "-i", badgePath,
     "-filter_complex",
     `[1:v]scale=${END_CARD.qrSize}:${END_CARD.qrSize}:flags=lanczos[qr];` +
-    `[0:v][qr]overlay=${qrX}:${END_CARD.qrTop}:format=auto[bg];` +
-    `[bg][2:v]overlay=${pillX}:${END_CARD.pillTop}:format=auto[card];` +
-    `[card]drawtext=fontfile=${FONT}:textfile=${tf}:fontsize=${fontSize}:` +
-    `fontcolor=${END_CARD.urlColor}:x=(w-text_w)/2:y=${urlY}[v]`,
+    `[0:v][qr]overlay=${qrX}:${qrY}:format=auto[bg];` +
+    `[2:v]scale=${badgeW}:${END_CARD.badgeH}:flags=lanczos[badge];` +
+    `[bg][badge]overlay=${badgeX}:${badgeY}:format=auto[v]`,
     "-map", "[v]", "-frames:v", "1", path.join(CARDS, "end.png")]);
-  console.log(`end card composed: ${SITE_URL} (font ${fontSize}px, card ${pillW}px)`);
+  console.log(`end card composed: QR(${END_CARD.qrSize}px) + badge ${badgeW}x${END_CARD.badgeH} pair @ y${qrY}`);
+}
+
+function buildTitleCard() {
+  const badgePath = path.join(CARDS, TITLE_CARD.badgeFile);
+  const b = pngSize(badgePath);
+  const badgeH = Math.round(TITLE_CARD.badgeW * b.height / b.width);
+  const cfg = { ...TITLE_CARD, badgeH };
+  const { qrX, qrY, badgeX, badgeY } = pairCoords(cfg, TITLE_CARD.badgeW);
+
+  run(["-y",
+    "-i", path.join(CARDS, "title.png"),
+    "-i", path.join(CARDS, "qr-dark.png"),
+    "-i", badgePath,
+    "-filter_complex",
+    `[1:v]scale=${TITLE_CARD.qrSize}:${TITLE_CARD.qrSize}:flags=lanczos[qr];` +
+    `[0:v][qr]overlay=${qrX}:${qrY}:format=auto[bg];` +
+    `[2:v]scale=${TITLE_CARD.badgeW}:${badgeH}:flags=lanczos[badge];` +
+    `[bg][badge]overlay=${badgeX}:${badgeY}:format=auto[v]`,
+    "-map", "[v]", "-frames:v", "1", path.join(CARDS, "title-final.png")]);
+  console.log(`title card composed: QR(${TITLE_CARD.qrSize}px) + badge ${TITLE_CARD.badgeW}x${badgeH} pair @ y${qrY}`);
 }
 
 // 2) webm -> CFR mp4 (25fps)
@@ -209,9 +201,11 @@ const shots = [
 ];
 
 async function main() {
+  await buildQrCodes();
+  buildTitleCard();
   await buildEndCard();
   if (ENDCARD_ONLY) {
-    console.log("--endcard-only: wrote", path.join(CARDS, "end.png"));
+    console.log("--endcard-only: wrote", path.join(CARDS, "end.png"), "+", path.join(CARDS, "title-final.png"));
     return;
   }
 
@@ -220,7 +214,7 @@ async function main() {
     const args = ["-y"];
     let filters = vf;
     if (src === null) {
-      const img = out.startsWith("01") ? path.join(CARDS, "title.png") : path.join(CARDS, "end.png");
+      const img = out.startsWith("01") ? path.join(CARDS, "title-final.png") : path.join(CARDS, "end.png");
       args.push("-loop", "1", "-framerate", "25", "-i", img, "-t", String(to));
     } else {
       args.push("-ss", String(ss), "-to", String(to), "-i", path.join(WORK, src + ".mp4"));
@@ -244,11 +238,11 @@ async function main() {
   run(["-y", "-i", concatPath, "-vf", "setpts=PTS/1.2,fps=25", "-an",
     "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-movflags", "+faststart", finalPath]);
 
-  // サムネイル（動画の冒頭カード title.png を1280x720へ縮小）
+  // サムネイル（動画の冒頭カード title-final.png を1280x720へ縮小）
   // 冒頭カード＝動画の1フレーム目＝サムネイル となり、常に一致する
-  run(["-y", "-i", path.join(CARDS, "title.png"), "-vf", "scale=1280:720",
+  run(["-y", "-i", path.join(CARDS, "title-final.png"), "-vf", "scale=1280:720",
     "-frames:v", "1", "-update", "1", path.join(ROOT, "thumbnail-1280x720.png")]);
-  console.log("thumbnail from title.png (video opening card)");
+  console.log("thumbnail from title-final.png (video opening card)");
 
   // verify
   const dur = execFileSync(FP, ["-v", "error", "-show_entries", "format=duration",

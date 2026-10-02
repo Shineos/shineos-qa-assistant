@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{width:960px;height:720px;overflow:hidden;
+    background:linear-gradient(135deg,#ffffff 0%,#eefaf5 55%,#ddf3ea 100%);
+    font-family:"Noto Sans JP","Yu Gothic UI",sans-serif;display:flex;flex-direction:column;align-items:center;position:relative;}
+  .glow1{position:absolute;width:560px;height:560px;border-radius:50%;
+    background:radial-gradient(circle,#10a37f22 0%,#10a37f00 70%);top:-260px;right:-180px;}
+  .glow2{position:absolute;width:520px;height:520px;border-radius:50%;
+    background:radial-gradient(circle,#10a37f18 0%,#10a37f00 70%);bottom:-240px;left:-170px;}
+  .icon{width:150px;height:150px;margin-top:64px;filter:drop-shadow(0 18px 30px rgba(13,43,35,.18));}
+  h1{margin-top:26px;font-size:56px;font-weight:800;color:#16211c;letter-spacing:-.02em;text-align:center;line-height:1.15;}
+  .sub{margin-top:16px;font-size:26px;color:#4b5b53;font-weight:700;}
+  .pills{margin-top:30px;display:flex;gap:14px;}
+  .pill{font-size:18px;font-weight:700;color:#0c3f32;background:#ffffff;
+    padding:13px 24px;border-radius:999px;box-shadow:0 10px 24px rgba(13,43,35,.08),0 2px 6px rgba(13,43,35,.05);white-space:nowrap;}
+</style>
+</head>
+<body>
+  <div class="glow1"></div>
+  <div class="glow2"></div>
+  <img class="icon" src="shineos-qa-icon.png" alt="">
+  <h1>Institutional knowledge,<br>right where you need it.</h1>
+  <div class="sub">ShineosQA — Fully Offline Internal Q&amp;A App</div>
+  <div class="pills">
+    <span class="pill">🔒 Nothing leaves the PC</span>
+    <span class="pill">💬 Answers with sources</span>
+    <span class="pill">⚡ Runs on CPU only</span>
+  </div>
+</body>
+</html>

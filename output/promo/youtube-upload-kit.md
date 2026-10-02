@@ -57,9 +57,10 @@
 （任意機能のWeb検索をONにした場合のみ、入力した質問が外部の検索サービスへ送信されます。既定はOFFです）
 
 ■ ダウンロード
+Microsoft Store: https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F
+※ 推奨はMicrosoft Store版（自動更新・インストール約0.2GB＋初回起動時にモデル約2.3GBを取得）。
 GitHub Releases: https://github.com/Shineos/shineos-qa-assistant/releases/latest
 ※ 直接ダウンロード版は現在テスト証明書での署名のため、SmartScreenが「認識されないアプリ」と表示することがあります。その場合は「詳細情報」→「実行」を選択してください。
-※ Microsoft Store での配布も準備中です。
 
 ■ 提供形態
 本体は無償（MIT License）。導入支援・保守サポートは有償で承っています。
@@ -120,3 +121,20 @@ GitHub: https://github.com/Shineos/shineos-qa-assistant
 YouTubeのチャプターは「0:00から始まる」「各チャプターが10秒以上」が条件です。
 上記の説明文に含めた4つのチャプターはこの条件を満たしています。動画の速度を変えた場合は
 `output/promo/build-promo.js` の `shots` 配列から各ショットの長さを再計算して時刻を調整してください。
+
+---
+
+## 6. Microsoft Storeバッジ（サイト・ブログ掲載用）
+
+公式バッジ生成ページ（https://apps.microsoft.com/badge）で作成した静的バッジ。
+拡大・色変更・改変はガイドライン上NGのため、このコードをそのまま使うこと。
+
+```html
+<a href="https://get.microsoft.com/installer/download/XP8C6NSGDR1N9F?referrer=appbadge" target="_self" >
+	<img src="https://get.microsoft.com/images/ja%20dark.svg" width="200"/>
+</a>
+```
+
+- 動画のエンドカード・タイトルカードに使っているのは同じ公式バッジのPNG化したもの
+  （`output/promo/cards/msstore-badge-*.png`。生成手順は `output/promo/README.md` を参照）。
+- YouTubeの説明文には画像を貼れないため、上記「■ ダウンロード」のテキストリンクを使用する。
