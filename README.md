@@ -53,7 +53,7 @@
 
 ## ダウンロードとインストール
 
-[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから最新の `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール・**インストーラは約200MBの軽量版**）。**[https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F](https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F) Microsoft Store からも無料でインストールできます**（自動更新対応）。
+[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから最新の `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール・**インストーラは約200MBの軽量版**）。**[Microsoft Store](https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F) からも無料でインストールできます**（自動更新対応）。
 
 1. インストール直後の初回起動で、**AIモデルのダウンロードウィザード**が表示されます。⚡クイック（Qwen3-1.7B）＋必須の埋め込みモデル（合計約1.7GB・進捗表示付き）を選んでダウンロードしてください
 2. ダウンロード完了後は完全オフラインで利用可能です（🎯標準4B・🏆高品質30Bは、アプリ画面のモデルボタンまたは設定タブから必要な分だけ後からDL）
