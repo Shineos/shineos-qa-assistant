@@ -8,6 +8,8 @@ ShineosQA is an internal Q&A tool provided by [Shineos Inc.](https://shineos.com
 
 [![Latest Release](https://img.shields.io/github/v/release/Shineos/shineos-qa-assistant?sort=semver&label=Latest%20Release)](https://github.com/Shineos/shineos-qa-assistant/releases/latest)
 
+▶ **Demo video (3 min)**: https://youtu.be/r5k4L6a9dEU ｜ **Book a free 30-min online demo**: https://timerex.net/s/shineos_0922/fe662240
+
 ## Product Overview (for code-signing review)
 
 **Publisher:** Shineos Inc. (https://shineos.com) — contact: https://shineos.com/contact/
@@ -67,7 +69,7 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 
 ## Download & Install
 
-Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; the installer is a lightweight ~200 MB with no models bundled). **Microsoft Store distribution is in preparation**.
+Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; the installer is a lightweight ~200 MB with no models bundled). A **free install is also available from the [Microsoft Store](https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F)** (auto-updates; no SmartScreen warning).
 
 1. On the first launch after setup, the **AI model download wizard** appears. Choose ⚡Quick (Qwen3-1.7B) + the required embedding model (~1.7 GB total, with progress display)
 2. Once downloaded, the app runs fully offline (🎯Standard 4B and 🏆Quality 30B can be fetched later from the model menu or the settings tab — only if you need them)
