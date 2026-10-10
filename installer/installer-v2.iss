@@ -71,7 +71,7 @@ Source: "..\assets\app.ico";                  DestDir: "{app}\assets"; Flags: ig
 Source: "launch.vbs";                         DestDir: "{app}"; Flags: ignoreversion
 ; 既定モデルの同梱は構成で切替:
 ;   既定（full）: モデル3点を同梱（インストール直後に使える・完全オフライン・約2.2GB）
-;   /DLiteBuild : モデル非同梱（約200MB・Store提出用。初回起動時にアプリ内ウィザードで
+;   /DLiteBuild : モデル非同梱（約53MB・Store提出用。初回起動時にアプリ内ウィザードで
 ;                 必須モデル〜選択チャットモデル〜リランカを約2.3GB DL — installerサイズ上限対策。
 ;                 アプリ側は Models.cs / wizard.ts の初回DLフローが既存実装）
 ; 標準4B・高品質30Bはアプリ内からオンデマンドDL
