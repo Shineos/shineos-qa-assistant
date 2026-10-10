@@ -53,7 +53,7 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 |------|----|----|
 | AI engine | Ollama (with intermediary layers) | **llama.cpp executed directly** (llama-server, no intermediary) |
 | App layer | Open WebUI + Python + source patches | **One custom lightweight backend executable** (embedded SQLite, no patches) |
-| Install size | ~6 GB total, 15–40 min | **~2.1 GB with bundled starter model, a few minutes** (extra models downloaded later) |
+| Install size | ~6 GB total, 15–40 min | **~53 MB installer, a few minutes** (AI models ≈ 1.7 GB downloaded on first launch) |
 | Memory | Python etc. consumed ~2 GB resident | **Zero resident overhead** — freed RAM goes to the model (4B runs on 8 GB machines) |
 | Time to first token | Varied by model and state | **~4 s** with Quick 1.7B; repeated questions **under 0.2 s** (CPU-only, measured) |
 | Model switching | Chosen in the installer (changing meant re-download) | **Switch instantly in the app** (undownloaded models download from the same menu) |
@@ -63,13 +63,13 @@ Users register their company regulations and manuals (PDF/Word/Excel/CSV/Markdow
 
 - Windows 10 / 11 (64-bit) — **no GPU required** (CPU only)
 - 8 GB RAM or more (16 GB+ lets you use the 🏆Quality 30B model)
-- Free disk space: the installer is ~200 MB (no models bundled) plus the first-launch AI model download (⚡Quick + the required embedding model ≈ 1.7 GB). Adding 🎯Standard 4B takes ~2.5 GB more; 🏆Quality 30B ~14 GB; the **drawing capture AI reader (Qwen3-VL, optional) ~2.1 GB**
+- Free disk space: the installer is ~53 MB (no models bundled) plus the first-launch AI model download (⚡Quick + the required embedding model ≈ 1.7 GB). Adding 🎯Standard 4B takes ~2.5 GB more; 🏆Quality 30B ~14 GB; the **drawing capture AI reader (Qwen3-VL, optional) ~2.1 GB**
 - Internet connection is only needed for the **first-launch AI model download** (after that, fully offline)
 - Answers take a few to ~15 seconds (all processing is local). The product specializes in regulations/manuals Q&A; general-knowledge questions are declined with "not found in the knowledge base"
 
 ## Download & Install
 
-Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; the installer is a lightweight ~200 MB with no models bundled). A **free install is also available from the [Microsoft Store](https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F)** (auto-updates; no SmartScreen warning).
+Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; the installer is a lightweight ~53 MB with no models bundled). A **free install is also available from the [Microsoft Store](https://apps.microsoft.com/detail/xp8c6nsgdr1n9f)** (updates reinstall over the existing install, keeping your knowledge base and downloaded models; no SmartScreen warning).
 
 1. On the first launch after setup, the **AI model download wizard** appears. Choose ⚡Quick (Qwen3-1.7B) + the required embedding model (~1.7 GB total, with progress display)
 2. Once downloaded, the app runs fully offline (🎯Standard 4B and 🏆Quality 30B can be fetched later from the model menu or the settings tab — only if you need them)
