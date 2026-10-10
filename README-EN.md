@@ -62,7 +62,9 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 
 ## Download & Install
 
-Download the latest `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user; ~2.2 GB download with the starter models bundled, fully offline install). **Also available on the [Microsoft Store](https://apps.microsoft.com/store/detail/XP8C6NSGDR1N9F)** — the Store build uses a small installer (~47 MB) and downloads the AI models (~2.3 GB) in the app on first launch.
+Download `ShineosQA-Setup-<version>.exe` from the [Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) page and **double-click it** (no admin rights needed — installs per user). **The fully-offline full build (~2.2 GB, all starter models bundled) is attached to the v2.1.0 release as split files** (join them with `join-and-run.bat`); note that the "latest" entry in the release list is the ~53 MB model-less build of the main line. **Also available on the [Microsoft Store](https://apps.microsoft.com/detail/xp8c6nsgdr1n9f)** — the Store build uses a small installer (~47 MB) and downloads the AI models (~2.3 GB) in the app on first launch.
+
+> The steps below describe the full build with bundled models. On the Store build (no models bundled), the first-launch wizard downloads the AI models (~2.3 GB).
 
 1. ⚡Quick (Qwen3-1.7B, IQ4_XS quantization) is **bundled with the installer**, so the app is ready immediately after setup
 2. 🎯Standard (4B) and 🏆Quality (30B) can be downloaded later from the model menu or the settings tab — only if you need them
