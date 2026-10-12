@@ -15,10 +15,9 @@
   <ItemGroup>
     <PackageReference Include="Docnet.Core" Version="2.6.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
-    <PackageReference Include="PdfPig" Version="0.1.16" />
     <!-- NU1903対応: GHSA-2m69-gcr7-jv3q を修正したSQLiteネイティブ版を明示ピン -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
-    <!-- PDFテキスト抽出（ToUnicode CMap対応・日本語PDF可）。mainからバックポート -->
+    <!-- PDFテキスト抽出（ToUnicode CMap対応・日本語PDF可） -->
     <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 
