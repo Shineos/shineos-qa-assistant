@@ -64,6 +64,11 @@ Source: "..\output\backend-pub\*"; DestDir: "{app}"; Excludes: "data,data\*,*.db
 ; llama.cpp CPUエンジン（llama-server + 依存DLL一式。バリアントDLLは実行時に自動選択される）
 Source: "..\spikes\phase0\engine\cpu\llama-server.exe"; DestDir: "{app}\engine"; Flags: ignoreversion
 Source: "..\spikes\phase0\engine\cpu\*.dll";            DestDir: "{app}\engine"; Flags: ignoreversion
+; VC++ランタイム（CRT）のアプリローカル同梱。llama.cpp公式プリビルドはCRT動的リンクのため、
+; VC++再頒布可能パッケージ未導入のクリーンPCでは「MSVCP140.dll not found」で llama-server.exe が
+; 起動せず SHINE_E_ENGINE_DOWN になる（Store審査 2026-09-28 10.1.2.10/10.2.4.1 指摘の実害）。
+; 実行ファイルと同じフォルダに置けばローダーがシステムより優先して解決する
+Source: "crt\*.dll"; DestDir: "{app}\engine"; Flags: ignoreversion
 ; 共通
 Source: "..\vendor\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\vendor\licenses\*";               DestDir: "{app}\licenses"; Flags: ignoreversion
@@ -71,7 +76,7 @@ Source: "..\assets\app.ico";                  DestDir: "{app}\assets"; Flags: ig
 Source: "launch.vbs";                         DestDir: "{app}"; Flags: ignoreversion
 ; 既定モデルの同梱は構成で切替:
 ;   既定（full）: モデル3点を同梱（インストール直後に使える・完全オフライン・約2.2GB）
-;   /DLiteBuild : モデル非同梱（約53MB・Store提出用。初回起動時にアプリ内ウィザードで
+;   /DLiteBuild : モデル非同梱（約47MB・Store提出用。初回起動時にアプリ内ウィザードで
 ;                 必須モデル〜選択チャットモデル〜リランカを約2.3GB DL — installerサイズ上限対策。
 ;                 アプリ側は Models.cs / wizard.ts の初回DLフローが既存実装）
 ; 標準4B・高品質30Bはアプリ内からオンデマンドDL

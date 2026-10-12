@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>社内知恵袋 promo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif;
+    background: linear-gradient(135deg, #041d18 0%, #0a4a3a 46%, #0f8a6c 100%);
+    color: #fff;
+  }
+  .glow {
+    position: absolute; width: 1400px; height: 1400px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(126,226,196,.22) 0%, rgba(126,226,196,0) 62%);
+    right: -420px; top: -420px;
+  }
+  .glow2 {
+    position: absolute; width: 900px; height: 900px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(16,163,127,.30) 0%, rgba(16,163,127,0) 60%);
+    left: -320px; bottom: -320px;
+  }
+  .canvas {
+    position: relative; width: 1920px; height: 1080px;
+    display: flex; align-items: center; padding: 0 84px 0 96px; gap: 40px;
+  }
+  .left { width: 800px; flex: none; }
+  .brand { display: flex; align-items: center; gap: 22px; margin-bottom: 40px; }
+  .brand svg { display: block; width: 112px; height: 112px; filter: drop-shadow(0 8px 18px rgba(0,0,0,.4)); }
+  .brand .name { font-size: 46px; font-weight: 800; letter-spacing: .02em; }
+  .brand .name small { display: block; font-size: 18px; font-weight: 600; color: #9fe3cb; letter-spacing: .08em; margin-top: 3px; }
+  h1 { font-size: 72px; line-height: 1.24; font-weight: 800; letter-spacing: .01em; margin-bottom: 22px; }
+  h1 .accent { color: #7ee2c4; }
+  .sub { font-size: 30px; line-height: 1.55; color: #d8f2e8; margin-bottom: 42px; font-weight: 600; }
+  .sub b { color: #fff; }
+  .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .chip {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 18px; padding: 20px 22px 18px;
+  }
+  .chip .t { font-size: 27px; font-weight: 800; margin-bottom: 7px; display: flex; align-items: center; gap: 10px; }
+  .chip .d { font-size: 20px; line-height: 1.45; color: #d3ecdf; font-weight: 500; }
+  .footer { position: absolute; left: 96px; bottom: 40px; font-size: 24px; color: #9fe3cb; letter-spacing: .04em; font-weight: 600; }
+  .footer b { color: #fff; }
+  .right { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+  .shotwrap { position: relative; }
+  .shot {
+    width: 880px; display: block; border-radius: 20px;
+    border: 1px solid rgba(255,255,255,.22);
+    box-shadow: 0 40px 90px rgba(0,0,0,.55), 0 0 0 10px rgba(255,255,255,.03);
+  }
+  .caption {
+    position: absolute; left: 26px; bottom: -28px;
+    background: #fff; color: #065f46; font-weight: 800; font-size: 25px;
+    padding: 13px 28px; border-radius: 999px;
+    box-shadow: 0 10px 26px rgba(0,0,0,.4);
+    display: flex; align-items: center; gap: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="glow2"></div>
+  <div class="canvas">
+    <div class="left">
+      <div class="brand">
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#33b489"/>
+              <stop offset="1" stop-color="#1b7a55"/>
+            </linearGradient>
+          </defs>
+          <!-- 角丸スクウェア（角は透過） -->
+          <rect x="0" y="0" width="100" height="100" rx="23" fill="url(#tile)"/>
+          <!-- 白い吹き出し: 角丸矩形＋小さめの尾（本ロゴの比率: 尾は気泡高さの約20%） -->
+          <rect x="20" y="22" width="60" height="40" rx="13" fill="#ffffff"/>
+          <path d="M42 60 L38 69 L50 61 Z" fill="#ffffff" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+          <!-- 中に緑の3ドット -->
+          <circle cx="36" cy="42" r="6.5" fill="#10a37f"/>
+          <circle cx="50" cy="42" r="6.5" fill="#10a37f"/>
+          <circle cx="64" cy="42" r="6.5" fill="#10a37f"/>
+        </svg>
+        <div class="name">社内知恵袋<small>ShineosQA — OFFLINE INTERNAL Q&amp;A</small></div>
+      </div>
+      <h1>社内規定・マニュアルの<br>Q&amp;Aを、<span class="accent">この1台だけで。</span></h1>
+      <div class="sub">AIモデルを内蔵し、<b>社内文書はPCの外に出ません</b>。<br>誰でも自然な日本語で質問できる、社内Q&amp;Aツール。</div>
+      <div class="chips">
+        <div class="chip"><div class="t">🔒 セキュリティ</div><div class="d">完全ローカル処理・外部送信ゼロ・テレメトリなし</div></div>
+        <div class="chip"><div class="t">📄 出典付き回答</div><div class="d">文書名＋該当箇所を必ず表示</div></div>
+        <div class="chip"><div class="t">💸 完全無料</div><div class="d">MITライセンス・機能制限なし・登録不要</div></div>
+        <div class="chip"><div class="t">⚡ 低スペックOK</div><div class="d">GPU不要・メモリ8GBで動作</div></div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="shotwrap">
+        <img class="shot" src="../../assets/screenshots/app-02-chat.png" alt="出典付き回答画面">
+        <div class="caption">🔗 回答には必ず「出典」が付きます</div>
+      </div>
+    </div>
+  </div>
+  <div class="footer"><b>powered by Shineos</b> ｜ https://shineos.com ｜ 完全オフライン社内Q&amp;Aツール</div>
+</body>
+</html>

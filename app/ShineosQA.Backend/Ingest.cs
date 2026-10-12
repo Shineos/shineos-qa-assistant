@@ -84,7 +84,10 @@ public sealed class Ingest
         return text;
     }
 
-    /// <summary>PDF: PdfPig（ToUnicode CMap対応・日本語PDF可）を本体に、従来の自製抽出器をフォールバックに</summary>
+    /// <summary>PDF抽出: PdfPig（ToUnicode CMap対応・日本語PDF可）を本体に、従来の自製抽出器を
+    /// フォールバックに。自製抽出器はCIDフォント（日本語PDFの大多数）で
+    /// 文字化けを抽出し、そのバイト列がembedの物理バッチ上限（512トークン）を超えて
+    /// SHINE_E_ENGINE_DOWN系の500になっていた実害がある。両方失敗で従来どおりのエラー</summary>
     private static string ExtractPdfAny(Stream s)
     {
         using var ms = new MemoryStream();

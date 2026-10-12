@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>poster 720x1080</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 720px; height: 1080px; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif;
+    background: linear-gradient(160deg, #041d18 0%, #0a4a3a 48%, #0f8a6c 100%);
+    color: #fff;
+  }
+  .glow {
+    position: absolute; width: 760px; height: 760px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(126,226,196,.22) 0%, rgba(126,226,196,0) 62%);
+    right: -260px; top: -260px;
+  }
+  .canvas {
+    position: relative; width: 720px; height: 1080px;
+    display: flex; flex-direction: column; padding: 58px 44px 44px;
+  }
+  .brand { display: flex; align-items: center; gap: 19px; margin-bottom: 36px; }
+  .brand svg { display: block; width: 96px; height: 96px; filter: drop-shadow(0 6px 14px rgba(0,0,0,.38)); }
+  .brand .name { font-size: 38px; font-weight: 800; }
+  .brand .name small { display: block; font-size: 16px; font-weight: 600; color: #9fe3cb; letter-spacing: .08em; margin-top: 3px; }
+  h1 { font-size: 54px; line-height: 1.32; font-weight: 800; margin-bottom: 18px; }
+  h1 .accent { color: #7ee2c4; }
+  .sub { font-size: 26px; line-height: 1.5; color: #d8f2e8; margin-bottom: 34px; font-weight: 600; }
+  .sub b { color: #fff; }
+  .chips { display: flex; flex-direction: column; gap: 18px; }
+  .chip {
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 18px; padding: 19px 24px 17px;
+  }
+  .chip .t { font-size: 26px; font-weight: 800; margin-bottom: 5px; }
+  .chip .d { font-size: 20px; line-height: 1.45; color: #d3ecdf; font-weight: 500; }
+  .footer { margin-top: auto; font-size: 20px; color: #9fe3cb; font-weight: 600; }
+  .footer b { color: #fff; }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="canvas">
+    <div class="brand">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#33b489"/>
+            <stop offset="1" stop-color="#1b7a55"/>
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="100" height="100" rx="23" fill="url(#tile)"/>
+        <rect x="20" y="22" width="60" height="40" rx="13" fill="#ffffff"/>
+        <path d="M42 60 L38 69 L50 61 Z" fill="#ffffff" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+        <circle cx="36" cy="42" r="6.5" fill="#10a37f"/>
+        <circle cx="50" cy="42" r="6.5" fill="#10a37f"/>
+        <circle cx="64" cy="42" r="6.5" fill="#10a37f"/>
+      </svg>
+      <div class="name">社内知恵袋<small>ShineosQA — OFFLINE INTERNAL Q&amp;A</small></div>
+    </div>
+    <h1>社内規定・マニュアルの<br><span class="accent">Q&amp;Aを、この1台だけで。</span></h1>
+    <div class="sub">AIモデルを内蔵し、<b>社内文書はPCの外に出ません</b>。</div>
+    <div class="chips">
+      <div class="chip"><div class="t">🔒 セキュリティ</div><div class="d">完全ローカル処理・外部送信ゼロ・テレメトリなし</div></div>
+      <div class="chip"><div class="t">📄 出典付き回答</div><div class="d">文書名＋該当箇所を必ず表示</div></div>
+      <div class="chip"><div class="t">💸 完全無料</div><div class="d">MITライセンス・機能制限なし・登録不要</div></div>
+      <div class="chip"><div class="t">⚡ 低スペックOK</div><div class="d">GPU不要・メモリ8GBで動作</div></div>
+    </div>
+    <div class="footer"><b>powered by Shineos</b> ｜ shineos.com</div>
+  </div>
+</body>
+</html>

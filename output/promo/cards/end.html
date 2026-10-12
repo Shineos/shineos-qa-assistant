@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<style>
+  html,body{margin:0;padding:0;width:1920px;height:1080px;overflow:hidden;}
+  body{
+    font-family:"Yu Gothic","Yu Gothic UI","Meiryo",sans-serif;
+    background:linear-gradient(135deg,#0d2b23 0%,#123c31 60%,#10a37f 140%);
+    position:relative;
+  }
+  .blob1{position:absolute;width:900px;height:900px;border-radius:50%;
+    background:radial-gradient(circle,#ffffff10 0%,#ffffff00 70%);top:-300px;left:-220px;}
+  .wrap{position:absolute;inset:0;}
+  /* 各要素は絶対配置。QRコードとURLカードは build-promo.js が ffmpeg で合成する
+     （ここには描かない）。座標を変える場合は build-promo.js の END_CARD も合わせて変更すること */
+  .icon{position:absolute;top:70px;left:50%;transform:translateX(-50%);
+    width:170px;height:170px;border-radius:38px;background:#ffffff;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 18px 50px #00000055;}
+  .icon img{width:146px;height:146px;display:block;}
+  h1{position:absolute;top:272px;left:0;width:1920px;margin:0;text-align:center;
+    font-size:108px;font-weight:800;color:#ffffff;letter-spacing:.02em;line-height:1.28;white-space:nowrap;}
+  .sub{position:absolute;top:430px;left:0;width:1920px;text-align:center;
+    font-size:40px;color:#c9efe2;font-weight:700;}
+  .note{position:absolute;bottom:20px;left:0;width:1920px;text-align:center;
+    font-size:28px;color:#9fd9c6;font-weight:600;}
+</style>
+</head>
+<body>
+  <div class="blob1"></div>
+  <div class="wrap">
+    <div class="icon"><img src="store-logo-1080.png" alt="社内知恵袋"></div>
+    <h1>社内の知恵を、すぐ隣に。</h1>
+    <div class="sub">社内知恵袋 ― Windowsアプリ・無料</div>
+    <div class="note">© Shineos Inc.</div>
+  </div>
+</body>
+</html>

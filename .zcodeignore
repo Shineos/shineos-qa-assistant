@@ -1,0 +1,68 @@
+# macOS
+.DS_Store
+
+# ビルド出力（ISCC の OutputDir）
+dist/
+
+# Python
+__pycache__/
+*.pyc
+
+# 実行時ログ
+*.log
+
+# バックアップ・一時ファイル
+*.bak
+
+# ZCode プラン
+.zcode/
+.mimosa/
+
+# フェーズ0スパイク: 大型バイナリ（llama.cppエンジン・GGUFモデル）は除外
+spikes/phase0/engine/
+spikes/phase0/models/
+
+# v2開発アーティファクト
+app/ShineosQA.Web/node_modules/
+app/ShineosQA.Web/dist/
+app/ShineosQA.Backend/bin/
+app/ShineosQA.Backend/obj/
+tools/dotnet-sdk/
+tools/ffmpeg/
+output/
+
+# v2 test artifacts
+app/ShineosQA.Backend.Tests/bin/
+app/ShineosQA.Backend.Tests/obj/
+spikes/phase0/ui-smoke/out/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+node_modules/
+bower_components/
+jspm_packages/
+site-packages/
+venv/
+coverage/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

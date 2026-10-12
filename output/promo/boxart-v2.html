@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>box art 1080 v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1080px; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Yu Gothic UI", "Meiryo", sans-serif;
+    background: linear-gradient(150deg, #17c096 0%, #0f8a6c 55%, #0a5c48 100%);
+    color: #fff;
+  }
+  .canvas {
+    position: relative; width: 1080px; height: 1080px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* 大きな柔らかいハイライト（左上） */
+  .sheen {
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 26% 20%, rgba(255,255,255,.16) 0%, rgba(255,255,255,0) 46%);
+  }
+  .mark { position: relative; width: 640px; height: 640px; }
+  svg { display: block; width: 640px; height: 640px; }
+  .shadow {
+    position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%);
+    width: 430px; height: 46px; border-radius: 50%;
+    background: rgba(3,40,30,.32); filter: blur(10px);
+  }
+</style>
+</head>
+<body>
+  <div class="sheen"></div>
+  <div class="canvas">
+    <div class="mark">
+      <div class="shadow"></div>
+      <svg viewBox="0 0 640 640" xmlns="http://www.w3.org/2000/svg">
+        <!-- 吹き出し（Q&A）: 袋を包む -->
+        <path d="M92 268 C92 172 172 92 320 92 C468 92 548 172 548 268 C548 364 468 444 320 444
+                 L196 444 L138 526 C130 538 112 533 112 518 L112 424 C98 392 92 344 92 268 Z"
+              fill="#ffffff"/>
+        <!-- 袋（知恵袋）: 縦長・口をぎゅっと絞った形 -->
+        <!-- 袋本体 -->
+        <path d="M320 156
+                 C275 156 236 172 214 198
+                 C252 216 284 224 320 224
+                 C356 224 388 216 426 198
+                 C404 172 365 156 320 156 Z"
+              fill="#0f8a6c"/>
+        <!-- 首ひも（左右） -->
+        <path d="M214 198 C186 214 168 236 160 262 L186 274 C194 246 210 224 232 210 Z" fill="#0f8a6c"/>
+        <path d="M426 198 C454 214 472 236 480 262 L454 274 C446 246 430 224 408 210 Z" fill="#0f8a6c"/>
+        <!-- 胴体（ふっくら） -->
+        <path d="M162 268
+                 C150 300 144 332 144 360
+                 C144 424 224 468 320 468
+                 C416 468 496 424 496 360
+                 C496 332 490 300 478 268
+                 C438 292 382 304 320 304
+                 C258 304 202 292 162 268 Z"
+              fill="#0f8a6c"/>
+        <!-- 「知」の光（袋の中央・星スパーク） -->
+        <path d="M320 330 L336 366 L376 372 L346 400 L355 440 L320 420 L285 440 L294 400 L264 372 L304 366 Z"
+              fill="#9fe3cb"/>
+        <!-- Q&Aドット（吹き出し内右上） -->
+        <circle cx="452" cy="200" r="17" fill="#9fe3cb"/>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

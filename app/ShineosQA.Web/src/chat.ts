@@ -1,5 +1,6 @@
 import { api, streamChat, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
 import { renderMarkdown } from './markdown';
+import { openReportModal } from './report';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -15,6 +16,8 @@ const SVG_ZAP = svgWrap('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2
 // 十字線付きの照準（crosshair）型にして区別させる
 const SVG_TARGET = svgWrap('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>');
 const SVG_TROPHY = svgWrap('<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>');
+// 問題報告（11.16 Live Generative AI Content対応）の旗アイコン
+const SVG_FLAG = svgWrap('<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>');
 // メッセージカード時刻横のコピーアイコン（コピー完了時はチェックに差し替え）
 const SVG_COPY = svgWrap('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>');
 const SVG_CHECK = svgWrap('<polyline points="20 6 9 17 4 12"/>');
@@ -211,6 +214,8 @@ export class ChatView {
   private chatTitle = '';                    // chat-mainヘッダーに表示中のチャット名
   private headerBookmarked = false;          // ヘッダー星アイコンの状態
   private sending = false;
+  // 直近のユーザー質問（AI回答の「問題を報告」に添付するため。履歴読込・ストリーミング両経路で更新）
+  private lastUserText = '';
   private webSearch = false;
   private selTier = '';
   private modelsById = new Map<string, ModelEntry>();
@@ -552,7 +557,11 @@ export class ChatView {
       card.appendChild(src);
     }
     wrap.appendChild(card);
-    this.appendTimeRow(wrap, time, content, sources);
+    if (role === 'user') {
+      this.lastUserText = content;
+    }
+    // 時刻＋コピーアイコン行。AI回答には「問題を報告」（11.16 Live Generative AI Content対応）も同じ行に付く
+    this.appendMessageActions(wrap, role, time, content, role === 'user' ? [] : sources);
     m.appendChild(wrap);
     m.scrollTop = m.scrollHeight;
     return card;
@@ -623,19 +632,18 @@ export class ChatView {
     if (host) host.innerHTML = '';
   }
 
-  /** 時刻行（カードの外・下）。時刻の横にコピーアイコン: rawTextはユーザーは入力テキスト、
-   *  AI回答はMarkdownソース（DB保存内容と同一）。sourcesがある回答は出典（ファイル名＋該当箇所）も
-   *  コピー本文に含める（画面の「出典」Detailsの中身と同じ情報をテキストで持たせる） */
-  private appendTimeRow(wrap: HTMLElement, time: Date | undefined, rawText: string, sources?: SourceInfo[]): void {
-    const copyBody = rawText + (sources && sources.length > 0 ? '\n\n' + buildSourcesText(sources) : '');
-    const row = document.createElement('div');
-    row.className = 'msg-time';
-    if (time) {
-      const tm = document.createElement('span');
-      tm.textContent = fmtTime(time);
-      tm.title = fmtFull(time);
-      row.appendChild(tm);
-    }
+  private reportButton(content: string): HTMLButtonElement {
+    const rep = document.createElement('button');
+    rep.type = 'button';
+    rep.className = 'report-btn';
+    rep.innerHTML = `${SVG_FLAG}<span>問題を報告</span>`;
+    rep.title = 'AIの回答に不適切な内容や誤りがある場合に報告します';
+    const q = this.lastUserText;
+    rep.addEventListener('click', () => openReportModal(content, q));
+    return rep;
+  }
+
+  private copyButton(copyBody: string): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'copy-btn';
@@ -653,7 +661,26 @@ export class ChatView {
         btn.title = 'コピー（出典の該当箇所を含む）';
       }, 1500);
     });
-    row.appendChild(btn);
+    return btn;
+  }
+
+  /** 時刻行（カードの外・下）。AI回答は「問題を報告」を同じ行に置く。
+   *  コピー本文: rawTextはユーザーは入力テキスト、AI回答はMarkdownソース（DB保存内容と同一）。
+   *  sourcesがある回答は出典（ファイル名＋該当箇所）も含める（画面の「出典」Detailsの中身と同じ情報） */
+  private appendMessageActions(wrap: HTMLElement, role: string, time: Date | undefined, rawText: string, sources: SourceInfo[] = []): void {
+    const copyBody = rawText + (sources.length > 0 ? '\n\n' + buildSourcesText(sources) : '');
+    const assistant = role !== 'user';
+    const row = document.createElement('div');
+    row.className = assistant ? 'msg-actions' : 'msg-time';
+    if (assistant) row.appendChild(this.reportButton(rawText));
+    if (time) {
+      const tm = document.createElement('span');
+      if (assistant) tm.className = 'msg-time';
+      tm.textContent = fmtTime(time);
+      tm.title = fmtFull(time);
+      row.appendChild(tm);
+    }
+    row.appendChild(this.copyButton(copyBody));
     wrap.appendChild(row);
   }
 
@@ -945,8 +972,8 @@ export class ChatView {
                 for (const s of sources) src.appendChild(sourceElement(s));
                 liveCard.appendChild(src);
               }
-              // 時刻はカードの外（下）に追加。コピーは acc＋出典（ファイル名＋該当箇所）
-              this.appendTimeRow(liveCard.parentElement!, new Date(), acc, sources);
+              // 「問題を報告」＋コピー＋時刻はカードの外（下）に追加。コピーは acc＋出典（ファイル名＋該当箇所）
+              this.appendMessageActions(liveCard.parentElement!, 'assistant', new Date(), acc, d.sources ?? []);
             } else {
               thinking.remove();
               this.appendMessage('assistant', acc || '', d.sources ?? [], new Date());

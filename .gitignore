@@ -28,8 +28,18 @@ app/ShineosQA.Web/dist/
 app/ShineosQA.Backend/bin/
 app/ShineosQA.Backend/obj/
 tools/dotnet-sdk/
-tools/ffmpeg/
-output/
+
+# output/ は作業出力（数GB）。プロモ動画制作キット（output/promo）のみ git 管理する
+output/*
+!output/promo/
+output/promo/recordings/
+output/promo/final-frames/
+output/promo/frames/
+output/promo/work/
+output/promo/node_modules/
+output/promo/backup-data-2.1.3-dev/
+output/promo/chat-resp.txt
+output/promo/chat-ids.json
 
 # v2 test artifacts
 app/ShineosQA.Backend.Tests/bin/
@@ -38,8 +48,11 @@ spikes/phase0/ui-smoke/out/
 
 # シナリオテスト出力・スクラッチファイル
 spikes/phase0/latency-cmp/answers/
+# 作業テンポラリ・ローカルツール・デバッグdump（git管理しない）
+/tmp/
+tools/ffmpeg/
 app/chat-out.txt
+/q-web.json
 app/q-web.json
-q-web.json
 app/ShineosQA.Web/q-lite.json
 app/ShineosQA.Web/q-md.json
