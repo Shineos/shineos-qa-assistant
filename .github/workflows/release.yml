@@ -171,6 +171,9 @@ jobs:
           }
           # エンジン（モデルは同梱しない: 初回起動時のウィザードでアプリ内DL）
           Copy-Item spikes/phase0/engine/cpu/* "$stage/engine" -Recurse -Force
+          # VC++ランタイム（CRT）: エンジンと同じく {engine} 配下へ（installer/crt/README.md 参照）。
+          # これが無いとクリーンPCで llama-server.exe が起動しない（Store審査 2026-09-28 の実害）
+          Copy-Item installer/crt/*.dll "$stage/engine" -Force
           # ライセンス
           Copy-Item vendor/licenses/* "$stage/licenses" -Recurse -Force
           Copy-Item vendor/THIRD-PARTY-NOTICES.txt $stage -Force
