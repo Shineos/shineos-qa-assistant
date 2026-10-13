@@ -48,6 +48,34 @@ public class PdfTextTests
     }
 
     [Fact]
+    public void ExtractAll_JapanesePdf_NoMojibakeChars()
+    {
+        // CIDフォント文字化けの回帰ガード: 置換文字（U+FFFD）やNULが本文に混入しないこと。
+        // 自製抽出器時代の実害（文字化けバイト列がembedの物理バッチ上限を超え500になる）の検知用
+        var r = PdfText.ExtractAll(Fixture("cid-japanese.pdf"));
+        Assert.DoesNotContain('�', r.Text);
+        Assert.DoesNotContain('\0', r.Text);
+    }
+
+    [Fact]
+    public void ExtractWithLines_LinesMapBackIntoFullText()
+    {
+        // 出典プレビュー（図上ハイライト）の契約: 各行のStart/Endは全文（Trim後）の有効な文字位置で、
+        // 全文の該当範囲から行テキストを復元できる。ページ寸法はページ数分そろい、正の値
+        var r = PdfText.ExtractWithLines(Fixture("cid-japanese.pdf"));
+        Assert.True(r.Lines.Count > 0);
+        Assert.True(r.Runs.Count > 0);
+        Assert.Equal(r.Pages, r.PageSizes.Count);
+        Assert.All(r.PageSizes, s => Assert.True(s.Item1 > 0 && s.Item2 > 0));
+        foreach (var line in r.Lines)
+        {
+            Assert.InRange(line.Start, 0, r.Text.Length);
+            Assert.InRange(line.End, line.Start, r.Text.Length);
+            Assert.Equal(line.Text, r.Text[line.Start..line.End]);
+        }
+    }
+
+    [Fact]
     public void Png_EncodeRgba_ProducesPngSignature()
     {
         // サムネイル用エンコーダの最小検証（1x1 RGBA）
