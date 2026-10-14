@@ -74,6 +74,9 @@ public sealed class ModelManager
     private readonly SemaphoreSlim _lock = new(1, 1);
     public volatile DownloadProgress Progress = new();
 
+    /// <summary>DLストール判定: この時間バイト進展が無ければ接続を切断し次URLへフォールバック</summary>
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
+
     public ModelManager(AppConfig cfg, ILogger log) { _cfg = cfg; _log = log; }
 
     public List<ModelStatus> Status() => Catalog.Select(e =>
@@ -145,12 +148,39 @@ public sealed class ModelManager
                             await using var src = await resp.Content.ReadAsStreamAsync(ct);
                             await using var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true);
                             var buf = new byte[1 << 20];
-                            int n;
-                            while ((n = await src.ReadAsync(buf, ct)) > 0)
+                            // ストール監視: 接続が生きたままバイト進展だけ止まるとReadAsyncは無期限に待つ
+                            // （実測2026-10-14: huggingfaceへのDLが54MBで停止し、UIは進捗0のまま固まる）。
+                            // 60秒進展が無ければ切断してIOException化し、次URL（ミラー）へフォールバックさせる
+                            using var stallCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                            var lastProgressUtc = DateTime.UtcNow;
+                            using var watchdogDone = new CancellationTokenSource();
+                            var _ = Task.Run(async () =>
                             {
-                                await fs.WriteAsync(buf.AsMemory(0, n), ct);
-                                Progress.Bytes += n;
+                                try
+                                {
+                                    while (!watchdogDone.Token.IsCancellationRequested)
+                                    {
+                                        await Task.Delay(5000, watchdogDone.Token);
+                                        if (DateTime.UtcNow - lastProgressUtc > StallTimeout) { stallCts.Cancel(); return; }
+                                    }
+                                }
+                                catch (OperationCanceledException) { }
+                            });
+                            try
+                            {
+                                int n;
+                                while ((n = await src.ReadAsync(buf, stallCts.Token)) > 0)
+                                {
+                                    await fs.WriteAsync(buf.AsMemory(0, n), ct);
+                                    Progress.Bytes += n;
+                                    lastProgressUtc = DateTime.UtcNow;
+                                }
                             }
+                            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                            {
+                                throw new IOException($"download stalled (no bytes for {(int)StallTimeout.TotalSeconds}s) — trying next URL");
+                            }
+                            finally { watchdogDone.Cancel(); }
                         }
                         Progress = new DownloadProgress { State = "verifying", CurrentId = id, Bytes = Progress.Bytes, Total = Progress.Total };
                         string hash;
