@@ -605,6 +605,14 @@ namespace ShineosQA
                 {
                     try
                     {
+                        // Microsoft Store評価導線: ms-windows-storeスキームはShellExecuteで
+                        // Storeアプリを直接開く（http(s)ホワイトリストの枠組みの外）
+                        if (e.Uri.StartsWith("ms-windows-store:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            e.Handled = true;
+                            OpenInDefaultBrowser(e.Uri);
+                            return;
+                        }
                         string host = new Uri(e.Uri).Host;
                         if (host == "shineos.com" || host == "www.shineos.com")
                         {
