@@ -2,7 +2,7 @@
 #
 # - v* タグを push すると: Windows ランナー上で
 #     Web UI (npm) → バックエンド自己完結publish (dotnet) → WebView2ラッパー (csc)
-#     → llama.cppエンジンDL → Inno Setup 6 で **モデル非同梠の軽量インストーラ（約200MB）**
+#     → llama.cppエンジンDL → Inno Setup 6 で **モデル非同梱の軽量インストーラ（約47MB）**
 #     を生成し、Actions成果物 + Release に添付
 # - AIモデル（GGUF）はインストーラに同梱しない: 初回起動時のウィザード（または設定→AIモデル）
 #   でアプリ内からダウンロードする（Models.cs / wizard.ts の既存DLフロー・SHA256検証付き）
