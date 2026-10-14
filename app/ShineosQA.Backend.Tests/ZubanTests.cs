@@ -68,4 +68,46 @@ public class ZubanTests
         Assert.True(hits.Count > 0);
         Assert.Contains("st1042a", hits[0].Rec.Tokens); // 正規形トークンが索引側にも入っている
     }
+
+    [Fact]
+    public void ZubansIn_ExtractsNormalizedZubanFromQuestion()
+    {
+        // 同一図番混在ガード: 質問文中の図番を正規形で取り出せること
+        Assert.Equal(new[] { "st1042a" }, DrawingIngest.ZubansIn("ST-1042Aの材質は？"));
+        Assert.Equal(new[] { "kb3052" }, DrawingIngest.ZubansIn("KB-305/2 と KB305-2 は同じ？"));
+    }
+
+    [Fact]
+    public void ZubansIn_JapaneseQuestionWithoutZuban_Empty()
+    {
+        Assert.Empty(DrawingIngest.ZubansIn("会議室の予約ルールを教えて"));
+    }
+
+    [Fact]
+    public void DetectZubanAmbiguity_SameZubanAcrossTwoFiles_Detected()
+    {
+        // 同一図番が別ファイル（改訂違い等）に存在する場合に検出されること
+        var amb = DrawingIngest.DetectZubanAmbiguity(new[] { (10L, (string?)"ST-1042A"), (11L, (string?)"ST-1042A") });
+        Assert.NotNull(amb);
+        Assert.Equal("st1042a", amb!.Value.ZubanNorm);
+        Assert.Equal(new long[] { 10, 11 }, amb.Value.FileIds.OrderBy(x => x).ToArray());
+    }
+
+    [Fact]
+    public void DetectZubanAmbiguity_FormatVariants_NormalizedTogether()
+    {
+        // 表記ゆれ（ハイフン・大小）も同一図番として扱う
+        var amb = DrawingIngest.DetectZubanAmbiguity(new[] { (10L, (string?)"ST-1042A"), (11L, (string?)"st-1042a") });
+        Assert.NotNull(amb);
+        Assert.Equal(new long[] { 10, 11 }, amb!.Value.FileIds.OrderBy(x => x).ToArray());
+    }
+
+    [Fact]
+    public void DetectZubanAmbiguity_DifferentZubanOrSingleFile_Null()
+    {
+        // 異なる図番、または同一ファイル内の重複は曖昧ではない
+        Assert.Null(DrawingIngest.DetectZubanAmbiguity(new[] { (10L, (string?)"ST-1042A"), (11L, (string?)"KB-305-2") }));
+        Assert.Null(DrawingIngest.DetectZubanAmbiguity(new[] { (10L, (string?)"ST-1042A"), (10L, (string?)"ST-1042A") }));
+        Assert.Null(DrawingIngest.DetectZubanAmbiguity(new[] { (10L, (string?)null), (11L, (string?)"") }));
+    }
 }

@@ -98,6 +98,9 @@ public class RagMathTests
         Assert.True(Rag.GuardThreshold < 0);
         Assert.True(Rag.RerankSkipCos < Rag.AnswerCacheCos);
         Assert.True(Rag.RerankSkipKw > 0 && Rag.RerankSkipKw < 1);
+        // 弱一致バックストップ(MinAcceptKw)は省略閾値より下に敷く:
+        // 0.15〜0.50の帯はリランカーに識別を委ね、バックストップはkw≈0(語彙的無関係)のみ拒否する
+        Assert.True(Rag.MinAcceptKw < Rag.RerankSkipKw);
         Assert.Equal(8, Rag.RerankPool);
     }
 }
@@ -201,5 +204,44 @@ public class RagCurrentDateTests
     {
         foreach (var q in new[] { "今何時？", "現在の時刻を教えて", "日付は？" })
             Assert.True(Rag.TimeSensitiveQuestion().IsMatch(q), $"should match: {q}");
+    }
+}
+
+/// <summary>弱一致バックストップ(IsWeakMatch)。識別の主役はリランクスコア(GuardThreshold)で、RerankSkipKw=0.50
+/// により弱一致は必ずリランクを経由する。本バックストップはリランカー未導入環境でkw≈0(語彙的無関係)を拒否する。
+/// 0.15〜0.50の帯はリランカーが無いと識別不能（10-01実測の富士山誤答kw=0.37はこの帯 → リランク経由でGuardThresholdが拒否）</summary>
+public class RagWeakMatchTests
+{
+    [Fact]
+    public void NearZeroKw_WithoutExemptions_Refuses()
+    {
+        // 語彙的にほぼ無関係な採択(リランカー未導入環境の最終防波堤)
+        Assert.True(Rag.IsWeakMatch(0.00, hasWebContext: false, timeSensitive: false, drawingIntent: false, rerankValidated: false));
+        Assert.True(Rag.IsWeakMatch(0.14, hasWebContext: false, timeSensitive: false, drawingIntent: false, rerankValidated: false));
+    }
+
+    [Fact]
+    public void MidBand_PassesBackstop_RerankIsTheDiscriminator()
+    {
+        // 正解質問(実測0.39-0.48)もKB外質問(0.37)もこの帯 — kwでは分離不可のためバックストップは通し、
+        // RerankSkipKw=0.50により必ずリランクへ流して GuardThreshold で識別する
+        Assert.False(Rag.IsWeakMatch(0.37, hasWebContext: false, timeSensitive: false, drawingIntent: false, rerankValidated: false));
+        Assert.False(Rag.IsWeakMatch(0.46, hasWebContext: false, timeSensitive: false, drawingIntent: false, rerankValidated: false));
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]   // Web文脈あり
+    [InlineData(false, true, false)]   // 時間感応
+    [InlineData(false, false, true)]   // 図面意図(寸法ノイズでkwが構造的に希薄)
+    public void ExemptedQuestions_Pass_EvenWithNearZeroKw(bool hasWebContext, bool timeSensitive, bool drawingIntent)
+    {
+        Assert.False(Rag.IsWeakMatch(0.10, hasWebContext, timeSensitive, drawingIntent, rerankValidated: false));
+    }
+
+    [Fact]
+    public void RerankValidated_Passes_EvenWithNearZeroKw()
+    {
+        // リランクを実行しガード(GuardThreshold)を通過した採択はクロスエンコーダ検証済み → 対象外
+        Assert.False(Rag.IsWeakMatch(0.10, hasWebContext: false, timeSensitive: false, drawingIntent: false, rerankValidated: true));
     }
 }

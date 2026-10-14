@@ -12,7 +12,12 @@ public static partial class Rag
     public const int SnippetMaxChars = 240;         // 事実切断を防ぐ関連文中心スニペット
     public const int RerankPool = 8;                // top8未満だと関連chunkが候補外に漏れる（実測）
     public const double RerankSkipCos = 0.62;       // 高信頼ショートカット: ベクトル一致が強ければリランク(~2秒)を省略
-    public const double RerankSkipKw = 0.10;        // かつキーワード一致もある場合のみ（実測: hit問cos0.68-0.75 / nohit0.46）
+    public const double RerankSkipKw = 0.50;        // かつキーワード一致も強い場合のみ（旧0.10→0.50: 弱一致をリランカーに
+                                                    // 必ず通す。識別器はリランクスコア(GuardThreshold)が正で、kw閾値は分離力が
+                                                    // 不足 — 実測: 正解質問kw0.39-0.48 / KB外質問0.37 と重なる）
+    public const double MinAcceptKw = 0.15;         // 弱一致ガード(バックストップ): リランカーが無い環境での最終防波堤。
+                                                    // kw≈0は語彙的に無関係なので、リランクを経由しない採択でも該当なし拒否へ。
+                                                    // 対象外条件は IsWeakMatch 参照（図面質問/Web文脈/時間感応/リランク済み）
     public const string PromptVersion = "2026-09-22-short-query-10"; // プロンプト/キャッシュ仕様変更時は回答キャッシュを無効化
     // (-2: 混同禁止規則を独立文に復元。1文への圧縮合并で「長期出張の承認者」問が所属長/部長を混同する回帰が発生したため)
     // (-3: 規則⑤追加。Web検索OFF時に【参照情報】が無いのに「参照情報によると晴天」等の外部状況を捏造する揺らぎ(s13)への防御)
@@ -37,6 +42,14 @@ public static partial class Rag
     /// 候補プールへ優先的に残す（ChatFlowのブーストで使用）</summary>
     public static bool HasDrawingIntent(string question) =>
         question.Contains("図面") || question.Contains("図番") || DrawingIngest.ZubanRegex().IsMatch(question);
+
+    /// <summary>弱一致判定(バックストップガード)。参照文脈が弱いまま生成すると、モデルが学習知識(一般知識)で質問に答え、
+    /// 出典行の正規化によって偽の出典が付く実害がある（10-01実測: KB外の「富士山の高さは?」が会議室文書
+    /// kw=0.37でリランクを素通りし「約3776米 出典:会議室文書」）。識別の主役はリランクスコア(GuardThreshold)で、
+    /// 本関数はリランクを経由しない採択(リランカー未導入環境など)での最終防波堤としてkw≈0を拒否する。
+    /// 図面質問（寸法数値ノイズでkwが構造的に希薄）/Web文脈あり/時間感応/リランク済み(ガード通過済み)は対象外</summary>
+    public static bool IsWeakMatch(double maxChosenKw, bool hasWebContext, bool timeSensitive, bool drawingIntent, bool rerankValidated) =>
+        !hasWebContext && !timeSensitive && !drawingIntent && !rerankValidated && maxChosenKw < MinAcceptKw;
 
     /// <summary>システムプロンプト末尾に付与する現在日付行。「今日は何日」等の質問に
     /// モデルが正確に答えられるようにする（学習時点で知識が止まっているため）。
@@ -121,6 +134,48 @@ public static partial class Rag
             if (present) return false;
         }
         return any;
+    }
+
+    /// <summary>手続き質問の対象語のうち、参照テキスト群に見つからないものを列挙する（対象語リルート用）。
+    /// ProcedureTargetMissingと違い「1つでも見つかれば通し」の早期リターンをせず、欠落対象をすべて返す。
+    /// 手続き質問でない場合は空。ChatFlowはこれが非空のとき、プール内の対象語含有チャンクへ根拠を
+    /// 差し替える（リランクの意味的選択が対象語を字面通り含まないケースへの対応・s11実測）</summary>
+    public static List<string> MissingProcedureTargets(string question, IEnumerable<string> sourceTexts)
+    {
+        var result = new List<string>();
+        if (!ProcedureQuestion().IsMatch(question)) return result;
+        var hay = string.Join('\n', sourceTexts).Normalize(NormalizationForm.FormKC);
+        var hayAlnum = string.Concat(hay.Where(char.IsAsciiLetterOrDigit).Select(char.ToLowerInvariant));
+        foreach (var m in TargetObjectRegex().Matches(question.Normalize(NormalizationForm.FormKC)).Cast<Match>())
+        {
+            var run = m.Groups[1].Value;
+            if (!IsTargetObject(run)) continue;
+            var present = char.IsAsciiLetterOrDigit(run[0])
+                ? hayAlnum.Contains(NormalizeZuban(run), StringComparison.Ordinal)
+                : hay.Contains(run, StringComparison.Ordinal);
+            if (!present) result.Add(run);
+        }
+        return result;
+    }
+
+    /// <summary>手続き質問の対象語のうち、参照テキスト群に見つかったものを返す（対象語リルートのスコアリング用）。
+    /// 手続き質問でない場合は空</summary>
+    public static List<string> ContainedProcedureTargets(string question, IEnumerable<string> sourceTexts)
+    {
+        var found = new List<string>();
+        if (!ProcedureQuestion().IsMatch(question)) return found;
+        var hay = string.Join('\n', sourceTexts).Normalize(NormalizationForm.FormKC);
+        var hayAlnum = string.Concat(hay.Where(char.IsAsciiLetterOrDigit).Select(char.ToLowerInvariant));
+        foreach (var m in TargetObjectRegex().Matches(question.Normalize(NormalizationForm.FormKC)).Cast<Match>())
+        {
+            var run = m.Groups[1].Value;
+            if (!IsTargetObject(run)) continue;
+            var present = char.IsAsciiLetterOrDigit(run[0])
+                ? hayAlnum.Contains(NormalizeZuban(run), StringComparison.Ordinal)
+                : hay.Contains(run, StringComparison.Ordinal);
+            if (present) found.Add(run);
+        }
+        return found;
     }
 
     /// <summary>回答中の「捏造疑いのある数値」（出典・質問のいずれにも存在しない数値）を抽出する。

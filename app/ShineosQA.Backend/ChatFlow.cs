@@ -381,6 +381,7 @@ public sealed class ChatFlow
             var docs = hits.Select(h => Rag.Snippet(h.Rec.Text, qTokForSnip, 240)).ToList();
             var sources = new List<SourceInfo>();
             List<ChunkIndex.HybridHit> chosen = hits;
+            bool rerankValidated = false; // リランクを実行しガード(GuardThreshold)を通過→弱一致バックストップの対象外
             if (docs.Count > 0)
             {
                 // 高信頼ショートカット: ベクトル・キーワードがともに強一致ならリランク（実測~2秒）を省略して
@@ -421,7 +422,9 @@ public sealed class ChatFlow
                         }
                         else
                         {
-                            // 高信頼（top1スコア≥+2.0）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2
+                            // 高信頼（top1スコア≥+2.0）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2。
+                            // ここを通った = クロスエンコーダが関連性を検証済み → 弱一致バックストップの対象外
+                            rerankValidated = true;
                             var take = ranked[0].Score >= 2.0 ? 1 : 2;
                             chosen = ranked.Take(take).Select(r => hits[r.Index]).ToList();
                         }
@@ -441,36 +444,88 @@ public sealed class ChatFlow
                 await Sse(ctx, "done", new { cached = false, guard = guard, sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                 return;
             }
+            // 弱一致ガード（バックストップ・生成前）: kw≈0の採択を拒否する。識別の主役はリランクスコア
+            // （GuardThreshold: nohit実測≤-7.8）で、RerankSkipKw=0.50により弱一致は必ずリランクを経由する。
+            // 本ガードが守るのはリランカー未導入環境（ウィザード既定ではrerankを導入するが、削除した場合の
+            // 最終防波堤）。0.15〜0.50帯はリランカーが無いと識別不能（リランカー推奨の根拠）。
+            // 対象外（IsWeakMatch参照）: 図面質問/Web文脈/時間感応/リランク検証済み
+            var maxKw = chosen.Max(h => h.Kw);
+            if (Rag.IsWeakMatch(maxKw,
+                    hasWebContext: !string.IsNullOrEmpty(webContext),
+                    timeSensitive: timeSensitive,
+                    drawingIntent: Rag.HasDrawingIntent(message),
+                    rerankValidated: rerankValidated))
+            {
+                _log.Info($"weak-match guard: kw={maxKw:F2} < {Rag.MinAcceptKw} — 該当なし拒否へ（偽出典防止）: {Truncate(message, 40)}");
+                var refusal = "該当する記載がありません。" + webNote;
+                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                await Sse(ctx, "delta", new { content = refusal });
+                await Sse(ctx, "done", new { cached = false, guard = "weak-match", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                return;
+            }
+            // 対象語リルート: リランクの意味的選択が、質問の対象語（会議室等）を字面通り含まないチャンクを
+            // 採択することがある（s11実測: top1スコア3.40でも対象語欠落 → 既存の対象ガードが拒否へ倒していた）。
+            // 拒否ではなく、プール内の対象語含有チャンクへ根拠を差し替える。プール全体にも無い場合は
+            // 従来どおり対象ガードが拒否する（t74型: 別対象の手続きを転用する回答の防止は維持）
+            var missingTargets = Rag.MissingProcedureTargets(message, chosen.Select(h => MergedChunkText(h.Rec)));
+            if (missingTargets.Count > 0 && string.IsNullOrEmpty(webContext) && !timeSensitive)
+            {
+                // 対象語をいくつ含むかでプールチャンクを ranking し、上位3件へ根拠を差し替える
+                // （対象語すべてが1チャンクに揃うことは稀 — s11実測: 会議室/大会議室/収容人数/申請期限は
+                //   3チャンクに分散。2件では事実欠落(30日)が出たため3件）
+                var rerouted = hits
+                    .Select(h => (Hit: h, N: Rag.ContainedProcedureTargets(message, new[] { MergedChunkText(h.Rec) }).Count))
+                    .Where(x => x.N > 0)
+                    .OrderByDescending(x => x.N)
+                    .Take(3).Select(x => x.Hit).ToList();
+                if (rerouted.Count > 0)
+                {
+                    _log.Info($"target reroute: chosen lacked [{string.Join("/", missingTargets)}] — swapped to pool chunks: {string.Join(", ", rerouted.Select(h => h.Rec.FileName))}");
+                    chosen = rerouted;
+                }
+            }
             foreach (var h in chosen)
                     sources.Add(EnrichDrawing(new SourceInfo { File = h.Rec.FileName, Snippet = await SnippetForSourceAsync(MergedChunkText(h.Rec), qTokens, message, ctx.RequestAborted), Text = MergedChunkText(h.Rec) }, h.Rec.FileId));
             // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）
             await Sse(ctx, "refs", new { files = chosen.Select(h => h.Rec.FileName).ToArray(), web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList() });
 
-            // 同一図番・改訂違いの図面が複数ヒットした場合: 単断定を避け、ユーザーに改訂を選んでもらう
-            // （UI選択式フロー。選択後は（図番: X・改訂Y）付きで再質問され、該当図面に絞った回答になる）
-            var drawChosen = chosen.Where(h => drawingIds.Contains(h.Rec.FileId))
-                .Select(h => (hit: h, meta: DrawingMetaOfFile(h.Rec.FileId)))
-                .Where(x => x.meta != null && x.meta.Value.Zuban != null).ToList();
-            if (drawChosen.Count >= 2)
+            // 同一図番（改訂違い・別ファイル）が絡む質問: 単断定・混在回答を避け、ユーザーに図面を選んでもらう
+            // （UI選択式。選択後は（図番: X・改訂Y）付きで再質問され、該当図面に絞った回答になる）
+            // 検出範囲: 質問に図番が明示されている場合は検索プール(hits)全体 — 同一図番の別ファイルがプールに
+            // いても採択外だと気づけず、片方だけを根拠に断定するため。図番の明示がない場合は無関係な図面を
+            // 巻き込まないよう採択済み(chosen)のみ。再質問済み（改訂指定あり）では発火させない
+            if (!message.Contains("改訂") && !message.Contains("（図番:"))
             {
-                var zubanGroups = drawChosen
-                    .GroupBy(x => x.meta!.Value.Zuban)
-                    .Where(g => g.Select(x => x.hit.Rec.FileId).Distinct().Count() >= 2)
-                    .ToList();
-                if (zubanGroups.Count > 0)
+                var qZubanNorm = DrawingIngest.ZubansIn(message).FirstOrDefault();
+                var ambScan = new List<(ChunkIndex.HybridHit Hit, string ZubanNorm)>();
+                foreach (var h in (qZubanNorm != null ? hits : chosen))
                 {
-                    _log.Info($"clarify: same zuban across multiple files ({zubanGroups[0].Key})");
-                    var options = zubanGroups[0].DistinctBy(x => x.hit.Rec.FileId).Select(x => new
-                    {
-                        file_id = x.hit.Rec.FileId,
-                        file = x.hit.Rec.FileName,
-                        revision = x.meta!.Value.Revision,
-                        hinmei = x.meta.Value.Hinmei,
-                    }).ToList();
-                    var zub = zubanGroups[0].Key;
-                    await Sse(ctx, "clarify", new { zuban = zub, message, options });
+                    if (!drawingIds.Contains(h.Rec.FileId)) continue;
+                    var z = DrawingMetaOfFile(h.Rec.FileId)?.Zuban;
+                    if (string.IsNullOrWhiteSpace(z)) continue;
+                    var zn = Rag.NormalizeZuban(z);
+                    if (qZubanNorm != null && zn != qZubanNorm) continue; // 質問の図番と一致するものだけ
+                    ambScan.Add((h, zn));
+                }
+                var amb = DrawingIngest.DetectZubanAmbiguity(ambScan.Select(x => (x.Hit.Rec.FileId, (string?)x.ZubanNorm)));
+                if (amb != null)
+                {
+                    var zubRaw = DrawingMetaOfFile(amb.Value.FileIds[0])?.Zuban ?? amb.Value.ZubanNorm;
+                    _log.Info($"clarify: same zuban across multiple files ({amb.Value.ZubanNorm})");
+                    var options = ambScan
+                        .Where(x => amb.Value.FileIds.Contains(x.Hit.Rec.FileId))
+                        .DistinctBy(x => x.Hit.Rec.FileId)
+                        .Select(x => new
+                        {
+                            file_id = x.Hit.Rec.FileId,
+                            file = x.Hit.Rec.FileName,
+                            zuban = DrawingMetaOfFile(x.Hit.Rec.FileId)?.Zuban,
+                            revision = DrawingMetaOfFile(x.Hit.Rec.FileId)?.Revision,
+                            hinmei = DrawingMetaOfFile(x.Hit.Rec.FileId)?.Hinmei,
+                        }).ToList();
+                    await Sse(ctx, "clarify", new { zuban = zubRaw, message, options });
                     await Sse(ctx, "done", new { cached = false, guard = "clarify", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
-                    _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", $"CLARIFY:{zub}"));
+                    _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", $"CLARIFY:{zubRaw}"));
                     return;
                 }
             }

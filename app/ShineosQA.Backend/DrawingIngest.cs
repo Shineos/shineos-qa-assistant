@@ -14,6 +14,23 @@ public static partial class DrawingIngest
     [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Z]{1,4}[-_/]?[0-9]{2,6}(?:[-_/][0-9]{1,4})?[A-Z]?(?![A-Za-z0-9])")]
     public static partial Regex ZubanRegex();
 
+    /// <summary>テキスト（質問文）に含まれる図番を正規形で抽出する（同一図番混在ガードで使用）</summary>
+    public static List<string> ZubansIn(string text) =>
+        ZubanRegex().Matches(text).Select(m => Rag.NormalizeZuban(m.Value)).Where(z => z.Length > 0).Distinct().ToList();
+
+    /// <summary>ヒット集合に「同一図番（正規形）が2ファイル以上」の組があるか検出する。
+    /// 同一図番の別ファイル（改訂違い等）が採択外にいると、片方だけを根拠に断定する混在回答になるため。
+    /// 発見時は正規形図番と、その図番を持つファイルID一覧（重複除去・昇順は保証しない）を返す</summary>
+    public static (string ZubanNorm, List<long> FileIds)? DetectZubanAmbiguity(IEnumerable<(long FileId, string? ZubanRaw)> items)
+    {
+        var g = items
+            .Where(x => !string.IsNullOrWhiteSpace(x.ZubanRaw))
+            .GroupBy(x => Rag.NormalizeZuban(x.ZubanRaw!))
+            .FirstOrDefault(grp => grp.Select(x => x.FileId).Distinct().Count() >= 2);
+        if (g == null) return null;
+        return (g.Key, g.Select(x => x.FileId).Distinct().ToList());
+    }
+
     public sealed record DrawingMeta(string? ZubanRaw, string? Hinmei, string? Zairyo, string? Scale, string? Revision, string? ApprovedAt)
     {
         public string? ZubanNorm => ZubanRaw is null ? null : Rag.NormalizeZuban(ZubanRaw);

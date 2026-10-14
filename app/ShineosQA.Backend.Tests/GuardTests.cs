@@ -119,3 +119,42 @@ public class GuardTriggerTests
             new[] { "交通費は電車・バスで実費支給" }));
     }
 }
+
+/// <summary>対象語リルート用ヘルパー(MissingProcedureTargets)。リランクの意味的選択が対象語を含まない
+/// チャンクを拾った場合(s11実測)に、プール内の対象語含有チャンクへ差し替えるための検出</summary>
+public class MissingProcedureTargetTests
+{
+    [Fact]
+    public void ProcedureQuestion_SubjectAbsentInTexts_Listed()
+    {
+        var missing = Rag.MissingProcedureTargets("会議室の予約方法を教えてください", new[] { "経費の精算は月末までに行うこと。" });
+        Assert.Contains("会議室", missing);
+    }
+
+    [Fact]
+    public void ProcedureQuestion_SubjectPresent_Empty()
+    {
+        var missing = Rag.MissingProcedureTargets("会議室の予約方法を教えてください", new[] { "会議室の予約は総務へ申請する。" });
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void NonProcedureQuestion_Empty()
+    {
+        Assert.Empty(Rag.MissingProcedureTargets("会議室の収容人数は？", new[] { "経費の精算は月末まで。" }));
+    }
+}
+
+/// <summary>対象語リルートのスコアリング(ContainedProcedureTargets): 対象語をいくつ含むチャンクか</summary>
+public class ContainedProcedureTargetTests
+{
+    [Fact]
+    public void CountsContainedTargets()
+    {
+        var n = Rag.ContainedProcedureTargets(
+            "会議室の予約方法と大会議室の収容人数を教えてください",
+            new[] { "会議室の予約は総務へ。大会議室は20名まで。" }).Count;
+        Assert.True(n >= 2, $"should contain at least 2 targets, got {n}");
+        Assert.Equal(0, Rag.ContainedProcedureTargets("会議室の予約方法を教えてください", new[] { "経費の精算は月末まで。" }).Count);
+    }
+}
