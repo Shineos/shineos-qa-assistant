@@ -36,7 +36,8 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 | Hybrid search | BM25 (keyword) + vector search (semantic) so model numbers and regulation IDs are found accurately |
 | Reranking | Candidates are re-scored with bge-reranker-v2-m3; high-confidence hits skip reranking for speed, and adjacent chunks are joined so context is never cut mid-sentence |
 | Three answer tiers | ⚡Quick (1.7B) / 🎯Standard (4B) / 🏆Quality (30B) — switch instantly from the composer; undownloaded models can be fetched from the same menu |
-| Hallucination guardrails | If the knowledge base has no answer, it says so — it never invents document names or numbers |
+| Offline model import | For internet-isolated PCs: import GGUF models carried in via USB from the settings screen (SHA-256 verified; exact matches to official models are recognized automatically) |
+| Hallucination guardrails | If the knowledge base has no answer, it says so — it never invents document names or numbers. Weak-match refusal (no general-knowledge bleed-through with fake citations), same-drawing-number (revision) ambiguity detection, and automatic regeneration when answer numbers are absent from the cited evidence |
 | Fast responses | Preload + warm-up at startup, stable prompt prefix (prefix caching), and an answer cache for repeated questions |
 | Stop on close | Closing the app stops the AI engine, backend and network ports completely and releases all memory (nothing stays resident) |
 | Fully offline | Company documents never leave the PC — suitable for confidential material |
