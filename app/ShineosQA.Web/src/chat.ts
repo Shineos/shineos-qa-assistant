@@ -193,7 +193,7 @@ function sourceElement(s: SourceInfo): HTMLElement {
  *  画面の出典行（sourceElement）と同じ見出し・該当箇所をマークダウン式で再現する:
  *  図面は【図】図番（品名・改訂）/【図面】ファイル名、通常文書はファイル名、Webはタイトル＋URL。
  *  スニペットは画面同様に1行化（空白正規化）して切り詰める */
-function buildSourcesText(sources: SourceInfo[]): string {
+export function buildSourcesText(sources: SourceInfo[]): string {
   const lines = sources.map((s, i) => {
     const drawing = s.is_drawing ?? s.isDrawing;
     const rev = s.revision ? `・改訂${s.revision}` : '';

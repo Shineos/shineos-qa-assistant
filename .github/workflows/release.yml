@@ -105,6 +105,13 @@ jobs:
           Expand-Archive $tmp -DestinationPath $dst -Force
           if (-not (Test-Path "$dst/llama-server.exe")) { throw "llama-server.exe missing after extract" }
 
+      # ---- 4.5) クリーン起動スモーク（CRT同梱+エンジン+バックエンド起動配線の回帰ゲート） ----
+      - name: Smoke test (clean startup)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-cleanroom.ps1
+          if ($LASTEXITCODE -ne 0) { throw "clean startup smoke failed" }
+
       # ---- 5) モデルGGUFは同梱しない（初回起動時のウィザードでアプリ内DL。Models.cs/wizard.tsの既存フロー） ----
 
       # ---- 6) Inno Setup 6.7.3（公式リリースから直接導入。7系はNon-commercialのため不使用） ----
