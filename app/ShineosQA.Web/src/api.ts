@@ -68,6 +68,8 @@ export const api = {
   modelProgress: () => fetch('/api/models/progress').then(r => json<{ state: string; currentId?: string; bytes: number; total: number; error?: string }>(r)),
   deleteModel: (id: string) =>
     fetch('/api/models/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
+  importModel: (path: string) =>
+    fetch('/api/models/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }),
 };
 
 export interface ModelEntry {

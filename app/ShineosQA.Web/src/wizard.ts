@@ -171,6 +171,45 @@ export class Models {
       row.append(info, st, act);
       list.appendChild(row);
     }
+
+    // オフライン取り込み（閉域PC向け）: インターネット不可のPCへ、USB等で持ち込んだGGUFを導入する。
+    // SHA256が公式モデルと一致すればそのまま導入済み扱い。入力欄はローカルアプリの絶対パス指定
+    const imp = document.createElement('div');
+    imp.className = 'source model-item';
+    imp.innerHTML = `<div class="setting-text"><b>ローカルから導入</b> <span class="muted">オフライン環境向け・GGUFファイルのパスを指定</span></div>`;
+    const impAct = document.createElement('div');
+    impAct.className = 'model-actions';
+    const impInput = document.createElement('input');
+    impInput.type = 'text';
+    impInput.className = 'import-path';
+    impInput.placeholder = '例: D:\\models\\Qwen3-4B-Instruct-2507-IQ4_XS.gguf';
+    impInput.style.cssText = 'flex:1;min-width:220px;font-size:12px;padding:4px 6px;';
+    const impBtn = document.createElement('button');
+    impBtn.className = 'primary small';
+    impBtn.textContent = '取り込む';
+    impBtn.addEventListener('click', async () => {
+      const p = impInput.value.trim();
+      if (!p) return;
+      impBtn.disabled = true;
+      impBtn.textContent = '…';
+      try {
+        const r = await api.importModel(p);
+        const body = await r.json().catch(() => ({} as { ok?: boolean; message?: string; id?: string | null }));
+        if (!r.ok || !body.ok) throw new Error(body.message || `HTTP ${r.status}`);
+        alert(body.id
+          ? '取り込みました（公式モデルと一致）。'
+          : '取り込みました（カスタムモデル）。階級で使うには config.json の quick_model / standard_model にファイル名を指定してください。');
+        await Models.renderInto(list);
+      } catch (ex) {
+        alert(`取り込みに失敗しました: ${(ex as Error).message}`);
+      } finally {
+        impBtn.disabled = false;
+        impBtn.textContent = '取り込む';
+      }
+    });
+    impAct.append(impInput, impBtn);
+    imp.append(impAct);
+    list.appendChild(imp);
     return box;
   }
 

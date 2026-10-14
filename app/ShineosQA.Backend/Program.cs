@@ -249,6 +249,24 @@ public static class Api
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, statusCode: 400); }
         });
 
+        // オフライン取り込み（閉域PC向け）: ローカルパスのGGUFを検証してModelsDirへ取り込む。
+        // カタログ一致（SHA256）なら正式配置で即installed、不一致はカスタムモデルとして取り込む
+        app.MapPost("/api/models/import", async (HttpRequest req) =>
+        {
+            using var doc = await JsonDocument.ParseAsync(req.Body);
+            var path = doc.RootElement.GetProperty("path").GetString() ?? "";
+            try
+            {
+                // パス穿越防止（/api/knowledge/import と同一方針）: .. を含む生パスは拒否
+                if (string.IsNullOrWhiteSpace(path) || path.Contains("..") || path.Contains('\0'))
+                    throw new InvalidDataException("無効なパスです");
+                var (id, file, bytes) = await ctx.Models.ImportAsync(Path.GetFullPath(path), req.HttpContext.RequestAborted);
+                ctx.Sup.ResetLlmFailure();
+                return Results.Ok(new { ok = true, id, file, bytes });
+            }
+            catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, statusCode: 400); }
+        });
+
         // ---- ナレッジ ----
         app.MapGet("/api/knowledge", (HttpRequest req) =>
         {

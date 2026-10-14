@@ -199,6 +199,71 @@ public sealed class ModelManager
         _log.Info($"model deleted: {entry.File} (+{files.Count - 1} companion file(s))");
     }
 
+    /// <summary>オフライン取り込み: ローカルのGGUFファイルを検証してModelsDirへ取り込む。
+    /// インターネット不可の閉域PC（工場環境等）への正規モデル持ち込み（USB等）が主ユースケース。
+    /// SHA256がカタログのいずれかと一致すればそのモデルの正式配置として扱い（即installed扱い）、
+    /// 一致しない場合はカスタムモデルとして元のファイル名のまま取り込む
+    /// （階級への割当は config.json の quick_model / standard_model で行う）</summary>
+    public async Task<(string? CatalogId, string DestFile, long Bytes)> ImportAsync(string sourcePath, CancellationToken ct)
+    {
+        if (!File.Exists(sourcePath)) throw new FileNotFoundException($"model file not found: {sourcePath}");
+        if (!Path.GetExtension(sourcePath).Equals(".gguf", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("GGUFファイル（.gguf）のみ取り込めます");
+        await _lock.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(_cfg.ModelsDir);
+            var total = new FileInfo(sourcePath).Length;
+            Progress = new DownloadProgress { State = "verifying", CurrentId = "import", Total = total, StartedAt = DateTime.UtcNow };
+
+            // GGUFマジック検証（拡張子だけでは中身を保証できない）
+            using (var fs = File.OpenRead(sourcePath))
+            {
+                var magic = new byte[4];
+                if (await fs.ReadAsync(magic.AsMemory(0, 4), ct) < 4 || System.Text.Encoding.ASCII.GetString(magic) != "GGUF")
+                    throw new InvalidDataException("GGUF形式ではありません（マジック不一致）");
+            }
+
+            string hash;
+            await using (var fs = File.OpenRead(sourcePath))
+                hash = Convert.ToHexString(await SHA256.HashDataAsync(fs, ct));
+
+            // カタログ一致: 正式ファイル名で配置。不一致: カスタムモデルとして元の名前のまま
+            var entry = Catalog.FirstOrDefault(e => e.Sha256.Equals(hash, StringComparison.OrdinalIgnoreCase));
+            string destFile;
+            if (entry != null) destFile = entry.File;
+            else
+            {
+                destFile = Path.GetFileName(sourcePath);
+                if (Catalog.Any(e => e.File == destFile))
+                    throw new InvalidDataException($"カタログモデルと同名ですがSHA256が一致しません（破損の可能性）: {destFile}");
+            }
+
+            var dest = Path.Combine(_cfg.ModelsDir, destFile);
+            if (!string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(dest), StringComparison.OrdinalIgnoreCase))
+            {
+                Progress = new DownloadProgress { State = "downloading", CurrentId = "import", Bytes = 0, Total = total, StartedAt = DateTime.UtcNow };
+                var part = dest + ".part";
+                using (var src = File.OpenRead(sourcePath))
+                await using (var dst = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20, useAsync: true))
+                {
+                    var buf = new byte[1 << 20];
+                    int n;
+                    while ((n = await src.ReadAsync(buf, ct)) > 0)
+                    {
+                        await dst.WriteAsync(buf.AsMemory(0, n), ct);
+                        Progress.Bytes += n;
+                    }
+                }
+                File.Move(part, dest, overwrite: true);
+            }
+            Progress = new DownloadProgress { State = "done", CurrentId = "import", Bytes = total, Total = total };
+            _log.Info($"model imported: {destFile} ({total / 1024 / 1024}MB, catalog={entry?.Id ?? "custom"})");
+            return (entry?.Id, destFile, total);
+        }
+        finally { _lock.Release(); }
+    }
+
     /// <summary>モデルIDに対応するファイル一覧（本体＋セット品）。削除前にエンジン停止判断へ渡す</summary>
     public string[] FilesFor(string id)
     {
