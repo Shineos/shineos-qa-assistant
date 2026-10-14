@@ -27,6 +27,24 @@ public sealed class Ingest
         _filesDir = Path.Combine(dataRoot, "files");
     }
 
+    /// <summary>抽出テキストがバイナリ断片（PDF/ICC辞書など）かを判定する。
+    /// 印字不可能・規格外文字（制御コード、Latin-1拡張等）が全体の1割超でジャンク扱い。
+    /// 通常の日本語/英語テキストはほぼ0%。実測: Edge画像PDFでICC辞書330字（gTRC/bTRC/cprt等）が
+    /// 「テキスト」として返り、ゴミchunkがreadyになる実害があった</summary>
+    private static bool LooksLikeBinaryJunkText(string text)
+    {
+        var t = text.Trim();
+        if (t.Length == 0) return true;
+        int weird = 0;
+        foreach (var ch in t)
+        {
+            if (ch is '\n' or '\r' or '\t') continue;
+            bool printable = ch is >= ' ' and <= '~' or >= '　'; // ASCII印字可 or CJK等(U+3000以降)
+            if (!printable) weird++;
+        }
+        return weird * 100 / t.Length >= 10;
+    }
+
     /// <summary>元ファイル保存先（拡張パックON時のみ使用）。Programのthumb/fileエンドポイントが参照する</summary>
     public string FilesDir => _filesDir;
 
@@ -212,12 +230,17 @@ public sealed class Ingest
                 {
                     try { pdf = PdfText.ExtractAll(bytes); text = pdf.Text; }
                     catch { text = ""; }
+                    // 抽出器（PdfPig・自製）は画像PDFからバイナリ断片を「テキスト」として返すことがある
+                    // （実測: Edge印字PDFでPDF/ICC辞書断片330字「gTRC…(bTRC…(cprt」）。
+                    // 印字不可能・規格外文字が1割超 or 20字未満は空扱いでスキャン救済（OCR/VL）へ進める
+                    if (text.Trim().Length < 20 || LooksLikeBinaryJunkText(text)) { text = ""; pdf = null; }
                     if (string.IsNullOrWhiteSpace(text))
                     {
                         pdf = null;
                         InvalidDataException? legacyErr = null;
                         try { text = ExtractPdf(new MemoryStream(bytes)); }
                         catch (InvalidDataException ex) { legacyErr = ex; text = ""; }
+                        if (text.Trim().Length < 20 || LooksLikeBinaryJunkText(text)) text = "";
                         // スキャンPDF（画像のみ）救済: ページをレンダリング→内蔵OCRでテキスト化。
                         // 実図面検証で金賞作品図面（スキャン1枚）が取り込み不可だった問題の根本対策
                         if (string.IsNullOrWhiteSpace(text) && packOn)
@@ -279,6 +302,19 @@ public sealed class Ingest
                     // 図面は1枚1チャンク（表題欄前置き＋全テキスト）。テキスト層ゼロはチャンク0で登録継続。
                     // OCR由来のテキストは読み取り誤差の可能性をチャンク内に明記する（回答の根拠提示に直結）
                     var fullText = scannedOcr ? pdf.Text + "\n※このテキストはOCRによる読み取りです（誤読を含む場合があります）" : pdf.Text;
+                    // VL文字起こし（任意・visionモデル導入時）: スキャン図面の注記・寸法・見出しをOCRより
+                    // 高精度にテキスト化して索引に乗せる。シートページを描画してVLへ。失敗時はOCRだけで続行
+                    if (scannedOcr && _sup.VisionInstalled)
+                    {
+                        try
+                        {
+                            var (pagePng, _, _) = await RenderPageWinRtAsync(bytes, sheetPage - 1, 1600, ct);
+                            var vt = await VisionRead.TranscribeAsync(_gw, _sup, _cfg, pagePng, "image/png", _log, ct);
+                            if (!string.IsNullOrWhiteSpace(vt))
+                                fullText += "\n【VL文字起こし】\n" + vt;
+                        }
+                        catch (Exception ex) { _log.Warn($"vl transcribe skipped: {ex.Message}"); }
+                    }
                     if (fullText.Trim().Length > 0)
                         chunks.Add(DrawingIngest.BuildChunkText(meta, fullText));
                 }
