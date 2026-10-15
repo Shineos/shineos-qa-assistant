@@ -235,10 +235,11 @@
 | ヒーロー/宣伝画像（SNS・OGP・スクショ1枚目候補・1920x1080） | `assets/promo-hero.png`（935KB） | ✓ 2026-09-16生成 |
 | Storeロゴ 300x300 PNG（従来・MSIXパッケージ内ロゴのソース） | `assets/store-logo-300.png` | ✓ 生成済み |
 | スクリーンショット1 初回モデルDL（Store版の特徴・listing文の「初回起動時にモデル取得」と整合） | `assets/screenshots/app-00-model-download.png`（1481x987・要件1366x768以上を満たす） | ✓ 2026-09-16追加 |
-| スクリーンショット2 メイン画面 | `assets/screenshots/app-01-main.png`（1500x1000・要件1366x768以上を満たす） | ✓ |
-| スクリーンショット3 出典付き回答 | `assets/screenshots/app-02-chat.png` | ✓ |
-| スクリーンショット4 ナレッジ管理 | `assets/screenshots/app-03-knowledge.png` | ✓ |
-| スクリーンショット5 モデル選択 | `assets/screenshots/app-04-models.png` | ✓ |
+| スクリーンショット2 メイン画面 | `assets/screenshots/app-01-main.png`（1500x1000・v2.2.1 UI） | ✓ 2026-10-16更新 |
+| スクリーンショット3 出典付き回答（「問題を報告」ボタン・出典スニペット展開） | `assets/screenshots/app-02-chat.png`（1500x1000・v2.2.1 UI・11.16対応の提示） | ✓ 2026-10-16更新 |
+| スクリーンショット4 ナレッジ管理 | `assets/screenshots/app-03-knowledge.png`（1500x1000） | ✓ 2026-10-16更新 |
+| スクリーンショット5 モデル選択 | `assets/screenshots/app-04-models.png`（1500x1000） | ✓ 2026-10-16更新 |
+| スクリーンショット6 図面QA（図番ST-1042Aの材質・品名+出典。製造業向けの差別化） | `assets/screenshots/app-05-drawing.png`（1500x1000・v2.2.0追加） | ✓ 2026-10-16追加 |
 | MSIXパッケージ内ロゴ（150/44/50px） | CIが `store-logo-300.png` から自動生成 | ✓ |
 
 ※ 1枚目（モデルDL画面）は日本語UIのまま掲載してよい（対象市場が日本のため。多言語展開時にキャプションのローカライズを検討）。
