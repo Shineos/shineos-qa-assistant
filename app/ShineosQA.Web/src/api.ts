@@ -2,7 +2,7 @@
 
 export interface SourceInfo { file: string; snippet: string; text?: string; kind?: string; url?: string | null; file_id?: number; fileId?: number; zuban?: string | null; hinmei?: string | null; revision?: string | null; is_drawing?: boolean; isDrawing?: boolean }
 export interface ChatSummary { uuid: string; id: number; title: string; updated_at: string; archived?: number; bookmarked?: number }
-export interface ChatMessage { id?: number; role: string; content: string; image?: string | null; sources_json?: string | null; created_at?: string }
+export interface ChatMessage { id?: number; role: string; content: string; image?: string | null; sources_json?: string | null; kind?: string | null; created_at?: string }
 export interface ChatDetail { id: number; title: string; archived?: number; bookmarked?: number; messages: ChatMessage[] }
 export interface KnowledgeFile { file_id: number; name: string; status: string; error?: string | null; chunk_count: number; added_at: string; kind?: string; zuban_raw?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null }
 export interface StatusInfo {
@@ -88,7 +88,7 @@ export async function streamChat(
     refs?: (d: { files: string[]; web: string[] }) => void;
     patch?: (content: string) => void;
     delta?: (content: string) => void;
-    done?: (d: { cached: boolean; guard?: string | null; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
+    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
     clarify?: (d: { zuban: string; message: string; options: { file_id: number; file: string; zuban: string; revision: string | null; hinmei: string | null }[] }) => void;
     error?: (d: { code: string; message: string }) => void;
   },

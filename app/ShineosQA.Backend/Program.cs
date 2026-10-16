@@ -175,7 +175,7 @@ public static class Api
             var id = db.ChatIdFromUuid(uuid);
             if (id == 0) return Results.NotFound(new { error = "not found" });
             var chat = db.Query("SELECT uuid, title, bookmarked FROM chats WHERE id=$i", ("$i", id));
-            var msgs = db.Query("SELECT id, role, content, image, sources_json, created_at FROM messages WHERE chat_id=$i ORDER BY id", ("$i", id));
+            var msgs = db.Query("SELECT id, role, content, image, sources_json, kind, created_at FROM messages WHERE chat_id=$i ORDER BY id", ("$i", id));
             return Results.Json(new { uuid, title = chat[0]["title"], bookmarked = chat[0]["bookmarked"], messages = msgs });
         });
 
