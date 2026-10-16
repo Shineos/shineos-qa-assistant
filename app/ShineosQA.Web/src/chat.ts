@@ -1,6 +1,7 @@
 import { api, streamChat, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
 import { renderMarkdown } from './markdown';
 import { openReportModal } from './report';
+import { onSuccessfulAnswer } from './review-prompt';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -980,6 +981,8 @@ export class ChatView {
             }
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setStatus(`⏱ ${secs}s${d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
+            // Store評価導線: 出典付きの正常回答（guard無し）のみカウント。拒否・clarifyは成功体験でない
+            if (!d.guard && (d.sources ?? []).length > 0) onSuccessfulAnswer();
             void this.refreshList(this.chatUuid);
           },
           clarify: (d) => {
