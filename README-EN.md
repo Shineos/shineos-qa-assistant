@@ -37,6 +37,7 @@ Users register their company regulations and manuals (PDF/Word/Markdown/text) as
 | Reranking | Candidates are re-scored with bge-reranker-v2-m3; high-confidence hits skip reranking for speed, and adjacent chunks are joined so context is never cut mid-sentence |
 | Three answer tiers | ⚡Quick (1.7B) / 🎯Standard (4B) / 🏆Quality (30B) — switch instantly from the composer; undownloaded models can be fetched from the same menu |
 | Offline model import | For internet-isolated PCs: import GGUF models carried in via USB from the settings screen (SHA-256 verified; exact matches to official models are recognized automatically) |
+| Drawing Q&A (manufacturing add-on) | Extracts title blocks (drawing number, product, material, revision) from drawing PDFs so they can be searched by number or name. Captured drawings are read via OCR + a vision model, scanned drawings are transcribed with a vision-language model (Qwen3-VL), and DXF (CAD) files are supported |
 | Hallucination guardrails | If the knowledge base has no answer, it says so — it never invents document names or numbers. Weak-match refusal (no general-knowledge bleed-through with fake citations), same-drawing-number (revision) ambiguity detection, and automatic regeneration when answer numbers are absent from the cited evidence |
 | Fast responses | Preload + warm-up at startup, stable prompt prefix (prefix caching), and an answer cache for repeated questions |
 | Stop on close | Closing the app stops the AI engine, backend and network ports completely and releases all memory (nothing stays resident) |
@@ -90,6 +91,7 @@ Silent installation (`/VERYSILENT`) is supported.
 |------|------|
 | [![Main screen](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **Main screen** — opens from the desktop icon in ~2 seconds, no URL entry needed |
 | [![Cited answer](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **Answer with citation** — the answer is shown together with its sources, and past Q&A can be reopened from the history |
+| [![Drawing QA](assets/screenshots/app-05-drawing.png)](assets/screenshots/app-05-drawing.png) | **Drawing QA** — ask by drawing number and get the material / product name answered with the drawing's title-block data as the source |
 | [![Knowledge management](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **Knowledge management** — register and review company documents (PDF / Word / Markdown / text) by drag & drop |
 | [![Model selection](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **Model selection** — switch between ⚡Quick (1.7B) / 🎯Standard (4B) / 🏆Quality (30B) instantly; undownloaded models download from here |
 

@@ -16,6 +16,7 @@
 |------|------|
 | 社内Q&A（RAG） | ナレッジに登録した社内規定・業務マニュアルから、根拠（文書名・該当箇所）付きで回答 |
 | ナレッジ登録 | 画面の「ナレッジ」タブからドラッグ＆ドロップで追加（PDF・Word・Markdown・テキスト）。入力欄の📎ボタンでその場で登録も可能 |
+| 図面QA（製造業向け・拡張機能） | 図面PDFから表題欄（図番・品名・材質・改訂）を自動読み取り、図番・品名で検索・質問票。キャプチャした図面はOCR＋視覚モデルで読み取り、スキャン図面は視覚言語モデル（Qwen3-VL）で全文文字起こしして索引化。DXF（CAD図面）にも対応 |
 | ハイブリッド検索 | BM25（キーワード一致）+ ベクトル検索（意味一致）の併用で、型番・規程番号・固有名詞を正確にヒット |
 | リランク強化 | bge-reranker-v2-m3 で候補を再評価。高信頼時はリランクを省略して高速化、文脈が途切れるチャンクは隣接チャンクを連結して回答 |
 | 3階級の回答モデル | ⚡クイック（1.7B）／🎯標準（4B）／🏆高品質（30B）。入力欄のモデルボタンから即切替。未DLのモデルは同じ画面からDL可能 |
@@ -49,7 +50,7 @@
 
 ## ダウンロードとインストール
 
-[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール）。**モデル3点同梱で完全オフライン導入できるフル版（約2.2GB）は v2.1.0 のリリースに分割ファイル（`join-and-run.bat` で結合）として添付**されています。なお、リリース一覧の「最新」（v2.1.16系・mainライン）は約53MBのモデル非同梱版です。**[Microsoft Store](https://apps.microsoft.com/detail/xp8c6nsgdr1n9f)からも入手可能**です（Store版は小型インストーラ（約47MB）で、初回起動時にAIモデル約2.3GBをアプリ内からダウンロードします）。
+[Releases](https://github.com/Shineos/shineos-qa-assistant/releases/latest) ページから `ShineosQA-Setup-<version>.exe` をダウンロードし、**ダブルクリックするだけでインストール**できます（管理者権限不要・ユーザー単位でインストール）。**モデル3点同梱で完全オフライン導入できるフル版（約2.2GB）は v2.1.0 のリリースに分割ファイル（`join-and-run.bat` で結合）として添付**されています。なお、リリース一覧の「最新」（v2.2.1系・mainライン）は約53MBのモデル非同梱版です。**[Microsoft Store](https://apps.microsoft.com/detail/xp8c6nsgdr1n9f)からも入手可能**です（Store版は小型インストーラ（約47MB）で、初回起動時にAIモデル約2.3GBをアプリ内からダウンロードします）。
 
 ※ 以下はモデル同梱のフル版の流れです。Store版（モデル非同梱）では、初回起動時のウィザードがAIモデル約2.3GBをダウンロードします。
 
@@ -74,6 +75,7 @@
 |------|------|
 | [![メイン画面](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **メイン画面**。デスクトップのアイコンから起動すると約2秒で開きます（URL入力不要） |
 | [![出典付き回答](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **出典付きの回答**。回答の根拠（文書名・該当箇所）が一緒に表示され、左の履歴から過去のQ&Aを再表示できます |
+| [![図面QA](assets/screenshots/app-05-drawing.png)](assets/screenshots/app-05-drawing.png) | **図面QA**。図番で質問すると、表題欄の情報（材質・品名・改訂）を出典付きで回答します |
 | [![ナレッジ管理](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **ナレッジ管理**。社内文書（PDF・Word・Markdown・テキスト）をドラッグ＆ドロップで登録・確認 |
 | [![モデル選択](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **モデル選択**。⚡クイック（1.7B）／🎯標準（4B）／🏆高品質（30B）をその場で切替。未DLのモデルはここからDLできます |
 
