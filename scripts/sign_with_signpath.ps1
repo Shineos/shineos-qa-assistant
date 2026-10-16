@@ -37,8 +37,8 @@ $req = $submit | ConvertFrom-Json
 if (-not $req.signingRequestId) { throw "submit failed: $submit" }
 Write-Output "signingRequestId: $($req.signingRequestId) (status: $($req.status))"
 
-# 2) 完了までポーリング（最大600秒）
-$deadline = (Get-Date).AddSeconds(600)
+# 2) 完了までポーリング（-TimeoutSeconds で指定された上限まで。手動承認ポリシーでは長めに）
+$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 $status = $null
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 5
