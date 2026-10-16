@@ -150,6 +150,59 @@ jobs:
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           Write-Output "SHA256: $hash"
 
+      - name: Upload to R2 (Store package URL)
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          VERSION: ${{ inputs.version || '2.1.0' }}
+        run: |
+          $exe = "dist/ShineosQA-Setup-$VERSION-lite.exe"
+          if (-not $env:R2_ACCESS_KEY_ID -or -not $env:R2_SECRET_ACCESS_KEY -or -not $env:CF_ACCOUNT_ID) {
+            Write-Output "::warning::R2 credentials not configured (secrets: R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / CF_ACCOUNT_ID) — skipping automatic upload. Upload '$exe' to the shineos-downloads bucket (Store package URL) manually."
+            exit 0
+          }
+          # 署名済みlite(約53MB)は300MB未満のため単一PUTで可能。aws s3 cp は大きい場合も
+          # 自動マルチパートするため旧Worker(cron+手動後片付け)は不要になる
+          aws s3 cp $exe "s3://shineos-downloads/ShineosQA-Setup-$VERSION-lite.exe" --endpoint-url "https://$env:CF_ACCOUNT_ID.r2.cloudflarestorage.com"
+          if ($LASTEXITCODE -ne 0) { throw "R2 upload failed" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $pub = "https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-$VERSION-lite.exe"
+          # 公開URLの整合確認(r2.dev公開アクセス経由)
+          $head = (curl.exe -s -I --max-time 20 $pub | Out-String)
+          if ($head -notmatch "200") { throw "R2 object not publicly reachable after upload: $pub" }
+          Write-Output "uploaded to R2: $pub"
+          Write-Output "SHA256 (uploaded): $hash"
+
+      - name: Submission sheet (Partner Center)
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version || '2.1.0' }}
+        run: |
+          $exe = "dist/ShineosQA-Setup-$VERSION-lite.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $size = (Get-Item $exe).Length
+          $url = "https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-$VERSION-lite.exe"
+          $sheet = @"
+
+          ## Partner Center 提出用シート (v$VERSION)
+
+          | 項目 | 値 |
+          |---|---|
+          | パッケージURL（新規オブジェクト・EXE更新は新URL原則） | $url |
+          | バイト数 | $size |
+          | SHA256 | ``$hash`` |
+          | アーキテクチャ / 言語 / 種類 | x64 / 日本語(ja) / EXE |
+          | サイレントパラメータ | /VERYSILENT /SUPPRESSMSGBOXES /NORESTART |
+          | 審査メモ | docs/store-submission.md §13（exe名を v$VERSION-lite に読み替えて貼り付け） |
+
+          提出後: パッケージURLの実DLでSHA256を再検証し、docs/store-submission.md §5.1 の行を本値へ更新してください。
+          "@
+          $sheet | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          Write-Output $sheet
+
       - name: Upload signed installer artifact
         uses: actions/upload-artifact@v4
         with:
