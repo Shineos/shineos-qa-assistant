@@ -12,6 +12,12 @@ public sealed class ChatFlow
     private readonly Db _db;
     private readonly Supervisor _sup;
     private readonly LlmGateway _gw;
+
+    /// <summary>エージェント経路のツール定義（Qwen3ツール呼び出し・実測: 1応答で複数ツールを並列出力）。
+    /// jisseki_lookup の値は実績情報として既に注入するため、計画呼び出しでは検索対象の決定にのみ使う</summary>
+    private const string AgentToolsJson =
+        "[{\"type\":\"function\",\"function\":{\"name\":\"knowledge_search\",\"description\":\"社内ナレッジ(図面・規定・マニュアル)を検索し、関連する文書の断片を返す\",\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"検索語(日本語)\"}},\"required\":[\"query\"]}}}," +
+        "{\"type\":\"function\",\"function\":{\"name\":\"jisseki_lookup\",\"description\":\"図番の過去見積額・原価・納期を実績表から検索する\",\"parameters\":{\"type\":\"object\",\"properties\":{\"zuban\":{\"type\":\"string\",\"description\":\"図番 例: ST-1042A\"}},\"required\":[\"zuban\"]}}}]";
     private readonly ChunkIndex _index;
     private readonly WebSearch _web;
     private readonly ILogger _log;
@@ -482,6 +488,64 @@ public sealed class ChatFlow
                 {
                     _log.Info($"target reroute: chosen lacked [{string.Join("/", missingTargets)}] — swapped to pool chunks: {string.Join(", ", rerouted.Select(h => h.Rec.FileName))}");
                     chosen = rerouted;
+                }
+            }
+            // エージェント経路（試験的・v2.3.1）: 実績が絡む複合質問（図番+文書横断 等）を
+            // 「ツール計画1回 → ツール実行 → 生成1回」の計2LLM呼び出しで捌く。Qwen3は1応答で
+            // 複数ツール呼び出しを並列出力する（実測）。CPU推論では反復回数が時間に直結するため、
+            // Dify式の反復ループではなくシングルショット計画を採用。
+            // 発動条件: 質問内の図番が実績表(jisseki_meta)に存在 + agent_mode 有効
+            List<ChunkIndex.HybridHit> agentHits = new();
+            var qzn = DrawingIngest.ZubansIn(message);
+            var jissekiCount = 0;
+            foreach (var zn in qzn)
+                jissekiCount += _db.Query("SELECT COUNT(*) AS n FROM jisseki_meta WHERE zuban_norm=$z", ("$z", zn)).Count;
+            _log.Info($"agent branch check: AgentMode={_cfg.AgentMode} timeSensitive={timeSensitive} webEmpty={string.IsNullOrEmpty(webContext)} zubans=[{string.Join(",", qzn)}] jissekiCount={jissekiCount}");
+            if (_cfg.AgentMode && !timeSensitive && string.IsNullOrEmpty(webContext))
+            {
+                foreach (var zn in qzn)
+                {
+                    if (_db.Query("SELECT COUNT(*) AS n FROM jisseki_meta WHERE zuban_norm=$z", ("$z", zn)).Count == 0) continue;
+                    try
+                    {
+                        _log.Info($"agent route: plan call starting (zuban={zn})");
+                        var planMessages = JsonSerializer.Serialize(new object[]
+                        {
+                            new { role = "system", content = "あなたは製造業の社内Q&Aアシスタント。質問に答えるために必要な情報をツールで収集する。収集済みの情報で答えられる場合はツールを呼ばない。" },
+                            new { role = "user", content = message },
+                        });
+                        var planResp = await _gw.ChatToolsOnceAsync(_cfg.EnginePortLlm, planMessages, AgentToolsJson, 400, ctx.RequestAborted);
+                        using var planDoc = JsonDocument.Parse(planResp);
+                        var msgEl = planDoc.RootElement; // ChatToolsOnceAsync はメッセージオブジェクトを返す
+                        if (!msgEl.TryGetProperty("tool_calls", out var tcs)) { _log.Info("agent route: no tool_calls — fixed pipeline continues"); break; }
+                        foreach (var tc in tcs.EnumerateArray())
+                        {
+                            // 小型モデルは弱形式のツール呼び出しを返すことがあるため、1件の異常はskip
+                            try
+                            {
+                                if (!tc.TryGetProperty("function", out var fn)) continue;
+                                if (!fn.TryGetProperty("name", out var nameEl)) continue;
+                                if (nameEl.GetString() != "knowledge_search") continue; // jisseki は実績情報として既に注入済み
+                                var argsStr = fn.TryGetProperty("arguments", out var a) ? a.GetString() : null;
+                                using var argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argsStr) ? "{}" : argsStr);
+                                var q2 = argsDoc.RootElement.TryGetProperty("query", out var qq) ? qq.GetString() : null;
+                                if (string.IsNullOrWhiteSpace(q2)) continue;
+                                var emb2 = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { q2 }, ctx.RequestAborted))[0];
+                                var t2 = Rag.Tokenize(q2).ToHashSet();
+                                foreach (var h in _index.Search(emb2, t2, 6)) agentHits.Add(h);
+                                if (agentHits.Count >= 12) break;
+                            }
+                            catch (Exception ex2) { _log.Warn($"agent route: tool call skipped ({ex2.Message})"); }
+                        }
+                        if (agentHits.Count > 0)
+                        {
+                            chosen = agentHits.DistinctBy(h => (h.Rec.FileId, h.Rec.Seq)).Take(4).ToList();
+                            _log.Info($"agent route: plan tool_calls executed — chosen replaced with {chosen.Count} chunks");
+                        }
+                        break;
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { _log.Warn($"agent route failed (fixed pipeline continues): {ex}"); break; }
                 }
             }
             foreach (var h in chosen)
