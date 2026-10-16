@@ -286,7 +286,7 @@ public sealed class ChatFlow
                     _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json) VALUES($c,'assistant',$m,$s)",
                         ("$c", chatId), ("$m", hit.Answer), ("$s", hit.SourcesJson));
                     Sse(ctx, "delta", new { content = hit.Answer }).GetAwaiter().GetResult();
-                    Sse(ctx, "done", new { cached = true, sources = JsonSerializer.Deserialize<object>(hit.SourcesJson), ms = sw.ElapsedMilliseconds }).GetAwaiter().GetResult();
+                    Sse(ctx, "done", new { cached = true, kind = "answer", sources = JsonSerializer.Deserialize<object>(hit.SourcesJson), ms = sw.ElapsedMilliseconds }).GetAwaiter().GetResult();
                     return;
                 }
             }
@@ -368,9 +368,9 @@ public sealed class ChatFlow
             if (hits.Count == 0 && string.IsNullOrEmpty(webContext) && !timeSensitive)
             {
                 var refusal = "該当する記載がありません。" + webNote;
-                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, guard = "empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                 return;
             }
 
@@ -413,9 +413,9 @@ public sealed class ChatFlow
                             if (string.IsNullOrEmpty(webContext) && !timeSensitive)
                             {
                                 var refusal = "該当する記載がありません。" + webNote;
-                                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                                _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                                 await Sse(ctx, "delta", new { content = refusal });
-                                await Sse(ctx, "done", new { cached = false, guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                                 return;
                             }
                             chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
@@ -439,9 +439,9 @@ public sealed class ChatFlow
                     ? "Web検索に失敗しました（アクセスが集中している可能性があります）。少し待ってからもう一度お試しください。"
                     : "社内ナレッジに該当する記載がありません。質問を具体的にしていただくと、より正確に回答できます。";
                 var guard = webOn ? "web-failed" : "no-material";
-                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", msg));
+                _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", msg));
                 await Sse(ctx, "delta", new { content = msg });
-                await Sse(ctx, "done", new { cached = false, guard = guard, sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = guard, sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                 return;
             }
             // 弱一致ガード（バックストップ・生成前）: kw≈0の採択を拒否する。識別の主役はリランクスコア
@@ -458,9 +458,9 @@ public sealed class ChatFlow
             {
                 _log.Info($"weak-match guard: kw={maxKw:F2} < {Rag.MinAcceptKw} — 該当なし拒否へ（偽出典防止）: {Truncate(message, 40)}");
                 var refusal = "該当する記載がありません。" + webNote;
-                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, guard = "weak-match", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "weak-match", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                 return;
             }
             // 対象語リルート: リランクの意味的選択が、質問の対象語（会議室等）を字面通り含まないチャンクを
@@ -524,8 +524,8 @@ public sealed class ChatFlow
                             hinmei = DrawingMetaOfFile(x.Hit.Rec.FileId)?.Hinmei,
                         }).ToList();
                     await Sse(ctx, "clarify", new { zuban = zubRaw, message, options });
-                    await Sse(ctx, "done", new { cached = false, guard = "clarify", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
-                    _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", $"CLARIFY:{zubRaw}"));
+                    await Sse(ctx, "done", new { cached = false, kind = "clarify", guard = "clarify", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                    _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'clarify')", ("$c", chatId), ("$m", $"CLARIFY:{zubRaw}"));
                     return;
                 }
             }
@@ -538,9 +538,9 @@ public sealed class ChatFlow
             {
                 _log.Info($"target guard: subject of procedure question not found in sources: {Truncate(message, 40)}");
                 var refusal = "該当する記載がありません。" + webNote;
-                _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'assistant',$m)", ("$c", chatId), ("$m", refusal));
+                _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, guard = "target", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "target", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                 return;
             }
 
@@ -594,8 +594,10 @@ public sealed class ChatFlow
             // さらに応答は「回答」ではないため参照情報・出典を一切付けない（実測2026-10-16: 「テスト」→
             // 確認促進の応答に「出典：QA_list.md」が付与され、意図確認なのに出典だけ表示される混乱を生んだ）。
             // 時間感応質問（「今何時」等）は sysInfo の日時で答えられるため対象外
+            bool clarifyConfirm = false; // 応答が「回答」ではなく確認促進であることを示す（kind=clarify）
             if (message.Trim().Length <= 3 && !timeSensitive)
             {
+                clarifyConfirm = true;
                 chosen = new();
                 sources.Clear();
                 ctxPart = "\n\n※質問が短すぎて意図を確認できません。知りたいことを具体的に教えてくださいとだけ返してください。";
@@ -619,7 +621,7 @@ public sealed class ChatFlow
             //    timeSensitive（日付応答）は検証対象外
             var validationCorpus = string.Concat(chosen.Select(h => MergedChunkText(h.Rec))) + "\n" + message
                 + (string.IsNullOrEmpty(webContext) ? "" : "\n" + webContext);
-            if (!timeSensitive && (sources.Count > 0 || !string.IsNullOrEmpty(webContext)))
+            if (!timeSensitive && !clarifyConfirm && (sources.Count > 0 || !string.IsNullOrEmpty(webContext)))
             {
                 var badNums = Rag.FabricatedNumbers(answer.ToString(), validationCorpus);
                 if (badNums.Count > 0)
@@ -659,18 +661,20 @@ public sealed class ChatFlow
                 await Sse(ctx, "patch", new { content = finalText });
 
             var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
-            _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json) VALUES($c,'assistant',$m,$s)",
-                ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
+            var responseKind = clarifyConfirm ? "clarify" : "answer";
+            _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,$k)",
+                ("$c", chatId), ("$m", finalText), ("$s", sourcesJson), ("$k", responseKind));
             _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
             // Web由来の回答はキャッシュしない: Web検索結果は時々刻々変わる_snapshot_で、
-            // 古い（誤った）回答の恒久化を防ぐため。天気・ニュース類はTimeSensitive判定でも排除
-            if (!timeSensitive && !webContributed && sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
+            // 古い（誤った）回答の恒久化を防ぐため。天気・ニュース類はTimeSensitive判定でも排除。
+            // 確認促進(clarify)は回答ではないためキャッシュ対象外
+            if (!clarifyConfirm && !timeSensitive && !webContributed && sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
             {
                 _db.Exec("INSERT INTO answer_cache(question, answer, sources_json, emb, model) VALUES($q,$a,$s,$e,$m)",
                     ("$q", message), ("$a", answer.ToString()), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));
                 lock (_cacheLock) _cache.Insert(0, new CacheEntry(message, answer.ToString(), sourcesJson, qEmb, _cfg.ChatModelFile, 0));
             }
-            await Sse(ctx, "done", new { cached = false, guard = (string?)null, sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
+            await Sse(ctx, "done", new { cached = false, kind = responseKind, guard = (string?)null, sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
         }
         catch (OperationCanceledException) { /* クライアント切断 */ }
         catch (FileNotFoundException ex)

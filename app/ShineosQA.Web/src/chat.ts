@@ -981,8 +981,10 @@ export class ChatView {
             }
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setStatus(`⏱ ${secs}s${d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
-            // Store評価導線: 出典付きの正常回答（guard無し）のみカウント。拒否・clarifyは成功体験でない
-            if (!d.guard && (d.sources ?? []).length > 0) onSuccessfulAnswer();
+            // Store評価導線: 通常回答（kind=answer）のみカウント。確認促進・拒否・clarifyは成功体験でない。
+            // 旧バックエンド(kind無し)との互換: guard無し+出典ありをフォールバックで正常回答とみなす
+            const isAnswer = d.kind ? d.kind === 'answer' : !d.guard && (d.sources ?? []).length > 0;
+            if (isAnswer) onSuccessfulAnswer();
             void this.refreshList(this.chatUuid);
           },
           clarify: (d) => {
