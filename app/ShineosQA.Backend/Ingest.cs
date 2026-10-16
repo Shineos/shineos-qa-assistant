@@ -226,6 +226,7 @@ public sealed class Ingest
                 bool scannedOcr = false;
                 List<(float W, float H)>? ocrPageDims = null;
                 List<DxfText.DxfRun>? dxfRuns = null;
+                bool isJissekiSheet = false; // 図番列を含む実績表（jisseki_meta 辞書化済み。シート抽出時に判定）
                 if (ext == ".pdf")
                 {
                     try { pdf = PdfText.ExtractAll(bytes); text = pdf.Text; }
@@ -264,6 +265,19 @@ public sealed class Ingest
                 {
                     // 表計算ファイル（本体標準機能）: ヘッダ＋行バッチのチャンク列（Rag.Chunk不使用）
                     sheetChunks = SheetExtract.ExtractChunks(fileName, bytes);
+                    // 実績接続（v2.3.0・C1）: 図番列を含む表を jisseki_meta へ辞書化（図面QAの回答文脈に
+                    // 過去見積・原価・納期を接続するため）。抽出は packOn 時のみ（図面QAと一体の機能）。
+                    // 失敗しても表チャンクとしての取り込みは続行。図番列が検出できた表は kind=実績表
+                    if (packOn)
+                    {
+                        try
+                        {
+                            var jRows = SheetJisseki.ExtractRows(SheetExtract.ParseToRows(fileName, bytes));
+                            InsertJissekiRows(fileId, jRows);
+                            if (jRows.Count > 0) isJissekiSheet = true;
+                        }
+                        catch (Exception ex) { _log.Warn($"jisseki extraction skipped: {ex.Message}"); }
+                    }
                 }
                 else if (ext == ".dxf")
                 {
@@ -343,7 +357,7 @@ public sealed class Ingest
                 if (chunks.Count == 0 && !isDrawing) throw new InvalidDataException("no text content");
 
                 _db.Exec("UPDATE files SET status='embedding', kind=$k WHERE file_id=$i",
-                    ("$k", isDrawing ? "drawing" : "doc"), ("$i", fileId));
+                    ("$k", isDrawing ? "drawing" : isJissekiSheet ? "sheet_jisseki" : "doc"), ("$i", fileId));
                 if (isDrawing) InsertDrawingMeta(fileId, meta);
 
                 if (chunks.Count > 0)
@@ -431,6 +445,16 @@ public sealed class Ingest
         _db.Exec("INSERT OR REPLACE INTO drawing_meta(file_id, zuban_raw, zuban_norm, hinmei, zairyo, scale, revision, approved_at) VALUES($f,$zr,$zn,$h,$za,$s,$r,$a)",
             ("$f", fileId), ("$zr", m.ZubanRaw), ("$zn", m.ZubanNorm), ("$h", m.Hinmei), ("$za", m.Zairyo),
             ("$s", m.Scale), ("$r", m.Revision), ("$a", m.ApprovedAt));
+
+    /// <summary>実績表から抽出した図番キー実績の保存（1ファイル複数行・再取り込み時は置換）</summary>
+    private void InsertJissekiRows(long fileId, List<SheetJisseki.JissekiRow> rows)
+    {
+        foreach (var r in rows)
+            _db.Exec("INSERT OR REPLACE INTO jisseki_meta(file_id, row_no, zuban_raw, zuban_norm, mitumori, genka, nouki) VALUES($f,$r,$z,$zn,$mi,$g,$n)",
+                ("$f", fileId), ("$r", r.RowNo), ("$z", r.ZubanRaw), ("$zn", r.ZubanNorm),
+                ("$mi", r.Mitumori), ("$g", r.Genka), ("$n", r.Nouki));
+        if (rows.Count > 0) _log.Info($"jisseki meta saved: {rows.Count} rows (file_id={fileId})");
+    }
 
     /// <summary>表題欄のLLM構造化（T6）。ルール抽出で図番が取れなかった図面のみ。失敗時はルール結果を維持。
     /// 出力は検証器を通し、尺度・寸法表記の誤採用（実図面で発生）を二重に防ぐ</summary>

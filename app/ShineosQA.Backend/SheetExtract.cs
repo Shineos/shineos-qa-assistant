@@ -15,18 +15,25 @@ public static class SheetExtract
 
     static SheetExtract() => Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); // shift_jis用
 
+    /// <summary>拡張子で振り分けて生の行配列（ヘッダ行＋データ行）を返す。実績表抽出(Jisseki)など
+    /// チャンク化以外の用途に使う。.xlsxは (シート名, 行配列) の複数シートを連結して返す</summary>
+    public static List<(string SheetName, string[][] Rows)> ParseToRows(string fileName, byte[] bytes)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".xlsx" => ParseXlsx(bytes).Select(s => (s.Item1, s.Item2)).ToList(),
+            ".csv" => new[] { (Path.GetFileNameWithoutExtension(fileName), ParseCsv(bytes, ',')) }.ToList(),
+            ".tsv" => new[] { (Path.GetFileNameWithoutExtension(fileName), ParseCsv(bytes, '\t')) }.ToList(),
+            _ => throw new NotSupportedException($"unsupported sheet type: {ext}"),
+        };
+    }
+
     /// <summary>拡張子で振り分けてチャンク列を生成。1チャンク=ヘッダ＋30行。出力例:
     /// 【表】品名リスト.csv / シート: Sheet1 / 1〜30行目\n品名 | 材質 | 数量\nブラケット | SS400 | 10 ...</summary>
     public static List<string> ExtractChunks(string fileName, byte[] bytes)
     {
-        var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        var sheets = ext switch
-        {
-            ".xlsx" => ParseXlsx(bytes),
-            ".csv" => new[] { (Path.GetFileNameWithoutExtension(fileName), ParseCsv(bytes, ',')) },
-            ".tsv" => new[] { (Path.GetFileNameWithoutExtension(fileName), ParseCsv(bytes, '\t')) },
-            _ => throw new NotSupportedException($"unsupported sheet type: {ext}"),
-        };
+        var sheets = ParseToRows(fileName, bytes);
         var chunks = new List<string>();
         foreach (var (name, rows) in sheets)
         {

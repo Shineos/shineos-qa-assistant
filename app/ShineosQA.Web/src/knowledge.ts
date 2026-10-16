@@ -68,11 +68,14 @@ export class KnowledgeView {
       const tr = document.createElement('tr');
       const status = f.status === 'error' ? `エラー（${f.error ?? ''}）` : statusLabel[f.status] ?? f.status;
       const isDraw = drawingCol && f.kind === 'drawing';
+      const isJisseki = drawingCol && f.kind === 'sheet_jisseki';
       let cells = `<td>${isDraw ? `<img class="file-thumb" data-fid="${f.file_id}" src="${api.thumbUrl(f.file_id)}" alt="" onerror="this.remove()">` : ''}${esc(f.name)}</td>`;
       if (drawingCol) {
         cells += isDraw
           ? `<td><span class="badge-drawing">図面</span> ${esc(f.zuban_raw ?? '図番不明')}${f.hinmei ? ` <span class="muted">${esc(f.hinmei)}</span>` : ''}</td>`
-          : `<td><span class="muted">文書</span></td>`;
+          : isJisseki
+            ? `<td><span class="badge-drawing">実績表</span></td>`
+            : `<td><span class="muted">文書</span></td>`;
       }
       cells += `<td class="st-${f.status}">${esc(status)}</td><td>${f.chunk_count}</td><td>${esc(f.added_at ?? '')}</td>`;
       tr.innerHTML = cells;
