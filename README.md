@@ -4,6 +4,8 @@
 
 **社内規定・業務マニュアルをナレッジ化し、社内Q&Aをパソコン内だけで安全に実現する Windows アプリ**
 
+**製造業の現場では**、図面・仕様書・品質記録は「クラウドに置けない機密文書」であり、必要な人が探すのに時間がかかり、分からないことはベテランに聞くしかない — その結果、AI活用だけが取り残されてきました。社内知恵袋は、こうした文書をPC内だけでナレッジ化し、**図面の表題欄（図番・品名・材質・改訂）やスキャン図面の内容まで検索・質問票できる**製造業向けの拡張を備えています。情報システム部門の承認審査を想定した設計（インストーラ署名・Microsoft Store審査通過・閉じたら完全停止）で、**情報流出の懸念なく生成AIを現場に導入**できます。
+
 [Shineos Inc.](https://shineos.com) が提供する社内Q&Aツールです。**llama.cpp を直接実行する自作の軽量バックエンド（C#）＋ TypeScript 製UI（WebView2）** の構成で、Python も Web サービスも常駐しません。そのため低スペックPCでも速く、閉じればメモリを完全に解放します。社内資料を外部に送信しない**完全オフライン運用**が特徴です。
 
 [![Latest Release](https://img.shields.io/github/v/release/Shineos/shineos-qa-assistant?sort=semver&label=Latest%20Release)](https://github.com/Shineos/shineos-qa-assistant/releases/latest)
