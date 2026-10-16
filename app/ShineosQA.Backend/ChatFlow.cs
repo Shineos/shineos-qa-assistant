@@ -595,6 +595,25 @@ public sealed class ChatFlow
             // 確認促進の応答に「出典：QA_list.md」が付与され、意図確認なのに出典だけ表示される混乱を生んだ）。
             // 時間感応質問（「今何時」等）は sysInfo の日時で答えられるため対象外
             bool clarifyConfirm = false; // 応答が「回答」ではなく確認促進であることを示す（kind=clarify）
+            // 実績接続（v2.3.0・C1）: 質問に図番があり、実績表(.xlsx/.csv)を取り込み済みなら、
+            // その図番の過去見積・原価・納期を回答文脈に追加する（「この図面の過去見積は？」に
+            // 実績で答えられる = 支払対象「図面×実績の接続」）。注入テキストは validationCorpus にも
+            // 加算する（FabricatedNumbers が実績の数値を捏造と誤判定しないため）
+            string jissekiText = "";
+            var qZubanNorms = DrawingIngest.ZubansIn(message);
+            if (qZubanNorms.Count > 0)
+            {
+                var jissekiParts = new List<string>();
+                foreach (var zn in qZubanNorms)
+                    foreach (var r in _db.Query("SELECT zuban_raw, mitumori, genka, nouki FROM jisseki_meta WHERE zuban_norm=$z", ("$z", zn)))
+                        jissekiParts.Add(SheetJisseki.FormatJisseki(
+                            r["zuban_raw"]?.ToString(), r["mitumori"]?.ToString(), r["genka"]?.ToString(), r["nouki"]?.ToString()));
+                if (jissekiParts.Count > 0)
+                {
+                    jissekiText = "図番の過去実績（実績表から）:\n" + string.Join("\n", jissekiParts);
+                    ctxPart += "\n\n【実績情報】\n" + jissekiText;
+                }
+            }
             if (message.Trim().Length <= 3 && !timeSensitive)
             {
                 clarifyConfirm = true;
@@ -620,7 +639,8 @@ public sealed class ChatFlow
             //    再生成はサイレント収集（deltaを流すとクライアント側で回答が倍加するため）。
             //    timeSensitive（日付応答）は検証対象外
             var validationCorpus = string.Concat(chosen.Select(h => MergedChunkText(h.Rec))) + "\n" + message
-                + (string.IsNullOrEmpty(webContext) ? "" : "\n" + webContext);
+                + (string.IsNullOrEmpty(webContext) ? "" : "\n" + webContext)
+                + (jissekiText.Length > 0 ? "\n" + jissekiText : "");
             if (!timeSensitive && !clarifyConfirm && (sources.Count > 0 || !string.IsNullOrEmpty(webContext)))
             {
                 var badNums = Rag.FabricatedNumbers(answer.ToString(), validationCorpus);

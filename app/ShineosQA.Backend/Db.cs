@@ -65,6 +65,17 @@ public sealed class Db : IDisposable
               scale TEXT, revision TEXT, approved_at TEXT);
             CREATE INDEX IF NOT EXISTS idx_drawing_meta_norm ON drawing_meta(zuban_norm);
             """);
+        // 実績接続（v2.3.0 C1）: 実績表(.xlsx/.csv)から抽出した図番キー実績（見積・原価・納期）。
+        // 1ファイル複数行。図面QAの回答文脈へ過去実績を接続するために使用
+        Exec("""
+            CREATE TABLE IF NOT EXISTS jisseki_meta(
+              file_id INTEGER NOT NULL REFERENCES files(file_id) ON DELETE CASCADE,
+              row_no INTEGER NOT NULL,
+              zuban_raw TEXT, zuban_norm TEXT,
+              mitumori TEXT, genka TEXT, nouki TEXT,
+              PRIMARY KEY(file_id, row_no));
+            CREATE INDEX IF NOT EXISTS idx_jisseki_meta_norm ON jisseki_meta(zuban_norm);
+            """);
         MigrateChatsUuid();
     }
 
