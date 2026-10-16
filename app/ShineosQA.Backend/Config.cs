@@ -17,6 +17,7 @@ public sealed class AppConfig
     public string RankModel { get; set; } = "bge-reranker-v2-m3-Q8_0.gguf"; // Q8必須: Q3_K_Mはガード分離が狭くなり誤回答が増える（RESULTS 第13ラウンド実測）
     public string Tier { get; set; } = "auto"; // auto | standard | quick
     public bool WebSearch { get; set; } = false; // 既定OFF（社外送信なし）
+    public bool AgentMode { get; set; } = false; // 試験的: 実績が絡む複合質問のエージェント経路（ツール計画1回+生成1回）
     public int EnginePortLlm { get; set; } = 8301;
     public int EnginePortEmb { get; set; } = 8302;
     public int EnginePortRank { get; set; } = 8303;
@@ -63,6 +64,7 @@ public sealed class AppConfig
                     case "quality_model": cfg.QualityModel = p.Value.GetString()!; break;
                     case "tier": cfg.Tier = p.Value.GetString()!; break;
                     case "web_search": cfg.WebSearch = p.Value.GetBoolean(); break;
+                    case "agent_mode": cfg.AgentMode = p.Value.GetBoolean(); break;
                     case "ctx_size": cfg.CtxSize = p.Value.GetInt32(); break;
                     case "threads": cfg.Threads = p.Value.GetInt32(); break;
                     case "idle_unload_minutes": cfg.IdleUnloadMinutes = p.Value.GetInt32(); break;

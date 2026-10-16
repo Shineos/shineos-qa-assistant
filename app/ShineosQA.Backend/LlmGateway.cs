@@ -53,6 +53,25 @@ public sealed class LlmGateway
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
     }
 
+    /// <summary>ツール呼び出し対応の非ストリーム呼び出し（エージェントのツール計画用）。
+    /// messagesJson/toolsJson はそのまま /v1/chat/completions へ埋め込むJSON配列文字列。
+    /// thinkingモデルは思考でmax_tokensを消費してツール呼び出しに到達しないことがあるため
+    /// thinkingを無効化。戻り値はアシスタントメッセージ全体のJSON文字列（content / tool_calls を含む）</summary>
+    public async Task<string> ChatToolsOnceAsync(int port, string messagesJson, string toolsJson, int maxTokens, CancellationToken ct)
+    {
+        var body = "{ \"model\": \"local\", \"stream\": false, \"temperature\": 0, \"max_tokens\": " + maxTokens +
+                   ", \"chat_template_kwargs\": { \"enable_thinking\": false }" +
+                   ", \"messages\": " + messagesJson + ", \"tools\": " + toolsJson + ", \"tool_choice\": \"auto\" }";
+        using var resp = await _http.PostAsync($"http://127.0.0.1:{port}/v1/chat/completions",
+            new StringContent(body, Encoding.UTF8, "application/json"), ct);
+        resp.EnsureSuccessStatusCode();
+        var raw = await resp.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(raw);
+        if (!doc.RootElement.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
+            throw new InvalidOperationException("chat completions response has no choices: " + raw[..Math.Min(200, raw.Length)]);
+        return choices[0].GetProperty("message").GetRawText();
+    }
+
     /// <summary>視覚言語モデルへの画像付き1回呼出し（llama-serverのOpenAI互換マルチモーダルAPI）。
     /// 画像はdata URLで送る。画像エンコード込みでCPUだと数十秒かかるため呼び出し側でタイムアウトを管理する</summary>
     public async Task<string> VisionOnceAsync(int port, string prompt, byte[] image, string imageMime, int maxTokens, CancellationToken ct)
