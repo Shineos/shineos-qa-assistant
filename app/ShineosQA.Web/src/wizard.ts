@@ -27,6 +27,9 @@ export class Models {
             <b>標準（高精度）</b><span>Qwen3-4B・約2.3GB・16GB以上推奨（あとから追加でもOK）</span>
           </button>
         </div>
+        <label class="wizard-ext"><input type="checkbox" id="wiz-ext-drawing" checked />
+          図面PDFの表題欄を読み取り、図番・品名で検索できるようにする
+          <span class="muted">（推奨・製造業向け／あとから設定で変更できます）</span></label>
         <div class="wizard-progress" hidden>
           <div id="wiz-label">準備中…</div>
           <div class="pbar"><div id="wiz-bar" class="pbar-fill"></div></div>
@@ -62,6 +65,11 @@ export class Models {
           bar.style.width = '100%';
           // 選択した階級を既定として永続（オート判定で未導入モデルが選ばれるのを防ぐ）
           try { await api.saveSettings({ tier: chatId === 'chat-quick' ? 'quick' : 'standard' }); } catch { /* 停止時は無視 */ }
+          // 図面QA拡張（v2.3.2〜既定ON）: ウィザードでも明示的に選択させる
+          try {
+            const extBox = ov.querySelector('#wiz-ext-drawing') as HTMLInputElement | null;
+            await api.saveSettings({ extensions: { drawing: extBox?.checked ?? true } });
+          } catch { /* 停止時は無視 */ }
           setTimeout(() => location.reload(), 1200);
         } catch (ex) {
           label.textContent = `エラー: ${(ex as Error).message}。再読み込みして再試行してください。`;

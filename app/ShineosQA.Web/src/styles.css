@@ -243,6 +243,9 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .wizard-choice:disabled { opacity: 0.5; }
 .wizard-choice span { color: var(--muted); font-size: 12px; }
 .wizard-choice.wizard-default { border-color: var(--accent); background: #ecfdf5; }
+.wizard-ext { display: flex; align-items: baseline; gap: 8px; font-size: 13px; margin: 4px 0 14px; cursor: pointer; }
+.wizard-ext input { accent-color: var(--accent); }
+.wizard-ext .muted { font-size: 11px; }
 .pbar { height: 10px; background: var(--bg); border-radius: 6px; overflow: hidden; margin: 8px 0; }
 .pbar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.4s; }
 .model-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }

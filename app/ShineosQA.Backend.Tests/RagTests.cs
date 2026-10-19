@@ -245,3 +245,96 @@ public class RagWeakMatchTests
         Assert.False(Rag.IsWeakMatch(0.10, hasWebContext: false, timeSensitive: false, drawingIntent: false, rerankValidated: true));
     }
 }
+
+/// <summary>低信頼×低Kwの組み合わせ判定(IsLowConfidenceWeak)。リランク検証済みでも、グレー帯
+/// (GuardThreshold≤top1&lt;RerankHighConf)×キーワードほぼ無関係(maxKw&lt;MinAcceptKw)は該当なし拒否へ。
+/// 実測(2026-10-19): 正解top1≥+7.3 / 無関係・表層類似≤-10.6 と強分離 → グレー帯の半端な組み合わせのみ拒否</summary>
+public class RagLowConfidenceWeakTests
+{
+    [Fact]
+    public void GrayBand_WithNearZeroKw_Refuses()
+    {
+        // リランク通過済みだが確信できないグレー帯 × キーワード一致なし → 拒否
+        Assert.True(Rag.IsLowConfidenceWeak(-4.9, 0.00, rerankValidated: true));
+        Assert.True(Rag.IsLowConfidenceWeak(+1.9, 0.14, rerankValidated: true));
+    }
+
+    [Fact]
+    public void HighConfidenceTop1_Passes_PureParaphrase()
+    {
+        // 純言い換えヒット: top1が高信頼(RerankHighConf以上)ならkw≈0でも通す
+        Assert.False(Rag.IsLowConfidenceWeak(+2.0, 0.00, rerankValidated: true));
+        Assert.False(Rag.IsLowConfidenceWeak(+7.3, 0.05, rerankValidated: true));
+    }
+
+    [Fact]
+    public void KeywordConfirmed_Passes_EvenInGrayBand()
+    {
+        // キーワード確認済み(maxKw≥MinAcceptKw)ならグレー帯でも通す（語彙的根拠あり）
+        Assert.False(Rag.IsLowConfidenceWeak(+1.0, 0.15, rerankValidated: true));
+        Assert.False(Rag.IsLowConfidenceWeak(-3.0, 0.37, rerankValidated: true));
+    }
+
+    [Fact]
+    public void NotRerankValidated_NeverFires()
+    {
+        // 本ガードはリランク検証済み経路専用。未検証経路はIsWeakMatch(バックストップ)が担う
+        Assert.False(Rag.IsLowConfidenceWeak(+1.0, 0.00, rerankValidated: false));
+    }
+
+    [Fact]
+    public void HighConfThreshold_SitsAboveGuardThreshold()
+    {
+        // グレー帯が成立するための不変条件: 高信頼判定がno-hit判定より上にある
+        Assert.True(Rag.RerankHighConf > Rag.GuardThreshold);
+        Assert.True(Rag.RerankHighConf > 0);
+        Assert.True(Rag.MinAcceptKw < Rag.RerankSkipKw);
+    }
+}
+
+/// <summary>連続同一文の畳み込み(CollapseDuplicateSentences)。繰り返し出力クセ対策
+/// （2026-10-19実測: 「〜です。」が直後に1回繰り返される）。非連続の反復・言い換えは触らない</summary>
+public class RagCollapseTests
+{
+    [Fact]
+    public void ConsecutiveDuplicate_Collapses()
+    {
+        var r = Rag.CollapseDuplicateSentences("タイムカードの締め日は毎月25日です。タイムカードの締め日は毎月25日です。");
+        Assert.Equal("タイムカードの締め日は毎月25日です。", r);
+    }
+
+    [Fact]
+    public void NonConsecutiveRepeat_Kept()
+    {
+        var t = "Aです。Bです。Aです。";
+        Assert.Equal(t, Rag.CollapseDuplicateSentences(t));
+    }
+
+    [Fact]
+    public void Decimals_NotTreatedAsSentenceEnd()
+    {
+        Assert.Equal("公差は3.5です。", Rag.CollapseDuplicateSentences("公差は3.5です。"));
+    }
+
+    [Fact]
+    public void DifferentSentences_Kept()
+    {
+        var t = "見積は150,000円です。原価は98,000円です。";
+        Assert.Equal(t, Rag.CollapseDuplicateSentences(t));
+    }
+
+    [Fact]
+    public void WhitespaceOnlyDifference_Collapses()
+    {
+        Assert.Equal("締め日は25日です。", Rag.CollapseDuplicateSentences("締め日は25日です。締め日は 25日です。"));
+    }
+
+    [Fact]
+    public void LineStructure_Preserved()
+    {
+        var t = "- 手順1\n- 手順2\n- 手順1";
+        Assert.Equal(t, Rag.CollapseDuplicateSentences(t));
+        Assert.Equal("", Rag.CollapseDuplicateSentences(""));
+        Assert.Null(Rag.CollapseDuplicateSentences(null));
+    }
+}

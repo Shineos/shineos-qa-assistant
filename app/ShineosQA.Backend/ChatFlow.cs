@@ -388,6 +388,7 @@ public sealed class ChatFlow
             var sources = new List<SourceInfo>();
             List<ChunkIndex.HybridHit> chosen = hits;
             bool rerankValidated = false; // リランクを実行しガード(GuardThreshold)を通過→弱一致バックストップの対象外
+            var rerankTop1 = double.NegativeInfinity; // リランク実行時のtop1スコア（低信頼×低Kw判定用・未実行時は∞で不発）
             if (docs.Count > 0)
             {
                 // 高信頼ショートカット: ベクトル・キーワードがともに強一致ならリランク（実測~2秒）を省略して
@@ -428,10 +429,14 @@ public sealed class ChatFlow
                         }
                         else
                         {
-                            // 高信頼（top1スコア≥+2.0）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2。
+                            // 高信頼（top1スコア≥RerankHighConf）なら文書1件のみ注入してプロンプト短縮（pp削減）。それ以外はtop2。
                             // ここを通った = クロスエンコーダが関連性を検証済み → 弱一致バックストップの対象外
                             rerankValidated = true;
-                            var take = ranked[0].Score >= 2.0 ? 1 : 2;
+                            rerankTop1 = ranked[0].Score;
+                            var take = ranked[0].Score >= Rag.RerankHighConf ? 1 : 2;
+                            // 2件目が no-hit 帯（リランカが無関連と判定）なら1件に削る。
+                            // top1のみ検査して2件目を無条件採用していた抜けを塞ぐ
+                            if (take == 2 && ranked[1].Score < Rag.GuardThreshold) take = 1;
                             chosen = ranked.Take(take).Select(r => hits[r.Index]).ToList();
                         }
                     }
@@ -467,6 +472,21 @@ public sealed class ChatFlow
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
                 await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "weak-match", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                return;
+            }
+            // 低信頼×低Kwの組み合わせ拒否: リランクはno-hit帯を逃れたものの確信できないグレー帯
+            // (top1<RerankHighConf)で、かつキーワード一致もほぼ無い(maxKw<MinAcceptKw)ケース。
+            // 表層のみ類似の無関係チャンクで一般知識+偽出典回答ができる最後の経路を塞ぐ
+            // （実測: 正解top1≥+7.3 vs 無関係≤-10.6 — グレー帯に落ちる半端な組み合わせのみ拒否）。
+            // 言い換えヒット(top1≥RerankHighConf)とキーワード確認済み(maxKw≥MinAcceptKw)は通す
+            if (Rag.IsLowConfidenceWeak(rerankTop1, maxKw, rerankValidated)
+                && string.IsNullOrEmpty(webContext) && !timeSensitive && !Rag.HasDrawingIntent(message))
+            {
+                _log.Info($"low-conf guard: rerankTop1={rerankTop1:F2} kw={maxKw:F2} — 該当なし拒否へ（偽出典防止）: {Truncate(message, 40)}");
+                var refusal = "該当する記載がありません。" + webNote;
+                _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
+                await Sse(ctx, "delta", new { content = refusal });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "low-conf", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
                 return;
             }
             // 対象語リルート: リランクの意味的選択が、質問の対象語（会議室等）を字面通り含まないチャンクを
@@ -739,8 +759,14 @@ public sealed class ChatFlow
                 }
             }
 
+            // 連続同一文の畳み込み（繰り返し出力クセ対策・v2.3.2）: 出典行正規化の前に適用し、
+            // DB・回答キャッシュには畳み後のテキストを保存する（キャッシュ経由で繰り返しを恒久化しない）
+            var collapsedText = Rag.CollapseDuplicateSentences(answer.ToString()) ?? answer.ToString();
+            if (collapsedText != answer.ToString())
+                _log.Info("repeat collapse: consecutive duplicated sentence removed");
+
             // 出典行を出典パネルと完全一致する正規形へ（モデルが省略・1件のみ記載するのを防止）
-            var finalText = NormalizeSourcesLine(answer.ToString(), sources);
+            var finalText = NormalizeSourcesLine(collapsedText, sources);
             if (finalText != answer.ToString())
                 await Sse(ctx, "patch", new { content = finalText });
 
@@ -755,8 +781,8 @@ public sealed class ChatFlow
             if (!clarifyConfirm && !timeSensitive && !webContributed && sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
             {
                 _db.Exec("INSERT INTO answer_cache(question, answer, sources_json, emb, model) VALUES($q,$a,$s,$e,$m)",
-                    ("$q", message), ("$a", answer.ToString()), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));
-                lock (_cacheLock) _cache.Insert(0, new CacheEntry(message, answer.ToString(), sourcesJson, qEmb, _cfg.ChatModelFile, 0));
+                    ("$q", message), ("$a", collapsedText), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));
+                lock (_cacheLock) _cache.Insert(0, new CacheEntry(message, collapsedText, sourcesJson, qEmb, _cfg.ChatModelFile, 0));
             }
             await Sse(ctx, "done", new { cached = false, kind = responseKind, guard = (string?)null, sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
         }

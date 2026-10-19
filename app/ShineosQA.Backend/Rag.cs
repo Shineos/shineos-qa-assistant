@@ -18,7 +18,10 @@ public static partial class Rag
     public const double MinAcceptKw = 0.15;         // 弱一致ガード(バックストップ): リランカーが無い環境での最終防波堤。
                                                     // kw≈0は語彙的に無関係なので、リランクを経由しない採択でも該当なし拒否へ。
                                                     // 対象外条件は IsWeakMatch 参照（図面質問/Web文脈/時間感応/リランク済み）
-    public const string PromptVersion = "2026-10-16-response-kind-12"; // プロンプト/キャッシュ仕様変更時は回答キャッシュを無効化
+    public const double RerankHighConf = 2.0;       // リランク高信頼判定（≥なら1件注入・<なら2件採用）。グレー帯(<2.0)で
+                                                    // かつキーワード一致もほぼ無い(maxKw<MinAcceptKw)組み合わせは
+                                                    // IsLowConfidenceWeak で該当なし拒否へ（偽出典の最後の経路）
+    public const string PromptVersion = "2026-10-19-no-repeat-13"; // プロンプト/キャッシュ仕様変更時は回答キャッシュを無効化
     // (-2: 混同禁止規則を独立文に復元。1文への圧縮合并で「長期出張の承認者」問が所属長/部長を混同する回帰が発生したため)
     // (-3: 規則⑤追加。Web検索OFF時に【参照情報】が無いのに「参照情報によると晴天」等の外部状況を捏造する揺らぎ(s13)への防御)
     // (-4〜-6: 規則⑥(前提質問の捏造防御・t76解消)と⑦(対象置換防御・t74へは効果薄)を試行
@@ -29,6 +32,10 @@ public static partial class Rag
     //     無関係な事実を列挙していた。外部調査(arXiv 2412)では文脈無関係時の明示的拒否指示が棄却率を上げると報告
     // -10: -9は正常質問(タクシー条件)を自己矛盾させた(「22時以降は可能」と述べた直後に「明記されていないため禁止」)ため撤回。
     //     代わりにChatFlowで短クエリ(3文字以下)のときのみ動的に確認促進の注記を付ける(通常質問には影響しない)
+    // -13: 繰り返し出力クセ（冒頭文が1回繰り返される・2026-10-19実測）への対応 — 生成後の決定的畳み込み
+    //     (CollapseDuplicateSentences)を導入。penalty系サンプリングは不使用。
+    //     ※SystemPromptへの「繰り返すな」指示は試したが撤回: 1.7Bが手順リスト生成時に冒頭を飛ばして
+    //      再掲する変形出力（s04実測・18問セットで基準比-1）を誘発したため。畳み込みだけで対処する
 
     /// <summary>相対日時語を含む質問の判定（「今日は何日」等）。これらは回答が日付で変わるため
     /// 回答キャッシュの対象外とする（ChatFlowで読み書き両方をスキップ）。
@@ -50,6 +57,16 @@ public static partial class Rag
     /// 図面質問（寸法数値ノイズでkwが構造的に希薄）/Web文脈あり/時間感応/リランク済み(ガード通過済み)は対象外</summary>
     public static bool IsWeakMatch(double maxChosenKw, bool hasWebContext, bool timeSensitive, bool drawingIntent, bool rerankValidated) =>
         !hasWebContext && !timeSensitive && !drawingIntent && !rerankValidated && maxChosenKw < MinAcceptKw;
+
+    /// <summary>低信頼×低Kwの組み合わせ判定。リランクはno-hit帯(GuardThreshold)を逃れたものの確信が持てない
+    /// (top1&lt;RerankHighConf)うえ、キーワード一致もほぼ無い(maxKw&lt;MinAcceptKw)ケース。
+    /// 表層のみ類似の無関係チャンクが回答文脈に入り、一般知識+偽出典で答えられる最後の経路を塞ぐ。
+    /// 実測(2026-10-19・bge-reranker-v2-m3): 正解はtop1≥+7.3、無関係/表層類似は≤-10.6と強く分離するため、
+    /// このグレー帯に落ちる半端な組み合わせのみを拒否しても正解への影響は小さい。
+    /// 純言い換えヒット(top1≥RerankHighConf)とキーワード確認済み(maxKw≥MinAcceptKw)は通す。
+    /// 対象外(Web文脈/時間感応/図面質問)は呼び出し側で判定（rerankガードと同じ免除条件）</summary>
+    public static bool IsLowConfidenceWeak(double rerankTop1, double maxChosenKw, bool rerankValidated) =>
+        rerankValidated && rerankTop1 < RerankHighConf && maxChosenKw < MinAcceptKw;
 
     /// <summary>システムプロンプト末尾に付与する現在日付行。「今日は何日」等の質問に
     /// モデルが正確に答えられるようにする（学習時点で知識が止まっているため）。
@@ -74,6 +91,45 @@ public static partial class Rag
 
     [GeneratedRegex(@"[^。．.\n]+[。．.]?")]
     private static partial Regex SentenceRegex();
+
+    /// <summary>連続する同一文の畳み込み。温度0+短文指示でも冒頭文が1回繰り返される出力クセがあるため
+    /// （2026-10-19実測: 「タイムカードの締め日は毎月25日です。」×2）、生成後に決定的に除去する。
+    /// サンプリングpenalty（repeat_penalty等）は文書どおりの数値出力を歪める恐れがあるため使わない。
+    /// 判定は空白・全角空白を除去した完全一致のみ。非連続の反復・言い換えは触らない。
+    /// 数値中の小数点（3.5 等）は文区切りにしない</summary>
+    public static string? CollapseDuplicateSentences(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        var lines = text.Split('\n');
+        for (var i = 0; i < lines.Length; i++) lines[i] = CollapseSentencesInLine(lines[i]);
+        return string.Join("\n", lines);
+    }
+
+    private static string CollapseSentencesInLine(string line)
+    {
+        var parts = new List<string>();
+        var start = 0;
+        for (var i = 0; i < line.Length; i++)
+        {
+            var c = line[i];
+            if (c != '。' && c != '．' && c != '.') continue;
+            if (c == '.' && i > start && i + 1 < line.Length && char.IsDigit(line[i - 1]) && char.IsDigit(line[i + 1])) continue;
+            parts.Add(line[start..(i + 1)]);
+            start = i + 1;
+        }
+        if (start < line.Length) parts.Add(line[start..]);
+        if (parts.Count < 2) return line;
+        var sb = new StringBuilder(line.Length);
+        string? prev = null;
+        foreach (var p in parts)
+        {
+            var norm = p.Replace(" ", "").Replace("\u3000", "");
+            if (norm.Length > 0 && norm == prev) continue; // 直前の文と同一（空白差のみ）→ 落とす
+            sb.Append(p);
+            if (norm.Length > 0) prev = norm;
+        }
+        return sb.ToString();
+    }
 
     [GeneratedRegex(@"[\u3040-\u30FF\u4E00-\u9FFF]+")]
     private static partial Regex CjkRegex();

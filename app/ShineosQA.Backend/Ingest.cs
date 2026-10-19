@@ -31,7 +31,7 @@ public sealed class Ingest
     /// 印字不可能・規格外文字（制御コード、Latin-1拡張等）が全体の1割超でジャンク扱い。
     /// 通常の日本語/英語テキストはほぼ0%。実測: Edge画像PDFでICC辞書330字（gTRC/bTRC/cprt等）が
     /// 「テキスト」として返り、ゴミchunkがreadyになる実害があった</summary>
-    private static bool LooksLikeBinaryJunkText(string text)
+    internal static bool LooksLikeBinaryJunkText(string text)
     {
         var t = text.Trim();
         if (t.Length == 0) return true;
@@ -246,7 +246,10 @@ public sealed class Ingest
                         // 実図面検証で金賞作品図面（スキャン1枚）が取り込み不可だった問題の根本対策
                         if (string.IsNullOrWhiteSpace(text) && packOn)
                         {
-                            var ocr = await OcrPdfFallbackAsync(bytes, ct);
+                            OcrPdfText? ocr = null;
+                            InvalidDataException? ocrErr = null;
+                            try { ocr = await OcrPdfFallbackAsync(bytes, ct); }
+                            catch (InvalidDataException ex) { ocrErr = ex; } // OCR不可（言語パック無し等）→ VL救済へ
                             if (ocr != null)
                             {
                                 var firstDim = ocr.PageDims.Count > 0 ? ocr.PageDims[0] : (0f, 0f);
@@ -255,8 +258,28 @@ public sealed class Ingest
                                 ocrPageDims = ocr.PageDims;
                                 scannedOcr = true;
                             }
-                            else if (legacyErr != null)
+                            // VL第二救済（v2.3.2）: OCRが使えない/ほぼ空（8字未満打ち切り含む）でも、visionモデル
+                            // 導入済みなら1頁目をVLで全文文字起こしする。未導入ならno-op（TranscribeAsyncが即null）。
+                            // VLのみの救済では語順情報（runs）が無いため図面表題欄抽出は行われず、通常文書チャンク
+                            // として索引化される。失敗時は従来のOCRガイド文言/エラーを維持
+                            if (string.IsNullOrWhiteSpace(text) && _sup.VisionInstalled)
+                            {
+                                try
+                                {
+                                    var (vlPng, _, _) = await RenderPageWinRtAsync(bytes, 0, 1600, ct);
+                                    var vt = await VisionRead.TranscribeAsync(_gw, _sup, _cfg, vlPng, "image/png", _log, ct);
+                                    if (!string.IsNullOrWhiteSpace(vt))
+                                    {
+                                        text = "※このテキストは視覚モデルによる文字起こしです（OCR救済）\n" + vt;
+                                        scannedOcr = true;
+                                        _log.Info($"vl rescue: OCR unusable — VL transcribed page 1 ({vt.Length} chars)");
+                                    }
+                                }
+                                catch (Exception ex) { _log.Warn($"vl rescue skipped: {ex.Message}"); }
+                            }
+                            if (string.IsNullOrWhiteSpace(text) && legacyErr != null)
                                 throw new InvalidDataException(legacyErr.Message + " （スキャンPDF: OCRでも読み取れる文字がありませんでした）");
+                            if (string.IsNullOrWhiteSpace(text) && ocrErr != null) throw ocrErr; // OCR不可ガイド（言語パック等）を維持
                         }
                         if (string.IsNullOrWhiteSpace(text) && legacyErr != null) throw legacyErr;
                     }
@@ -352,6 +375,23 @@ public sealed class Ingest
                 }
                 else if (text.Trim().Length > 0)
                 {
+                    // VL第二救済（v2.3.2）: 図面判定を通らないスキャン文書（画像のみPDF・OCR救済済み）でも、
+                    // visionモデル導入済みなら1頁目をVLで全文文字起こしして索引に乗せる（OCRの読み違え・
+                    // 読み飛ばしの補完）。未導入ならno-op。失敗時はOCR結果だけで続行
+                    if (scannedOcr && _sup.VisionInstalled && ext == ".pdf" && pdf != null)
+                    {
+                        try
+                        {
+                            var (pagePng, _, _) = await RenderPageWinRtAsync(bytes, 0, 1600, ct);
+                            var vt = await VisionRead.TranscribeAsync(_gw, _sup, _cfg, pagePng, "image/png", _log, ct);
+                            if (!string.IsNullOrWhiteSpace(vt))
+                            {
+                                text += "\n【VL文字起こし】\n" + vt;
+                                _log.Info($"vl rescue: non-drawing scanned doc — VL transcript appended ({vt.Length} chars)");
+                            }
+                        }
+                        catch (Exception ex) { _log.Warn($"vl rescue skipped: {ex.Message}"); }
+                    }
                     chunks = Rag.Chunk(text);
                 }
                 if (chunks.Count == 0 && !isDrawing) throw new InvalidDataException("no text content");
