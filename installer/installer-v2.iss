@@ -60,7 +60,11 @@ Name: "desktopicon"; Description: "デスクトップにショートカットを
 ; バックエンド（自己完結publish: .NETランタイム同梱・109MB）
 ; ※Excludes: data は必須。ローカルでpublish出力からexeを起動すると data/knowledge.db が
 ;   生成されることがあり、それを同梱してインストールすると**ユーザーのナレッジDBを空DBで上書き**する
-Source: "..\output\backend-pub\*"; DestDir: "{app}"; Excludes: "data,data\*,*.db,*.db-shm,*.db-wal"; Flags: ignoreversion recursesubdirs createallsubdirs
+; ※Excludes: config.json も必須。ローカルでpublish出力からexeを起動すると EnsureDefaultConfig が
+;   開発機の絶対パス入りのconfig.jsonを生成することがあり、それを同梱するとインストール先のアプリが
+;   開発機のフォルダ(data/models)を読みに行ってモデル未検出エラーになる（2026-10-16ローカル検証実測）。
+;   config.json が無い場合は初回起動時に EnsureDefaultConfig が正しい既定値で生成する
+Source: "..\output\backend-pub\*"; DestDir: "{app}"; Excludes: "data,data\*,*.db,*.db-shm,*.db-wal,config.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; llama.cpp CPUエンジン（llama-server + 依存DLL一式。バリアントDLLは実行時に自動選択される）
 Source: "..\spikes\phase0\engine\cpu\llama-server.exe"; DestDir: "{app}\engine"; Flags: ignoreversion
 Source: "..\spikes\phase0\engine\cpu\*.dll";            DestDir: "{app}\engine"; Flags: ignoreversion
