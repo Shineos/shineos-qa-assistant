@@ -168,25 +168,35 @@
 
 ## 7. Store掲載文（日本語・英語）
 
+> **2026-10-20 全面刷新（v2.4.0）**: 「図面と実績が繋がるローカルQA」を最前列に置く差別化配置へ。
+> 10.1.1整合（絶対表現を避け、Web検索の既定OFFと報告機能を明記）を最優先で文言を作成。
+> 貼り付けは Partner Center の 提出開始 → プロパティ/説明 の各欄へ。
+
 ### 7.1 日本語
 
 **簡単な説明（最大200字）**:
 
-> 社内規定・業務マニュアルをAIで検索できる社内Q&Aツール。回答には必ず出典（文書名・該当箇所）が付き、根拠のない回答はしません。社内文書はPCの外に出ません。初回起動時にAIモデルを取得すれば、後は完全オフラインで使えます。
+> 図面と実績表を登録すると、図番の過去見積・原価・注記まで出典付きで答える社内Q&A。文書のAI処理はPC内で完結し、初期設定後はオフラインで動作します。ナレッジに無い質問には「該当する記載がありません」と回答します。
 
 **詳しい説明（最大1500字）**:
 
-> 社内知恵袋は、社内規定・業務マニュアルを登録するだけで、誰でも自然な日本語で質問できる社内Q&Aツールです。
+> 社内知恵袋は、製造業の現場から生まれた完全ローカル型の社内Q&Aツールです。図面・実績表・規定・マニュアルを登録するだけで、誰でも日本語で質問でき、回答には必ず出典が付きます。
 >
-> ■ 特徴
-> ・回答には必ず「出典（文書名・該当箇所）」が表示され、ナレッジにない質問には「該当する記載がありません」と答えます（根拠のない回答をしません）
-> ・すべての処理が自分のPC内で完結。社内文書・質問・回答が外部に送信されません（テレメトリもありません）
-> ・インストール後の初回起動時にAIモデル（クイック1.7B・合計約2.3GB）を取得します。以降は完全オフラインで動作します（モデルの取得時にだけ通信します）
-> ・速度と精度のバランスでモデルを切り替え可能（クイック1.7B／標準4B／高品質30B・追加モデルはアプリ内からダウンロード）
-> ・PDF・Word・Excel・CSV・Markdown・テキストをドラッグ＆ドロップでナレッジ化。追加した文書は即座に検索対象になります
+> ■ 製造業向け機能（インストール直後から有効）
+> ・図面QA: 図面PDFの表題欄（図番・品名・材質・改訂）を自動で読み取り、図番や品名で検索・質問できます。図番の表記ゆれ（ST-1042A／ST1042A）も同一視。画面キャプチャを貼り付けての質問にも対応（OCRはPC内で処理）
+> ・実績接続QA: 実績表（Excel/CSV）を登録すると図番列を自動検出し、「ST-1042Aの過去見積と原価は？」といった質問に過去見積・原価・納期を出典付きで回答
+> ・スキャン図面対応: 紙スキャンの図面PDFも内蔵OCRで読み取り（コントラストの低いスキャンは自動で前処理）。視覚モデルを導入すると図面の注記・寸法をさらに高精度に読み取れます
+> ・DXF（CAD図面）の取り込みにも対応
+>
+> ■ 全機能
+> ・回答には必ず「出典（文書名・該当箇所）」が表示され、ナレッジに無い質問には「該当する記載がありません」と答えます（根拠のない回答をしません）
+> ・文書のAI処理はすべて自分のPC内で完結し、自動送信はありません。Web検索は既定でOFFで、ONにした場合のみ検索語が検索サービスへ送信されます。各AI回答には「問題を報告」ボタンがあります
+> ・インストール後の初回起動時にAIモデル（クイック1.7B・合計約2.3GB）を取得します。以降は完全オフラインで動作します（モデル取得時のみ通信）。閉域ネットワークのPC向けに、ダウンロード済みモデルファイルをUSB等で持ち込んで導入するオフライン取り込みも可能
+> ・PDF・Word・Excel・CSV・Markdown・テキスト・DXF・図面PDFをドラッグ＆ドロップでナレッジ化
 > ・ハイブリッド検索（キーワード＋意味検索）で型番・規程番号・固有名詞も正確にヒット
+> ・速度と精度でモデルを切り替え可能（クイック1.7B／標準4B／高品質30B・アプリ内で追加ダウンロード）
 > ・閉じるとAIエンジンも完全停止。他アプリの作業を優先する低負荷モード搭載
-> ・製造業向け拡張（設定から有効・既定OFF）: 図面PDFの表題欄（図番・品名・材質・改訂）を自動読み取りし、図番の表記ゆれ（A-1234／A1234）も同一視して検索。画面キャプチャを貼って図番から質問もできます（OCRはPC内で処理）
+> ・複合質問をまとめて調べる試験的なエージェント機能（設定で有効化）
 >
 > ■ 動作環境
 > Windows 10/11（64bit）・メモリ8GB以上・空き容量4GB以上（GPU不要）。初回起動時のモデル取得にのみインターネット接続が必要です
@@ -194,23 +204,28 @@
 > ■ 提供形態
 > 本体は無償（MIT License）。導入支援・保守サポートは shineos.com まで。
 
-### 7.2 英語（英語圏listing用・新規作成）
+### 7.2 英語（英語圏listing用）
 
 **Short description**:
 
-> Offline internal Q&A for company rules and manuals. Every answer cites its source (document & section); if the answer is not in your documents, it says so. Nothing ever leaves your PC — after the first-launch model download.
+> Register drawings and result sheets, and this local Q&A answers past estimates, costs and drawing notes with citations. AI processing stays on your PC; it works offline after setup. If it's not in your documents, it says "not found".
 
 **Long description**:
 
-> ShineosQA turns your company regulations and business manuals into a knowledge base that anyone can query in natural Japanese.
+> ShineosQA is a fully local Q&A tool born from the factory floor. Register drawings, result sheets, regulations and manuals — anyone on the team can query them in natural Japanese, and every answer cites its source.
 >
-> - Every answer shows its source (document name and section). Questions not covered by your documents are answered with "not found" — it never guesses
-> - All processing stays on your PC. Documents, questions and answers are never sent anywhere (no telemetry)
-> - On first launch, the app downloads the AI models (~2.3 GB); after that it runs fully offline
-> - Switch between Quick (1.7B) / Standard (4B) / Quality (30B) models right in the app; extra models download on demand
-> - Register PDF / Word / Excel / CSV / Markdown / text files by drag & drop; newly added documents are searchable immediately
-> - Hybrid search (keyword + semantic) so model numbers and regulation IDs are found accurately
+> - Drawing QA (enabled by default): reads title blocks (drawing number, part name, material, revision) from drawing PDFs and finds them even with notation variants (ST-1042A / ST1042A). Ask with a screenshot too — OCR runs on your PC
+> - Results-linked QA: register a result sheet (Excel/CSV) and ask "What was the past estimate and cost for ST-1042A?" — answers cite the sheet
+> - Scanned drawings: paper-scanned drawing PDFs are read by built-in OCR with adaptive preprocessing; an optional vision model reads notes and dimensions with higher accuracy
+> - DXF (CAD drawing) import supported
+> - Every answer shows its source (document and section). Questions not covered by your documents are answered with "not found" — it never guesses
+> - All AI processing stays on your PC; nothing is sent automatically. Web search is OFF by default — only the search terms are sent to a search service when you turn it on. Each AI answer has a "Report an issue" button
+> - On first launch, the app downloads the AI models (~2.3 GB); after that it runs fully offline. For air-gapped PCs, models can be imported from a local file (e.g. USB)
+> - Register PDF / Word / Excel / CSV / Markdown / text / DXF / drawing PDFs by drag & drop
+> - Hybrid search (keyword + semantic) finds model numbers and regulation IDs accurately
+> - Quick (1.7B) / Standard (4B) / Quality (30B) models switch in-app; extras download on demand
 > - Closing the app stops the AI engine completely; a low-load mode prioritizes your other apps
+> - Experimental agent mode (opt-in) answers compound questions in one pass
 >
 > Requirements: Windows 10/11 (64-bit), 8 GB+ RAM, ~4 GB free disk space, internet on first launch only. No GPU needed.
 >
@@ -218,11 +233,21 @@
 
 ### 7.3 検索キーワード（フォーム: 最大7個・合計21単語まで）
 
+**案A（現行維持・2026-10-01 Partner Center確認済みに近い）**:
+
 ```
 社内QA, 社内文書検索, オフラインAI, ローカルAI, 図面検索, マニュアル検索, 社内規定
 ```
 
-※第三者商標（ChatGPT等）はキーワード入力すると認証で却下されうるため使わない（Storeポリシー 10.1 関連）。
+**案B（製造業差別化強化・「ナレッジベース」等を汎用語から図面系へ入れ替え）**:
+
+```
+社内QA, 製造業 図面, 図面検索, 図面QA, ローカルAI, オフラインAI, 実績検索
+```
+
+- 申請時は **Partner Centerの現在値を画面で突合** してから上書きする（本書の記録と画面は差異が生じうる。2026-10-01確認時は「ナレッジベース」が含まれ「図面検索」は未記録だった）。
+- 上限: 7個/合計21単語。案Bは「製造業 図面」が2単語扱いに注意（合計13単語で可）。
+- 第三者商標（ChatGPT等）はキーワード入力すると認証で却下されうるため使わない（Storeポリシー 10.1 関連）。
 
 ---
 
@@ -240,6 +265,7 @@
 | スクリーンショット4 ナレッジ管理 | `assets/screenshots/app-03-knowledge.png`（1500x1000） | ✓ 2026-10-16更新 |
 | スクリーンショット5 モデル選択 | `assets/screenshots/app-04-models.png`（1500x1000） | ✓ 2026-10-16更新 |
 | スクリーンショット6 図面QA（図番ST-1042Aの材質・品名+出典。製造業向けの差別化） | `assets/screenshots/app-05-drawing.png`（1500x1000・v2.2.0追加） | ✓ 2026-10-16追加 |
+| スクリーンショット7 **実績接続QA**（「ST-1042Aの過去見積と原価は？」→150,000円/98,000円を出典付き回答。差別化の中核ビジュアル・**スクショ一覧の2枚目に配置推奨**） | `assets/screenshots/app-06-jisseki.png`（1500x1000） | ✓ 2026-10-20追加 |
 | MSIXパッケージ内ロゴ（150/44/50px） | CIが `store-logo-300.png` から自動生成 | ✓ |
 
 ※ 1枚目（モデルDL画面）は日本語UIのまま掲載してよい（対象市場が日本のため。多言語展開時にキャプションのローカライズを検討）。
@@ -317,8 +343,9 @@ MicrosoftのEXE認証テスト項目（[MSI/EXE認証プロセス](https://learn
 > 6. Closing the app stops all backend/engine processes and releases localhost port 8300 — nothing stays resident.
 > 7. **First-launch model download**: the installer downloads nothing. On the first app launch, a welcome wizard downloads the required AI models (~2.3 GB total: embedding, chat 1.7B, reranker) from huggingface.co with SHA-256 verification. **An internet connection is required on first launch**; after that the app is fully offline. Download progress is shown; if it fails, relaunching retries.
 > 8. **Reporting AI-generated content (Store policy 11.16 compliance)**: every AI answer has a 「問題を報告」 (Report an Issue) button below it. Clicking it opens a dialog to pick a reason (inappropriate content / factual error / other), optionally add details, and review the pre-filled report (question + answer excerpt + app version + timestamp). The 「問い合わせフォームを開く」 button opens the official contact form at https://shineos.com/contact/ **with the report automatically filled into the form's type and message fields** (company/name/email are entered by the user; the report is also copied to the clipboard as a fallback). The same form also opens from Settings > サポート (Support). The app itself never transmits anything automatically; the user sends the report themselves.
+> 9. **Drawing features are enabled by default (v2.4.0)**: the app reads title blocks (drawing number / part name / material / revision) from drawing PDFs on import and answers drawing-number questions with citations. Scanned drawing PDFs are read by the built-in OCR (processed on the PC); an optional vision model (~1.7 GB, downloadable in Settings) improves accuracy. A knowledge list banner may suggest installing it after a scanned drawing is imported — it is optional and OFF unless the user installs it.
 >
-> Silent install: `ShineosQA-Setup-2.1.0-lite.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`
+> Silent install: `ShineosQA-Setup-<version>-lite.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`
 
 ---
 

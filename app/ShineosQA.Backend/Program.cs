@@ -368,7 +368,9 @@ public static class Api
                 {
                     using var s = f.OpenReadStream();
                     var id = await ingest.IngestFileAsync(Path.GetFileName(name), s, req.HttpContext.RequestAborted);
-                    results.Add(new { name, ok = true, file_id = id });
+                    // スキャン（OCR救済）を視覚モデル未導入で取り込んだ場合はVL導入案内を返す
+                    // （ナレッジ画面のバナーで「視覚モデル導入で読み取り精度が向上」を表示する・v2.4.0）
+                    results.Add(new { name, ok = true, file_id = id, suggest_vision = ingest.LastIngestScannedOcr && !sup.VisionInstalled });
                 }
                 catch (Exception ex)
                 {

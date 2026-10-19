@@ -251,6 +251,11 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .model-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .model-row span:first-child { flex: 1; }
 
+/* ---- スキャン図面の視覚モデル導入案内（v2.4.0） ---- */
+.vision-hint { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin: 0 0 12px; border: 1px solid var(--accent); border-radius: 10px; background: #ecfdf5; font-size: 13px; }
+.vision-hint span { flex: 1; }
+.vision-hint .icon-btn { flex: none; }
+
 /* ---- 図面PDF検索・Q&A 拡張パック（製造業向け） ---- */
 .badge-drawing { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 999px; padding: 1px 8px; font-size: 10.5px; font-weight: 600; }
 .file-thumb { width: 34px; height: 44px; object-fit: cover; object-position: top left; border: 1px solid var(--border); border-radius: 4px; vertical-align: middle; margin-right: 8px; background: #fff; }
