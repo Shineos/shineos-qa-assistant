@@ -337,4 +337,22 @@ public class RagCollapseTests
         Assert.Equal("", Rag.CollapseDuplicateSentences(""));
         Assert.Null(Rag.CollapseDuplicateSentences(null));
     }
+
+    [Fact]
+    public void WholeBlockRepeat_Collapses()
+    {
+        // 箇条書きブロック丸ごと2回反復（v2.3.2実機E2E実測・図面注記）:
+        // 文単位では A,B,A,B で直前一致が無いため、ブロック単位のA+A判定で畳む
+        var t = "- 溶接はJIS Z 3601に従う。  \n- 仕上げ面のバリ取りを完了後、検査すること。- 溶接はJIS Z 3601に従う。  \n- 仕上げ面のバリ取りを完了後、検査すること。\n\n出典：drawing-sample.pdf";
+        var r = Rag.CollapseDuplicateSentences(t);
+        Assert.Equal("- 溶接はJIS Z 3601に従う。  \n- 仕上げ面のバリ取りを完了後、検査すること。\n\n出典：drawing-sample.pdf", r);
+    }
+
+    [Fact]
+    public void DifferentHalves_Kept()
+    {
+        // 前後半が一致しない通常回答は触らない
+        var t = "見積は150,000円です。\n原価は98,000円です。";
+        Assert.Equal(t, Rag.CollapseDuplicateSentences(t));
+    }
 }

@@ -92,18 +92,41 @@ public static partial class Rag
     [GeneratedRegex(@"[^。．.\n]+[。．.]?")]
     private static partial Regex SentenceRegex();
 
-    /// <summary>連続する同一文の畳み込み。温度0+短文指示でも冒頭文が1回繰り返される出力クセがあるため
-    /// （2026-10-19実測: 「タイムカードの締め日は毎月25日です。」×2）、生成後に決定的に除去する。
-    /// サンプリングpenalty（repeat_penalty等）は文書どおりの数値出力を歪める恐れがあるため使わない。
-    /// 判定は空白・全角空白を除去した完全一致のみ。非連続の反復・言い換えは触らない。
-    /// 数値中の小数点（3.5 等）は文区切りにしない</summary>
+    /// <summary>繰り返し出力の畳み込み。2段構え:
+    /// (1) 行内の連続同一文を除去（空白差のみの一致も同一扱い）
+    /// (2) 回答全体が同一ブロックの2回反復（A+A）になっていれば1回分へ畳む —
+    ///     箇条書きブロック丸ごと再現されるクセ（2026-10-19 図面注記・v2.3.2実機E2E実測:
+    ///     「- 溶接…。- 仕上げ…。」×2）は文単位の連続判定では捉わらない（A,B,A,Bで直前一致が無いため）。
+    ///     末尾のモデル自書き出典行は退避して本文だけで判定し、後から再結合する。
+    /// サンプリングpenalty（repeat_penalty等）は文書どおりの数値出力を歪める恐れがあるため使わない</summary>
     public static string? CollapseDuplicateSentences(string? text)
     {
         if (string.IsNullOrEmpty(text)) return text;
         var lines = text.Split('\n');
         for (var i = 0; i < lines.Length; i++) lines[i] = CollapseSentencesInLine(lines[i]);
-        return string.Join("\n", lines);
+        return CollapseRepeatedBlock(string.Join("\n", lines));
     }
+
+    /// <summary>A+A反復の判定: 本文長の半分で分割し、空白を除去した正規形が一致すれば前半のみ返す。
+    /// 偶然前後半が一致する通常文は事実上なく、一致=反復と見なしてよい</summary>
+    private static string CollapseRepeatedBlock(string text)
+    {
+        var body = text;
+        var tail = "";
+        // 出典行との区切り（\n\n出典 / \n出典）を本文から丸ごと退離させる（改行数を保持）
+        var idx = text.LastIndexOf("\n\n出典", StringComparison.Ordinal);
+        if (idx < 0) idx = text.LastIndexOf("\n出典", StringComparison.Ordinal);
+        if (idx > 0) { body = text[..idx]; tail = text[idx..]; }
+        var half = body.Length / 2;
+        if (half < 4) return text;
+        var first = body[..half];
+        var second = body[half..];
+        if (NormForRepeat(first).Length > 0 && NormForRepeat(first) == NormForRepeat(second))
+            return first.TrimEnd() + tail;
+        return text;
+    }
+
+    private static string NormForRepeat(string s) => s.Replace(" ", "").Replace("\u3000", "").Replace("\t", "").Replace("\r", "").Replace("\n", "");
 
     private static string CollapseSentencesInLine(string line)
     {
