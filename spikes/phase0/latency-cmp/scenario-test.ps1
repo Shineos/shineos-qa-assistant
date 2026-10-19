@@ -1,10 +1,10 @@
-﻿param([string]$Label = "run", [string]$Scenarios = "scenarios.json", [switch]$WebSearch)
+﻿param([string]$Label = "run", [string]$Scenarios = "scenarios.json", [switch]$WebSearch, [string]$Base = "http://127.0.0.1:8300")
 # 品質シナリオテスト: シナリオJSON（既定 scenarios.json、-Scenarios scenarios-100.json で100問）を
-# /api/chat に流し、期待キーワード/拒否を判定。
+# /api/chat に流し、期待キーワード/拒否を判定。-Base でdevインスタンス(8305等)を指定できる。
 # 出力: TSV（tag, pass, answer_chars, ms）＋ answers/<Label>-<tag>.txt
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-$base = "http://127.0.0.1:8300"
+$base = $Base
 & curl.exe -s -X POST "$base/api/cache-clear" | Out-Null  # answer cache is not model-tagged: always regenerate
 $dir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $cases = [IO.File]::ReadAllText((Join-Path $dir $Scenarios), [Text.Encoding]::UTF8) | ConvertFrom-Json

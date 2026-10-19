@@ -15,8 +15,12 @@ public static class Extensions
 
     // 注: Excel・CSV取り込みは拡張パックではなく本体標準機能（常に有効・設定不要）
 
-    /// <summary>拡張パックの有効判定。既定OFF・リクエストごとにDBを読む（即時反映・再起動不要）</summary>
-    public static bool IsEnabled(Db db, string packId) => db.GetSetting($"ext.{packId}", "0") == "1";
+    /// <summary>拡張パックの有効判定。図面QAは既定ON（v2.3.2〜: 製造業向けの中核機能を既定で見える状態に。
+    /// 影響は図面判定(LooksLikeDrawing: 図番パターン+≤3頁)を通るPDFのみで一般文書は無影響。
+    /// 設定UIで明示的にOFFにしたユーザーはDB永続済みのため変更の影響を受けない）。
+    /// リクエストごとにDBを読む（即時反映・再起動不要）</summary>
+    public static bool IsEnabled(Db db, string packId) =>
+        db.GetSetting($"ext.{packId}", packId == DrawingId ? "1" : "0") == "1";
 
     public static void SetEnabled(Db db, string packId, bool on) => db.SetSetting($"ext.{packId}", on ? "1" : "0");
 

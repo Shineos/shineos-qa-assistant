@@ -1,7 +1,8 @@
 using Xunit;
 namespace ShineosQA.Backend.Tests;
 
-/// <summary>拡張パック機構（T2）: 既定OFF・設定の往復・スキーマ移行</summary>
+/// <summary>拡張パック機構（T2）: 図面QAはv2.3.2〜既定ON（トグル未触の既存ユーザーも自動で有効化。
+/// 明示的にOFFにしたユーザーはDB永続済みなので影響なし）・設定の往復・スキーマ移行</summary>
 public class ExtensionsTests : IDisposable
 {
     private readonly string _dir;
@@ -17,10 +18,11 @@ public class ExtensionsTests : IDisposable
     private Db NewDb() => new(Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".db"));
 
     [Fact]
-    public void IsEnabled_DefaultFalse()
+    public void IsEnabled_Drawing_DefaultTrue()
     {
+        // v2.3.2〜: 図面QA（製造業向け中核機能）は既定ON
         using var db = NewDb();
-        Assert.False(Extensions.IsEnabled(db, Extensions.DrawingId));
+        Assert.True(Extensions.IsEnabled(db, Extensions.DrawingId));
     }
 
     [Fact]

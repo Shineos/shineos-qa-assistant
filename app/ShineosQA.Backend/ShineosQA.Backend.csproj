@@ -13,6 +13,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="ShineosQA.Backend.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Docnet.Core" Version="2.6.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <!-- NU1903対応: GHSA-2m69-gcr7-jv3q を修正したSQLiteネイティブ版を明示ピン -->
