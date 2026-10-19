@@ -70,14 +70,16 @@ public static partial class DrawingIngest
 
     /// <summary>表題欄抽出。渡すrunsは図面シート1ページ分（PickSheetPageで選択したページ。呼び出し側でフィルタ済み）。
     /// JIS慣行の右下領域の行テキストからラベル近接で各欄を取り出し、寸法・尺度等の誤採用を検証で排除する。
-    /// 取得できなかった欄はnull（呼び出し側でLLM構造化のフォールバック判定に使う）</summary>
-    public static DrawingMeta ExtractTitleBlock(IReadOnlyList<PdfTextRun> runs, float pageWidth, float pageHeight)
+    /// 取得できなかった欄はnull（呼び出し側でLLM構造化のフォールバック判定に使う）。
+    /// yTol: 行化のY許容。テキスト層PDF（pt座標・正確なベースライン）は既定3pt、OCR由来のruns
+    /// （ピクセル座標・単語毎に数px〜数十px振れ）は呼び出し側で pageHeight の1%程度を渡す（v2.4.0）</summary>
+    public static DrawingMeta ExtractTitleBlock(IReadOnlyList<PdfTextRun> runs, float pageWidth, float pageHeight, float yTol = 3f)
     {
         var region = runs
             .Where(r => pageWidth > 0 && pageHeight > 0
                 && r.X > pageWidth * 0.55f && r.Y < pageHeight * 0.40f)
             .ToList();
-        var lines = ToLines(region);
+        var lines = ToLines(region, yTol);
         string? zuban = FindZuban(lines);
         if (!IsPlausibleZuban(zuban)) zuban = null;
         var hinmei = ValueAfterLabel(lines, "品名", "名称", "TITLE");
@@ -167,10 +169,11 @@ public static partial class DrawingIngest
 
     // ---- 内部 ----
 
-    public static List<string> ToLines(IEnumerable<PdfTextRun> runs)
+    public static List<string> ToLines(IEnumerable<PdfTextRun> runs, float yTol = 3f)
     {
         return runs
-            .GroupBy(r => Math.Round(r.Y / 3f)) // ベースラインYを3ptバケットに行化
+            .GroupBy(r => Math.Round(r.Y / yTol)) // ベースラインYを行バケット化。既定3pt=テキスト層PDF用。
+            // OCR由来のruns（ピクセル座標・単語毎にYが数px振れる）は呼び出し側で広いtolを渡す（v2.4.0）
             .Select(g => string.Join(" ", g.OrderBy(r => r.X).Select(r => r.Text)).Trim())
             .Where(s => s.Length > 0)
             .ToList();
@@ -178,7 +181,9 @@ public static partial class DrawingIngest
 
     private static string? FindZuban(List<string> lines)
     {
-        // ラベル行（図番/No./DWG）の同じ行または直後2行の図番パターン → なければ領域全体の最初の一致
+        // ラベル行（図番/No./DWG）の同じ行または直後2行の図番パターン → なければ領域全体の最初の一致。
+        // OCRは「ST-7789B」を「ST -7789B」のように語間に空白を挟むことがあるため、
+        // 空白を除いた行でも照合する（図番に空白は含まれないので除去照合は安全）
         for (int i = 0; i < lines.Count; i++)
         {
             if (System.Text.RegularExpressions.Regex.IsMatch(lines[i], @"図番|Drawing\s*No|DWG|No\."))
@@ -186,9 +191,18 @@ public static partial class DrawingIngest
                 {
                     var m = ZubanRegex().Match(lines[j]);
                     if (m.Success) return m.Value;
+                    m = ZubanRegex().Match(lines[j].Replace(" ", "").Replace("\u3000", ""));
+                    if (m.Success) return m.Value;
                 }
         }
-        return lines.Select(l => ZubanRegex().Match(l)).FirstOrDefault(m => m.Success)?.Value;
+        foreach (var line in lines)
+        {
+            var m = ZubanRegex().Match(line);
+            if (m.Success) return m.Value;
+            m = ZubanRegex().Match(line.Replace(" ", "").Replace("\u3000", ""));
+            if (m.Success) return m.Value;
+        }
+        return null;
     }
 
     private static string? ValueAfterLabel(List<string> lines, params string[] labels)
@@ -201,19 +215,41 @@ public static partial class DrawingIngest
                 var value = line[(idx + label.Length)..].Trim(' ', ':', '：', '\u3000');
                 if (value.Length > 0) return value;
             }
+        // OCR由来の行は「品 名 取 付…」のように字間に空白を挟むことがあるため、
+        // 空白を除いた行でもラベル照合する（v2.4.0・切り出し再OCRの実測）
+        foreach (var line in lines)
+            foreach (var label in labels)
+            {
+                var flat = line.Replace(" ", "").Replace("\u3000", "");
+                var idx = flat.IndexOf(label, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0) continue;
+                var value = flat[(idx + label.Length)..].Trim(':', '：');
+                if (value.Length > 0) return value;
+            }
         return null;
     }
 
     private static string? RevisionOf(List<string> lines, string? zuban)
     {
         // 改訂ラベル行の末尾1文字（A-Z）。図番末尾のサフィックス(A)は改訂と紛らわしいので、
-        // ラベルによる取り出しを優先し、なければ「改訂」表記の隣接1文字のみを採用
+        // ラベルによる取り出しを優先し、なければ「改訂」表記の隣接1文字のみを採用。
+        // 空白除去の照合は ValueAfterLabel と同じ理由（OCRの字間空白対策）
         foreach (var line in lines)
         {
             var idx = line.IndexOf("改訂", StringComparison.OrdinalIgnoreCase);
             if (idx < 0) idx = line.IndexOf("REV", StringComparison.OrdinalIgnoreCase);
             if (idx < 0) continue;
             var value = line[(idx + 2)..].Trim(' ', ':', '：', '\u3000');
+            var m = System.Text.RegularExpressions.Regex.Match(value, "^[A-Z]");
+            if (m.Success) return m.Value;
+        }
+        foreach (var line in lines)
+        {
+            var flat = line.Replace(" ", "").Replace("\u3000", "");
+            var idx = flat.IndexOf("改訂", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) idx = flat.IndexOf("REV", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) continue;
+            var value = flat[(idx + 2)..].Trim(':', '：');
             var m = System.Text.RegularExpressions.Regex.Match(value, "^[A-Z]");
             if (m.Success) return m.Value;
         }

@@ -435,8 +435,10 @@ public sealed class ChatFlow
                             rerankTop1 = ranked[0].Score;
                             var take = ranked[0].Score >= Rag.RerankHighConf ? 1 : 2;
                             // 2件目が no-hit 帯（リランカが無関連と判定）なら1件に削る。
-                            // top1のみ検査して2件目を無条件採用していた抜けを塞ぐ
-                            if (take == 2 && ranked[1].Score < Rag.GuardThreshold) take = 1;
+                            // top1のみ検査して2件目を無条件採用していた抜けを塞ぐ。
+                            // ※プールが1件のときは ranked[1] が存在しない（v2.3.2で小型KBの質問が
+                            //   内部エラーになる実害を実測・A/B検証中に発見）ため件数を先に見る
+                            if (take == 2 && (ranked.Count < 2 || ranked[1].Score < Rag.GuardThreshold)) take = 1;
                             chosen = ranked.Take(take).Select(r => hits[r.Index]).ToList();
                         }
                     }

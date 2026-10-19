@@ -18,6 +18,11 @@ public sealed class Ingest
     private readonly AppConfig _cfg;
     private readonly ILogger _log;
     private readonly SemaphoreSlim _ingestLock = new(1, 1); // 取り込みの直列化（embedエンジン飽和防止）
+
+    /// <summary>直前の取り込みがスキャン（OCR救済）だったか。取り込みは_ingestLockで直列化されており、
+    /// 呼び出し側（アップロード応答の suggest_vision 生成）が直後に読むための簡易フラグ。
+    /// 視覚モデル未導入環境でスキャン図面を取り込んだ際のVL導入案内に使う</summary>
+    public bool LastIngestScannedOcr { get; private set; }
     private readonly string _filesDir;
 
     public Ingest(Db db, LlmGateway gw, Supervisor sup, ChunkIndex index, AppConfig cfg, ILogger log)
@@ -31,6 +36,16 @@ public sealed class Ingest
     /// 印字不可能・規格外文字（制御コード、Latin-1拡張等）が全体の1割超でジャンク扱い。
     /// 通常の日本語/英語テキストはほぼ0%。実測: Edge画像PDFでICC辞書330字（gTRC/bTRC/cprt等）が
     /// 「テキスト」として返り、ゴミchunkがreadyになる実害があった</summary>
+    /// <summary>表題欄メタの欠落欄のみフォールバックで補完（既に取れた欄を上書きしない保守ルール。
+    /// 全景OCRの結果を正とし、切り出し再OCRの結果は null 欄の充填に限って使う）</summary>
+    internal static DrawingIngest.DrawingMeta FillMissing(DrawingIngest.DrawingMeta primary, DrawingIngest.DrawingMeta fallback) => new(
+        ZubanRaw: primary.ZubanRaw ?? fallback.ZubanRaw,
+        Hinmei: primary.Hinmei ?? fallback.Hinmei,
+        Zairyo: primary.Zairyo ?? fallback.Zairyo,
+        Scale: primary.Scale ?? fallback.Scale,
+        Revision: primary.Revision ?? fallback.Revision,
+        ApprovedAt: primary.ApprovedAt ?? fallback.ApprovedAt);
+
     internal static bool LooksLikeBinaryJunkText(string text)
     {
         var t = text.Trim();
@@ -208,6 +223,7 @@ public sealed class Ingest
         await _ingestLock.WaitAsync(ct);
         try
         {
+            LastIngestScannedOcr = false;
             // 元ファイル保存と抽出の両方で使うため、ストリームを1回だけ読み込む
             using var ms = new MemoryStream();
             content.CopyTo(ms);
@@ -225,6 +241,7 @@ public sealed class Ingest
                 List<string>? sheetChunks = null;
                 bool scannedOcr = false;
                 List<(float W, float H)>? ocrPageDims = null;
+                List<byte[]>? ocrPagePngs = null; // 表題欄の高解像度再OCR（v2.4.0）に使うページ画像
                 List<DxfText.DxfRun>? dxfRuns = null;
                 bool isJissekiSheet = false; // 図番列を含む実績表（jisseki_meta 辞書化済み。シート抽出時に判定）
                 if (ext == ".pdf")
@@ -256,6 +273,7 @@ public sealed class Ingest
                                 pdf = new PdfExtractResult(ocr.Text, ocr.Pages, ocr.Runs, firstDim.Item1, firstDim.Item2);
                                 text = pdf.Text;
                                 ocrPageDims = ocr.PageDims;
+                                ocrPagePngs = ocr.PagePngs;
                                 scannedOcr = true;
                             }
                             // VL第二救済（v2.3.2）: OCRが使えない/ほぼ空（8字未満打ち切り含む）でも、visionモデル
@@ -334,6 +352,32 @@ public sealed class Ingest
                     if (pw <= 0) { pw = pdf.PageWidth; ph = pdf.PageHeight; }
                     var sheetRuns = pdf.Runs.Where(r => r.Page == sheetPage).ToList();
                     meta = DrawingIngest.ExtractTitleBlock(sheetRuns, pw, ph);
+                    // 表題欄の高解像度再OCR（v2.4.0）: 2600px全景OCRでは小さな表題欄文字が認識漏れすることが
+                    // あるため、右下領域を切り出して再OCRし、欠落していた欄のみ補完する（既に取れた欄を
+                    // 上書きしない保守ルール。改善がなければ全景OCRの結果のまま）
+                    if (scannedOcr && ocrPagePngs != null && ocrPagePngs.Count >= sheetPage
+                        && ocrPageDims != null && ocrPageDims.Count >= sheetPage)
+                    {
+                        try
+                        {
+                            var extra = await Ocr.ReOcrTitleBlockAsync(ocrPagePngs[sheetPage - 1]);
+                            float sheetPixH = ocrPageDims[sheetPage - 1].H;
+                            if (extra.Count > 0 && sheetPixH > 0)
+                            {
+                                // 切り出し単独で抽出する（全景OCRの崩れた語と混ぜると
+                                // 「ST」+「ST-7789B」が連結される実測があるため）。
+                                // OCR runsはピクセル座標でYが振れるため、行化の許容をページ高の約1%に広げる
+                                var cropRuns = extra.Select(w => new PdfTextRun(w.Text, sheetPage,
+                                    (float)w.X, (float)(sheetPixH - (w.Y + w.H)), (float)w.W, (float)w.H)).ToList();
+                                var meta2 = DrawingIngest.ExtractTitleBlock(cropRuns, pw, ph, Math.Max(3f, ph * 0.012f));
+                                var filled = FillMissing(meta, meta2);
+                                if (filled != meta)
+                                    _log.Info("title-block re-ocr: filled missing field(s) from the bottom-right crop");
+                                meta = filled;
+                            }
+                        }
+                        catch (Exception ex) { _log.Warn($"title-block re-ocr skipped: {ex.Message}"); }
+                    }
                     if (meta.ZubanRaw is null && Extensions.DrawingLlmEnabled(_db))
                         meta = await TryLlmMetaAsync(meta, sheetRuns, pw, ph, pdf.Text, ct);
                     // 図面は1枚1チャンク（表題欄前置き＋全テキスト）。テキスト層ゼロはチャンク0で登録継続。
@@ -414,6 +458,7 @@ public sealed class Ingest
                 _db.Exec("UPDATE files SET status='ready', chunk_count=$c WHERE file_id=$i", ("$c", chunks.Count), ("$i", fileId));
                 if (packOn && ext == ".pdf") await TryMakeThumbnailAsync(fileId, bytes, ct); // 失敗しても取り込みを妨げない
                 _log.Info($"ingested {fileName}: {chunks.Count} chunks{(isDrawing ? " (drawing)" : "")}");
+                LastIngestScannedOcr = scannedOcr;
                 return fileId;
             }
             catch (Exception ex)
@@ -539,7 +584,7 @@ public sealed class Ingest
         catch (Exception ex) { _log.Warn($"drawing llm structuring failed: {ex.Message}"); return m; }
     }
 
-    public sealed record OcrPdfText(string Text, int Pages, List<PdfTextRun> Runs, List<(float W, float H)> PageDims);
+    public sealed record OcrPdfText(string Text, int Pages, List<PdfTextRun> Runs, List<(float W, float H)> PageDims, List<byte[]> PagePngs);
 
     /// <summary>画像のみPDF（スキャン図面）の救済: 各ページをレンダリング→内蔵OCR（回転最良）でテキスト化。
     /// 拡張パックON時のみ呼ばれる。長文スキャン（MaxPages超）やOCR結果がほぼ空のページは救済対象外としてnull
@@ -583,7 +628,9 @@ public sealed class Ingest
             var runs = new List<PdfTextRun>();
             for (int i = 0; i < pngs.Count; i++)
             {
-                var best = await Ocr.RecognizeBestAsync(pngs[i]);
+                // 適応的前処理（v2.4.0）: そのまま+前処理の良い方を自動選択（薄いスキャンで文字を立たせる。
+                // クリアな画像はそのままの結果が選ばれるため退回帰しない）
+                var best = await Ocr.RecognizeBestWithPreprocessAsync(pngs[i]);
                 sb.AppendLine(best.Text);
                 var (w, h) = dims[i];
                 // OCRの単語矩形（左上原点・ピクセル）をPDF式（左下原点）へ変換し、表題欄抽出を共用する
@@ -595,7 +642,7 @@ public sealed class Ingest
             // 白紙・無地ページ（OCR実測で0〜3文字程度）は救済不能。小さな表題欄のみのシートも救えるよう
             // 下限は最小限にする（実測: 画像サンプル640x320の有効テキスト18文字が救済対象）
             if (text.Trim().Length < 8) return null;
-            return new OcrPdfText(text, pages, runs, dims);
+            return new OcrPdfText(text, pages, runs, dims, pngs);
         }
         finally { try { File.Delete(tmp); } catch { } }
     }

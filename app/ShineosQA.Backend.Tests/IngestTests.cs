@@ -77,3 +77,30 @@ public class BinaryJunkTextTests
         Assert.False(Ingest.LooksLikeBinaryJunkText(below));
     }
 }
+
+/// <summary>表題欄メタの欠落補完(Ingest.FillMissing)。切り出し再OCR（v2.4.0）の結果は
+/// 全景OCRで取れた欄を上書きせず、null欄のみ充填する保守ルールの固定</summary>
+public class FillMissingTests
+{
+    [Fact]
+    public void NullFields_FilledFromFallback()
+    {
+        var primary = new DrawingIngest.DrawingMeta("ST-1042A", null, null, null, null, null);
+        var fallback = new DrawingIngest.DrawingMeta("ST-9999Z", "サポートブラケット", "SS400", "1:2", "B", "2026-10-19");
+        var r = Ingest.FillMissing(primary, fallback);
+        Assert.Equal("ST-1042A", r.ZubanRaw); // 既に取れた欄は上書きしない
+        Assert.Equal("サポートブラケット", r.Hinmei);
+        Assert.Equal("SS400", r.Zairyo);
+        Assert.Equal("1:2", r.Scale);
+        Assert.Equal("B", r.Revision);
+        Assert.Equal("2026-10-19", r.ApprovedAt);
+    }
+
+    [Fact]
+    public void CompletePrimary_Unchanged()
+    {
+        var primary = new DrawingIngest.DrawingMeta("ST-1042A", "ブラケット", "SS400", "1:1", "A", "2026-01-01");
+        var fallback = new DrawingIngest.DrawingMeta("X", "Y", "Z", "9:9", "Z", "1999-01-01");
+        Assert.Equal(primary, Ingest.FillMissing(primary, fallback));
+    }
+}

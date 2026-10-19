@@ -52,7 +52,7 @@ export const api = {
     const fd = new FormData();
     for (const f of files) fd.append('files', f, f.name);
     return fetch('/api/knowledge', { method: 'POST', body: fd })
-      .then(r => json<{ results: { name: string; ok: boolean; file_id?: number; message?: string; error?: string }[] }>(r));
+      .then(r => json<{ results: { name: string; ok: boolean; file_id?: number; message?: string; error?: string; suggest_vision?: boolean }[] }>(r));
   },
   importFolder: (path: string) =>
     fetch('/api/knowledge/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) })

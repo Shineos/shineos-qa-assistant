@@ -141,3 +141,38 @@ public class OcrTests
         return parts.SelectMany(p => p).ToArray();
     }
 }
+
+/// <summary>デュアルパスOCRの採用判定(Ocr.PickBetter)。前処理結果が1割以上良い時だけ採用し、
+/// クリアな画像はそのままの結果を維持する（固定前処理で撤回した退回帰の構造的回避）</summary>
+public class OcrPickBetterTests
+{
+    private static Ocr.OcrBest Best(string text) =>
+        new(text, Windows.Graphics.Imaging.BitmapRotation.None, new List<Ocr.OcrWordBox>());
+
+    [Fact]
+    public void ClearImage_KeepsPlainResult()
+    {
+        // クリアな画像: 前処理版が僅差（1割未満）でもそのままの結果を維持
+        var plain = Best("溶接はJIS Z 3601に従うこと。仕上げ面のバリ取りを完了後に検査すること。");
+        var enhanced = Best("溶接はJIS Z 3601に従うこと。仕上げ面のバリ取りを完了後に検査する");
+        Assert.Same(plain, Ocr.PickBetter(plain, enhanced));
+    }
+
+    [Fact]
+    public void FaintScan_WithBigGain_AdoptsEnhanced()
+    {
+        // 薄いスキャン: 前処理で文字が立って読取量が1割超増えた場合は採用
+        var plain = Best("ST-1042A");
+        var enhanced = Best("ST-1042A 図番 ST-1042A 品名 サポートブラケット 材質 SSCP 改訂 B");
+        Assert.Same(enhanced, Ocr.PickBetter(plain, enhanced));
+    }
+
+    [Fact]
+    public void BlankPage_NeitherAdopted_EvenIfNoise()
+    {
+        // 白紙ページ: 前処理ノイズが僅かに出ても極小スコアでは採用しない（1割ルールで0のまま）
+        var plain = Best("");
+        var enhanced = Best("1");
+        Assert.Same(plain, Ocr.PickBetter(plain, enhanced));
+    }
+}

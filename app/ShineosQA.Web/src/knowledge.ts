@@ -39,6 +39,11 @@ export class KnowledgeView {
         const ok = r.results.filter(x => x.ok).length;
         const errs = r.results.filter(x => !x.ok).map(x => `${x.name}: ${x.message ?? x.error ?? ''}`);
         st.textContent = `${ok}/${r.results.length}件を登録しました` + (errs.length ? ` ／ 失敗: ${errs.join(', ')}` : '');
+        // スキャン図面を視覚モデル未導入で取り込んだ場合はVL導入案内を出す（v2.4.0）
+        // 一度閉じたら恒久非表示（removal、同一環境で繰り返し案内しない）
+        if (r.results.some(x => x.suggest_vision) && localStorage.getItem('vision-hint-dismissed') !== '1') {
+          this.showVisionHint();
+        }
       } finally {
         clearInterval(poll);
       }
@@ -46,6 +51,33 @@ export class KnowledgeView {
       st.textContent = `アップロード失敗: ${(ex as Error).message}`;
     }
     await this.refresh();
+  }
+
+  /** スキャン図面取り込み後の視覚モデル（VL）導入案内バナー */
+  private showVisionHint() {
+    if (document.getElementById('vision-hint')) return;
+    const dz = document.getElementById('dropzone')!;
+    const bar = document.createElement('div');
+    bar.id = 'vision-hint';
+    bar.className = 'vision-hint';
+    bar.innerHTML = `<span>スキャン図面を内蔵OCRで読み込みました。視覚モデル（約2.1GB）を導入すると注記・寸法の読み取り精度が向上します。</span>`;
+    const btn = document.createElement('button');
+    btn.className = 'primary small';
+    btn.textContent = '設定を開く';
+    btn.addEventListener('click', () => {
+      localStorage.setItem('vision-hint-dismissed', '1');
+      document.querySelector<HTMLButtonElement>('button.tab[data-tab="settings"]')?.click();
+    });
+    const close = document.createElement('button');
+    close.className = 'icon-btn';
+    close.textContent = '×';
+    close.title = '閉じる（今後表示しない）';
+    close.addEventListener('click', () => {
+      localStorage.setItem('vision-hint-dismissed', '1');
+      bar.remove();
+    });
+    bar.append(btn, close);
+    dz.parentNode!.insertBefore(bar, dz);
   }
 
   /** 一覧のみ再取得（設定再取得・拡張パック再評価を行わない軽量版。取り込み中の進捗表示用） */

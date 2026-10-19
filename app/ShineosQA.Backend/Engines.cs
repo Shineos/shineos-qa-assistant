@@ -121,7 +121,9 @@ public sealed class Supervisor
             if (_emb is null || _emb.Proc.HasExited)
             {
                 if (_emb != null) DisposeEngine(_emb);
-                _emb = Start("embed", _cfg.EmbedModel, _cfg.EnginePortEmb, extra: new[] { "--embedding", "--pooling", "cls" });
+                // -ub 2048: 物理バッチ既定512では長いチャンク（VL文字起こし付き図面チャンク=523トークンを実測）
+                // が "input too large" 500 になり取り込みが失敗する（v2.4.0実測）。bge-m3は8192トークン対応
+                _emb = Start("embed", _cfg.EmbedModel, _cfg.EnginePortEmb, extra: new[] { "--embedding", "--pooling", "cls", "-ub", "2048" });
             }
             // リランカは任意モデル（README: 精度向上・任意）: 未DLでもQ&Aを止めない。
             // 無いのに起動しようとするとFNFでチャット全体が死ぬため（軽量インストーラ実機検証で発覚）
@@ -134,7 +136,7 @@ public sealed class Supervisor
             else if (_rank is null || _rank.Proc.HasExited)
             {
                 if (_rank != null) DisposeEngine(_rank);
-                _rank = Start("rank", _cfg.RankModel, _cfg.EnginePortRank, extra: new[] { "--rerank", "--pooling", "rank" });
+                _rank = Start("rank", _cfg.RankModel, _cfg.EnginePortRank, extra: new[] { "--rerank", "--pooling", "rank", "-ub", "2048" });
             }
         }
     }
