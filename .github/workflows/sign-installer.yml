@@ -153,9 +153,7 @@ jobs:
       - name: Upload to R2 (Store package URL)
         shell: pwsh
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           VERSION: ${{ inputs.version || '2.1.0' }}
         run: |
@@ -163,21 +161,35 @@ jobs:
           $version = $env:VERSION
           $exe = "dist/ShineosQA-Setup-$version-lite.exe"
           if (-not (Test-Path $exe)) { throw "installer not found: $exe" }
-          if (-not $env:R2_ACCESS_KEY_ID -or -not $env:R2_SECRET_ACCESS_KEY -or -not $env:CF_ACCOUNT_ID) {
-            Write-Output "::warning::R2 credentials not configured (secrets: R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / CF_ACCOUNT_ID) — skipping automatic upload. Upload '$exe' to the shineos-downloads bucket (Store package URL) manually."
+          if (-not $env:CF_API_TOKEN -or -not $env:CF_ACCOUNT_ID) {
+            Write-Output "::warning::Cloudflare credentials not configured (secrets: CF_API_TOKEN / CF_ACCOUNT_ID) — skipping automatic upload. Upload '$exe' to the shineos-downloads bucket (Store package URL) manually."
             exit 0
           }
-          # 署名済みlite(約53MB)は300MB未満のため単一PUTで可能。aws s3 cp は大きい場合も
-          # 自動マルチパートするため旧Worker(cron+手動後片付け)は不要になる
-          aws s3 cp $exe "s3://shineos-downloads/ShineosQA-Setup-$version-lite.exe" --endpoint-url "https://$env:CF_ACCOUNT_ID.r2.cloudflarestorage.com"
-          if ($LASTEXITCODE -ne 0) { throw "R2 upload failed" }
+          # Cloudflare API トークン(R2:Edit)による単一PUT。 lite exe 約53MB < 300MB上限のため
+          # APIトークン方式で可能（S3 Access Key 不要）。このステップは署名検証の後に実行される
+          # （SignPath認証済みのバイナリのみR2へ公開）
+          $key = "ShineosQA-Setup-$version-lite.exe"
+          $size = (Get-Item $exe).Length
+          $put = & curl.exe -s --max-time 600 -X PUT `
+            -H "Authorization: Bearer $env:CF_API_TOKEN" `
+            -H "Content-Type: application/octet-stream" `
+            --data-binary "@$exe" `
+            "https://api.cloudflare.com/client/v4/accounts/$env:CF_ACCOUNT_ID/r2/buckets/shineos-downloads/objects/$key"
+          if ($LASTEXITCODE -ne 0) { throw "R2 PUT failed (curl exit $LASTEXITCODE)" }
+          $putJson = $put | ConvertFrom-Json
+          if (-not $putJson.success) { throw "R2 PUT failed: $($put | Out-String)" }
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          $pub = "https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-$version-lite.exe"
-          # 公開URLの整合確認(r2.dev公開アクセス経由)
-          $head = (curl.exe -s -I --max-time 20 $pub | Out-String)
-          if ($head -notmatch "200") { throw "R2 object not publicly reachable after upload: $pub" }
+          $pub = "https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/$key"
+          # 公開URLの整合確認(r2.dev公開アクセス経由・伝播を考慮して3回リトライ)
+          $ok = $false
+          for ($i = 0; $i -lt 3; $i++) {
+            Start-Sleep -Seconds 2
+            $head = (curl.exe -s -I --max-time 20 $pub | Out-String)
+            if ($head -match "200") { $ok = $true; break }
+          }
+          if (-not $ok) { throw "R2 object not publicly reachable after upload: $pub" }
           Write-Output "uploaded to R2: $pub"
-          Write-Output "SHA256 (uploaded): $hash"
+          Write-Output "size: $size bytes / SHA256: $hash"
 
       - name: Submission sheet (Partner Center)
         shell: pwsh
