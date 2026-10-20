@@ -1009,7 +1009,8 @@ export class ChatView {
                 chipRow.className = 'web-retry-row';
                 const chip = document.createElement('button');
                 chip.className = 'web-retry-btn';
-                chip.textContent = '🔍 Webで検索';
+                // ツールバーのWeb検索ボタンと同一の地球SVG（絵文字は使わない・v2.4.3）
+                chip.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg><span>Webで検索</span>';
                 chip.title = '質問が検索サービス（DuckDuckGo）へ送信されます';
                 chip.addEventListener('click', () => {
                   chipRow.remove();
