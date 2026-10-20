@@ -688,7 +688,7 @@ export class ChatView {
   /** 時刻行（カードの外・下）。AI回答は「問題を報告」を同じ行に置く。
    *  コピー本文: rawTextはユーザーは入力テキスト、AI回答はMarkdownソース（DB保存内容と同一）。
    *  sourcesがある回答は出典（ファイル名＋該当箇所）も含める（画面の「出典」Detailsの中身と同じ情報） */
-  private appendMessageActions(wrap: HTMLElement, role: string, time: Date | undefined, rawText: string, sources: SourceInfo[] = []): void {
+  private appendMessageActions(wrap: HTMLElement, role: string, time: Date | undefined, rawText: string, sources: SourceInfo[] = []): HTMLElement {
     const copyBody = rawText + (sources.length > 0 ? '\n\n' + buildSourcesText(sources) : '');
     const assistant = role !== 'user';
     const row = document.createElement('div');
@@ -703,6 +703,7 @@ export class ChatView {
     }
     row.appendChild(this.copyButton(copyBody));
     wrap.appendChild(row);
+    return row;
   }
 
   /** 思考中インジケータ（カードなし・回答開始でカード表示に切替）。
@@ -1000,22 +1001,25 @@ export class ChatView {
                 liveCard.appendChild(src);
               }
               // 「問題を報告」＋コピー＋時刻はカードの外（下）に追加。コピーは acc＋出典（ファイル名＋該当箇所）
-              this.appendMessageActions(liveCard.parentElement!, 'assistant', new Date(), acc, d.sources ?? []);
-              // 拒否回答への「Webで検索する」提案チップ（v2.4.1）: 押した時だけ同一質問を
-              // web_search=true で再送（明示同意・トグルは変更しない）
-              if (shouldShowWebSuggestion(d.kind, d.suggest_web, this.webSearch) && liveCard.parentElement) {
+              const actionsRow = this.appendMessageActions(liveCard.parentElement!, 'assistant', new Date(), acc, d.sources ?? []);
+              // 拒否回答への「Webで検索する」提案チップ（v2.4.1）: 報告ボタンの下にコンパクトに置く（v2.4.2）。
+              // 押した時だけ同一質問を web_search=true で再送（明示同意・トグルは変更しない）
+              if (shouldShowWebSuggestion(d.kind, d.suggest_web, this.webSearch)) {
+                const chipRow = document.createElement('div');
+                chipRow.className = 'web-retry-row';
                 const chip = document.createElement('button');
                 chip.className = 'web-retry-btn';
-                chip.textContent = 'Webで検索する';
+                chip.textContent = '🔍 Webで検索';
                 chip.title = '質問が検索サービス（DuckDuckGo）へ送信されます';
                 chip.addEventListener('click', () => {
-                  chip.remove();
+                  chipRow.remove();
                   input.value = this.lastUserText;
                   input.style.height = 'auto';
                   this.webOverrideOnce = true;
                   void this.send();
                 });
-                liveCard.parentElement.appendChild(chip);
+                chipRow.appendChild(chip);
+                actionsRow.after(chipRow);
               }
             } else {
               thinking.remove();

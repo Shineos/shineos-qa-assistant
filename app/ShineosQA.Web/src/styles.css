@@ -256,8 +256,9 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .vision-hint span { flex: 1; }
 .vision-hint .icon-btn { flex: none; }
 
-/* ---- 拒否回答へのWeb検索提案チップ / 要約（v2.4.1） ---- */
-.web-retry-btn { margin: 2px 0 6px; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 14px; background: var(--bg); color: var(--accent); font-size: 12px; cursor: pointer; }
+/* ---- 拒否回答へのWeb検索提案チップ / 要約（v2.4.1・v2.4.2で報告ボタンの下に小型化） ---- */
+.web-retry-row { display: flex; margin-top: 2px; padding: 0 2px; }
+.web-retry-btn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--accent); font-size: 11.5px; padding: 2px 10px; cursor: pointer; }
 .web-retry-btn:hover { background: #ecfdf5; }
 
 /* ---- 図面PDF検索・Q&A 拡張パック（製造業向け） ---- */
