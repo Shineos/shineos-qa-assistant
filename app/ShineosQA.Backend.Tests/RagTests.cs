@@ -356,3 +356,43 @@ public class RagCollapseTests
         Assert.Equal(t, Rag.CollapseDuplicateSentences(t));
     }
 }
+
+/// <summary>文書要約の全文組み立て(SelectSummaryText・v2.4.1)。上限内は全文連結・
+/// 超過は先頭から打ち切り+注記。seq順（=渡された順）を維持する</summary>
+public class RagSelectSummaryTextTests
+{
+    [Fact]
+    public void WithinLimit_JoinsAllInOrder()
+    {
+        var (text, truncated) = Rag.SelectSummaryText(new List<string> { "第一章", "第二章", "第三章" }, 100);
+        Assert.Equal("第一章\n\n第二章\n\n第三章", text);
+        Assert.False(truncated);
+    }
+
+    [Fact]
+    public void OverLimit_TruncatesWithNote()
+    {
+        var chunks = new List<string> { new('あ', 50), new('い', 50) };
+        var (text, truncated) = Rag.SelectSummaryText(chunks, 60);
+        Assert.True(truncated);
+        Assert.StartsWith(new string('あ', 50), text);
+        Assert.Contains("先頭から一部のみ", text);
+        Assert.DoesNotContain(new string('い', 10), text); // 2チャンク目は入らない
+    }
+
+    [Fact]
+    public void ExactBoundary_NotTruncated()
+    {
+        var (text, truncated) = Rag.SelectSummaryText(new List<string> { "12345" }, 5);
+        Assert.Equal("12345", text);
+        Assert.False(truncated);
+    }
+
+    [Fact]
+    public void EmptyChunks_ReturnsEmpty()
+    {
+        var (text, truncated) = Rag.SelectSummaryText(new List<string>(), 100);
+        Assert.Equal("", text);
+        Assert.False(truncated);
+    }
+}

@@ -256,6 +256,10 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .vision-hint span { flex: 1; }
 .vision-hint .icon-btn { flex: none; }
 
+/* ---- 拒否回答へのWeb検索提案チップ / 要約（v2.4.1） ---- */
+.web-retry-btn { margin: 2px 0 6px; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 14px; background: var(--bg); color: var(--accent); font-size: 12px; cursor: pointer; }
+.web-retry-btn:hover { background: #ecfdf5; }
+
 /* ---- 図面PDF検索・Q&A 拡張パック（製造業向け） ---- */
 .badge-drawing { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 999px; padding: 1px 8px; font-size: 10.5px; font-weight: 600; }
 .file-thumb { width: 34px; height: 44px; object-fit: cover; object-position: top left; border: 1px solid var(--border); border-radius: 4px; vertical-align: middle; margin-right: 8px; background: #fff; }

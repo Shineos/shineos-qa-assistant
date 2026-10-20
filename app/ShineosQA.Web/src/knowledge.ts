@@ -129,6 +129,19 @@ export class KnowledgeView {
         });
         td.appendChild(retry);
       }
+      // 文書要約（v2.4.1）: 取り込み済みファイルを1クリックで要約（チャットへ遷移して自動送信。
+      // 出典=対象ファイル全体・検索top-kを経ない確定経路）
+      if (f.status === 'ready' && f.chunk_count > 0) {
+        const sum = document.createElement('button');
+        sum.className = 'icon-btn';
+        sum.textContent = '要';
+        sum.title = 'この文書を要約';
+        sum.addEventListener('click', () => {
+          document.querySelector<HTMLButtonElement>('button.tab[data-tab="chat"]')?.click();
+          document.dispatchEvent(new CustomEvent('shineosqa:summarize', { detail: { fileId: f.file_id, name: f.name } }));
+        });
+        td.appendChild(sum);
+      }
       const del = document.createElement('button');
       del.className = 'icon-btn';
       del.textContent = '×';

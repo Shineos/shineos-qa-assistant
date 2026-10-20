@@ -80,7 +80,7 @@ export interface ModelEntry {
 
 /// POST /api/chat をSSE受信する。イベント: meta / model / web / delta / done / error
 export async function streamChat(
-  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string; capture_image?: string },
+  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string; capture_image?: string; summary_file_id?: number },
   handlers: {
     meta?: (d: { chat_id: number; chat_uuid: string }) => void;
     model?: (d: { tier: string; model_file: string }) => void;
@@ -88,7 +88,7 @@ export async function streamChat(
     refs?: (d: { files: string[]; web: string[] }) => void;
     patch?: (content: string) => void;
     delta?: (content: string) => void;
-    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
+    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; suggest_web?: boolean; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
     clarify?: (d: { zuban: string; message: string; options: { file_id: number; file: string; zuban: string; revision: string | null; hinmei: string | null }[] }) => void;
     error?: (d: { code: string; message: string }) => void;
   },

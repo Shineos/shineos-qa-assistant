@@ -265,6 +265,14 @@ public sealed class ChatFlow
         _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'user',$m)", ("$c", chatId), ("$m", message));
         if (captureImage != null) SaveCaptureImage(chatId, captureImage);
 
+        // 文書要約（v2.4.1）: ナレッジ一覧の「要約」ボタンからの確定経路。検索top-kを経ず
+        // 指定ファイルの全チャンクを注入する（出典=ファイル全体・検索ミスによる幻覚源が存在しない）
+        if (root.TryGetProperty("summary_file_id", out var sfid) && sfid.ValueKind == JsonValueKind.Number)
+        {
+            await SummarizeFileAsync(ctx, chatId, sfid.GetInt64(), sw);
+            return;
+        }
+
         try
         {
             _sup.StartEmbedAndRank(); // 前回クラッシュ・tier変更後のStopAll等で止まっていたら自己修復
@@ -376,7 +384,7 @@ public sealed class ChatFlow
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "empty", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
                 return;
             }
 
@@ -422,7 +430,7 @@ public sealed class ChatFlow
                                 var refusal = "該当する記載がありません。" + webNote;
                                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                                 await Sse(ctx, "delta", new { content = refusal });
-                                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "rerank", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "rerank", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
                                 return;
                             }
                             chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
@@ -454,7 +462,7 @@ public sealed class ChatFlow
                 var guard = webOn ? "web-failed" : "no-material";
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", msg));
                 await Sse(ctx, "delta", new { content = msg });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = guard, sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = guard, sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
                 return;
             }
             // 弱一致ガード（バックストップ・生成前）: kw≈0の採択を拒否する。識別の主役はリランクスコア
@@ -462,7 +470,10 @@ public sealed class ChatFlow
             // 本ガードが守るのはリランカー未導入環境（ウィザード既定ではrerankを導入するが、削除した場合の
             // 最終防波堤）。0.15〜0.50帯はリランカーが無いと識別不能（リランカー推奨の根拠）。
             // 対象外（IsWeakMatch参照）: 図面質問/Web文脈/時間感応/リランク検証済み
-            var maxKw = chosen.Max(h => h.Kw);
+            // chosen空（リランク拒否後にWebのみで回答する経路・時間感応）でもクラッシュしない:
+            // Maxの引数を0にすると IsWeakMatch はWeb文脈/時間感応で免除されるため実質無害
+            // （v2.2.0から潜在・Web検索ON×KB全棄却で初めて到達する経路。実機E2Eで発見）
+            var maxKw = chosen.Count > 0 ? chosen.Max(h => h.Kw) : 0;
             if (Rag.IsWeakMatch(maxKw,
                     hasWebContext: !string.IsNullOrEmpty(webContext),
                     timeSensitive: timeSensitive,
@@ -473,7 +484,7 @@ public sealed class ChatFlow
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "weak-match", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "weak-match", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
                 return;
             }
             // 低信頼×低Kwの組み合わせ拒否: リランクはno-hit帯を逃れたものの確信できないグレー帯
@@ -488,7 +499,7 @@ public sealed class ChatFlow
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "low-conf", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "low-conf", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
                 return;
             }
             // 対象語リルート: リランクの意味的選択が、質問の対象語（会議室等）を字面通り含まないチャンクを
@@ -626,7 +637,7 @@ public sealed class ChatFlow
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "target", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "target", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
                 return;
             }
 
@@ -809,5 +820,71 @@ public sealed class ChatFlow
             _log.Error($"chat failed: {ex}");
             await Sse(ctx, "error", new { code = "SHINE_E_INTERNAL", message = "内部エラーが発生しました。", detail = ex.Message });
         }
+    }
+
+    /// <summary>文書要約（v2.4.1）: 指定ファイルの全チャンク（seq順・上限8000字）を注入して要約を
+    /// ストリーミング生成する。出典は対象ファイル1件・kind=answer。検索ガード類は経由しない
+    /// （全文注入のため検証コーパス=文書全体）。回答キャッシュには書かない（ファイル再取り込みで
+    /// 内容が変わるため）。繰り返し畳み込みのみ適用</summary>
+    private async Task SummarizeFileAsync(HttpContext ctx, long chatId, long fileId, System.Diagnostics.Stopwatch sw)
+    {
+        var fileRow = _db.Query("SELECT name, status, kind FROM files WHERE file_id=$i", ("$i", fileId));
+        if (fileRow.Count == 0 || (string)fileRow[0]["status"]! != "ready")
+        {
+            var miss = "指定された文書が見つかりません（取り込み中か、削除された可能性があります）。";
+            _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", miss));
+            await Sse(ctx, "delta", new { content = miss });
+            await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "summary-missing", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+            return;
+        }
+        var fileName = (string)fileRow[0]["name"]!;
+        var fileKind = (string)fileRow[0]["kind"]!;
+        var (fullText, truncated) = Rag.SelectSummaryText(_index.ByFile(fileId).Select(c => c.Text).ToList(), 8000);
+        _log.Info($"summary: file={fileName} id={fileId} chunks-text={fullText.Length} chars truncated={truncated}");
+        if (fullText.Trim().Length == 0)
+        {
+            var empty = "このファイルには要約できるテキストがありません。";
+            _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", empty));
+            await Sse(ctx, "delta", new { content = empty });
+            await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "summary-empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+            return;
+        }
+        // 出典は対象ファイル1件（図面はメタも添えてUIの【図面】表示に対応）
+        var src = new SourceInfo { File = fileName, Snippet = "文書要約", Kind = "kb", FileId = fileId, IsDrawing = fileKind == "drawing" };
+        if (src.IsDrawing)
+        {
+            var meta = _db.Query("SELECT zuban_raw, hinmei, revision FROM drawing_meta WHERE file_id=$i", ("$i", fileId));
+            if (meta.Count > 0)
+            {
+                src.Zuban = meta[0]["zuban_raw"] as string;
+                src.Hinmei = meta[0]["hinmei"] as string;
+                src.Revision = meta[0]["revision"] as string;
+            }
+        }
+        var sources = new List<SourceInfo> { src };
+        await Sse(ctx, "refs", new { files = sources.Select(s => s.File).ToArray(), web = Array.Empty<object>() });
+        var messages = new List<(string, string)>
+        {
+            ("system", "あなたは社内文書の要約担当です。渡された文書から要点を3〜5個の箇条書き（- ）でまとめてください。重要な数値・金額・日付・条件は文書の記載どおり含めてください。文書に書かれていないことを推測で追加せず、前置きと見出しは不要です。"),
+            ("user", "次の文書を要約してください。\n\n" + fullText),
+        };
+        var answer = new StringBuilder();
+        var ttfb = -1L;
+        await _gw.ChatStreamAsync(_cfg.EnginePortLlm, messages, 0.0, 500, async delta =>
+        {
+            if (ttfb < 0) ttfb = sw.ElapsedMilliseconds;
+            answer.Append(delta);
+            await Sse(ctx, "delta", new { content = delta });
+        }, ctx.RequestAborted);
+
+        var finalText = Rag.CollapseDuplicateSentences(answer.ToString()) ?? answer.ToString();
+        if (finalText != answer.ToString())
+            await Sse(ctx, "patch", new { content = finalText });
+
+        var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
+        _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,'answer')",
+            ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
+        _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
+        await Sse(ctx, "done", new { cached = false, kind = "answer", sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
     }
 }

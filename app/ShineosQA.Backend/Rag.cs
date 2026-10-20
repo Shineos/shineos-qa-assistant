@@ -128,6 +128,22 @@ public static partial class Rag
 
     private static string NormForRepeat(string s) => s.Replace(" ", "").Replace("\u3000", "").Replace("\t", "").Replace("\r", "").Replace("\n", "");
 
+    /// <summary>文書要約（v2.4.1）用の全文組み立て。チャンクをseq順に連結し maxChars 上限で打ち切る。
+    /// 打ち切った場合は注記付き（誠実な表示: 大型文書は先頭部分の要約になることを明示する）。
+    /// 純関数（テスト直接検証）</summary>
+    public static (string Text, bool Truncated) SelectSummaryText(IReadOnlyList<string> chunks, int maxChars)
+    {
+        var sb = new StringBuilder();
+        foreach (var c in chunks)
+        {
+            if (sb.Length > 0) sb.Append("\n\n");
+            sb.Append(c);
+            if (sb.Length >= maxChars) break;
+        }
+        if (sb.Length <= maxChars) return (sb.ToString(), false);
+        return (sb.ToString(0, maxChars) + "\n\n※長い文書のため、先頭から一部のみを要約しています。", true);
+    }
+
     private static string CollapseSentencesInLine(string line)
     {
         var parts = new List<string>();
@@ -423,6 +439,12 @@ public sealed class ChunkIndex
     public void RemoveFile(long fileId)
     {
         lock (_lock) _list.RemoveAll(r => r.FileId == fileId);
+    }
+
+    /// <summary>指定ファイルの全チャンクをseq順で返す（文書要約 v2.4.1: 検索top-kを経ない全文注入に使用）</summary>
+    public List<Rec> ByFile(long fileId)
+    {
+        lock (_lock) return _list.Where(r => r.FileId == fileId).OrderBy(r => r.Seq).ToList();
     }
 
     /// <summary>同一文書の次チャンク（seq+1）の本文。手順・条項のチャンク境界分断対策用</summary>
