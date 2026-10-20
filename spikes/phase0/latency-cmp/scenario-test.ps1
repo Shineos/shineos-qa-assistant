@@ -1,6 +1,8 @@
-﻿param([string]$Label = "run", [string]$Scenarios = "scenarios.json", [switch]$WebSearch, [string]$Base = "http://127.0.0.1:8300")
+﻿param([string]$Label = "run", [string]$Scenarios = "scenarios.json", [switch]$WebSearch, [string]$Base = "http://127.0.0.1:8300", [switch]$KeepChats)
 # 品質シナリオテスト: シナリオJSON（既定 scenarios.json、-Scenarios scenarios-100.json で100問）を
 # /api/chat に流し、期待キーワード/拒否を判定。-Base でdevインスタンス(8305等)を指定できる。
+# 実行後、このランナーが作成した scn-<tag>-* チャットを既定で削除する（-KeepChats で残す）。
+# サイドバーは新着200件のみ表示するため、テスト実行のたびに本物の履歴が押し下げられる問題の対策（backlog）
 # 出力: TSV（tag, pass, answer_chars, ms）＋ answers/<Label>-<tag>.txt
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -11,6 +13,7 @@ $cases = [IO.File]::ReadAllText((Join-Path $dir $Scenarios), [Text.Encoding]::UT
 $ansDir = Join-Path $dir "answers"
 if (-not (Test-Path $ansDir)) { [IO.Directory]::CreateDirectory($ansDir) | Out-Null }
 $utf8 = New-Object Text.UTF8Encoding($false)
+$script:createdUuids = @()
 
 function Ask([string]$q, [string]$uuid) {
   $body = @{ chat_uuid = $uuid; message = $q }
@@ -27,6 +30,7 @@ function Ask([string]$q, [string]$uuid) {
     elseif ($ln.StartsWith("data: ")) {
       $json = $ln.Substring(6)
       if ($ev -eq "delta") { $o = $json | ConvertFrom-Json; [void]$answer.Append($o.content) }
+      elseif ($ev -eq "meta") { $o = $json | ConvertFrom-Json; $script:createdUuids += $o.chat_uuid }
       elseif ($ev -eq "done") { $done = $json | ConvertFrom-Json }
     }
   }
@@ -58,3 +62,14 @@ foreach ($c in $cases) {
   Write-Output ("{0}`t{1}`t{2}`t{3}" -f $c.tag, $(if ($ok) { "PASS" } else { "FAIL" }), $ans.Length, $r.ms)
 }
 Write-Output ("SCORE`t{0}/{1}" -f $passCount, $cases.Count)
+
+# 後片付け: このランナーが作成したチャットを削除。バックエンドは未知のchat_uuidを
+# 新規生成uuidで置き換えるため、SSE metaイベントから実際のuuidを収集して消す
+# （履歴一覧は新着200件のみのため、残骸が実ユーザーの履歴を押し下げる事故 2026-09-22 の再発防止）
+if (-not $KeepChats) {
+  $removed = 0
+  foreach ($u in ($script:createdUuids | Select-Object -Unique)) {
+    if ($u) { & curl.exe -s -o NUL -X DELETE "$base/api/chats/$u" | Out-Null; $removed++ }
+  }
+  Write-Output ("CLEANUP`tremoved {0} scenario chats" -f $removed)
+}
