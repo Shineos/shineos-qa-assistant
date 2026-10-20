@@ -210,6 +210,13 @@ export function buildSourcesText(sources: SourceInfo[]): string {
   return '──── 出典（該当箇所） ────\n' + lines.join('\n');
 }
 
+/** 拒否回答に「Webで検索する」チップを出す条件（v2.4.1）。
+ * kind=refusal + バックエンドが提案フラグを立てた + 現在Web検索OFF（ONなら既に検索済み）の全てで表示。
+ * 旧バックエンド（suggest_web無し）では非表示になる後方互換 */
+export function shouldShowWebSuggestion(kind: string | null | undefined, suggestWeb: boolean | undefined, webOn: boolean): boolean {
+  return kind === 'refusal' && suggestWeb === true && !webOn;
+}
+
 export class ChatView {
   private chatUuid = '';
   private chatTitle = '';                    // chat-mainヘッダーに表示中のチャット名
@@ -219,6 +226,10 @@ export class ChatView {
   private lastUserText = '';
   private webSearch = false;
   private selTier = '';
+  // 1回限りの送信オプション（v2.4.1）: ナレッジ一覧「要約」ボタンの対象ファイル /
+  // 拒否回答の「Webで検索する」チップからの再送（トグル状態は変更しない）
+  private pendingSummaryId: number | null = null;
+  private webOverrideOnce: boolean | null = null;
   private modelsById = new Map<string, ModelEntry>();
   private modelMenu: HTMLElement | null = null;
   private packDrawing = false;               // 拡張パック（図面）: キャプチャ入力の表示条件
@@ -235,6 +246,15 @@ export class ChatView {
     const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
 
     form.addEventListener('submit', (e) => { e.preventDefault(); void this.send(); });
+    // ナレッジ一覧「要約」ボタン（v2.4.1）: 対象ファイルIDを受けて自動送信する
+    // （knowledge.ts 側でタブ切替後に dispatch される）
+    document.addEventListener('shineosqa:summarize', (e) => {
+      const { fileId, name } = (e as CustomEvent<{ fileId: number; name: string }>).detail;
+      input.value = `${name} を要約してください`;
+      input.style.height = 'auto';
+      this.pendingSummaryId = fileId;
+      void this.send();
+    });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void this.send(); }
     });
@@ -905,8 +925,14 @@ export class ChatView {
     try {
       // キャプチャ画像をローカル保存用に送る（data URL。サーバ側で data/files/captures/ に保存し過去チャットでも表示）
       const captureImage = captureFile ? await fileToDataUrl(captureFile) : undefined;
+      // 1回限りの送信オプション（v2.4.1）: 文書要約の対象ファイルID・拒否回答からのWeb再送。
+      // 消費したら即クリア（通常送信・トグル状態には影響しない）
+      const summaryFileId = this.pendingSummaryId;
+      const webOverride = this.webOverrideOnce;
+      this.pendingSummaryId = null;
+      this.webOverrideOnce = null;
       await streamChat(
-        { chat_uuid: this.chatUuid || undefined, message, web_search: this.webSearch, model: this.selTier || undefined, capture_image: captureImage },
+        { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined },
         {
           meta: (d) => {
             if (!this.chatUuid && d.chat_uuid) {
@@ -975,6 +1001,22 @@ export class ChatView {
               }
               // 「問題を報告」＋コピー＋時刻はカードの外（下）に追加。コピーは acc＋出典（ファイル名＋該当箇所）
               this.appendMessageActions(liveCard.parentElement!, 'assistant', new Date(), acc, d.sources ?? []);
+              // 拒否回答への「Webで検索する」提案チップ（v2.4.1）: 押した時だけ同一質問を
+              // web_search=true で再送（明示同意・トグルは変更しない）
+              if (shouldShowWebSuggestion(d.kind, d.suggest_web, this.webSearch) && liveCard.parentElement) {
+                const chip = document.createElement('button');
+                chip.className = 'web-retry-btn';
+                chip.textContent = 'Webで検索する';
+                chip.title = '質問が検索サービス（DuckDuckGo）へ送信されます';
+                chip.addEventListener('click', () => {
+                  chip.remove();
+                  input.value = this.lastUserText;
+                  input.style.height = 'auto';
+                  this.webOverrideOnce = true;
+                  void this.send();
+                });
+                liveCard.parentElement.appendChild(chip);
+              }
             } else {
               thinking.remove();
               this.appendMessage('assistant', acc || '', d.sources ?? [], new Date());
