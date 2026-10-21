@@ -28,14 +28,17 @@ if (-not (Test-Path $ArtifactPath)) { throw "artifact not found: $ArtifactPath" 
 $base = "https://app.signpath.io/api/v1/$org"
 
 # 1) 署名リクエスト送信
+# ※SignPath APIの応答には空プロパティ名（""）を含むことがあり、pwsh 7の
+#   ConvertFrom-Json は既定でそれを拒否するため -AsHashtable でパースする（2026-10-21実績）
 Write-Output "submitting signing request ($project / $policy)..."
 $submit = & curl.exe -s --max-time 300 -X POST -H "Authorization: Bearer $token" `
     -F "ProjectSlug=$project" -F "SigningPolicySlug=$policy" -F "Artifact=@$ArtifactPath" `
     "$base/SigningRequests/SubmitWithArtifact"
 if ($LASTEXITCODE -ne 0) { throw "submit failed (curl exit $LASTEXITCODE): $submit" }
-$req = $submit | ConvertFrom-Json
-if (-not $req.signingRequestId) { throw "submit failed: $submit" }
-Write-Output "signingRequestId: $($req.signingRequestId) (status: $($req.status))"
+$req = $submit | ConvertFrom-Json -AsHashtable
+if (-not $req['signingRequestId']) { throw "submit failed: $submit" }
+$reqId = [string]$req['signingRequestId']
+Write-Output "signingRequestId: $reqId (status: $($req['status']))"
 
 # 2) 完了までポーリング（-TimeoutSeconds で指定された上限まで。手動承認ポリシーでは長めに）
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -43,19 +46,19 @@ $status = $null
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 5
     $status = (& curl.exe -s --max-time 20 -H "Authorization: Bearer $token" `
-        "$base/SigningRequests/$($req.signingRequestId)") | ConvertFrom-Json
-    Write-Output "status: $($status.status) / $($status.workflowStatus)"
-    if ($status.status -eq 'Completed') { break }
-    if ($status.isFinalStatus -and $status.status -ne 'Completed') {
-        throw "signing failed: $($status.status) / $($status.workflowStatus)"
+        "$base/SigningRequests/$reqId") | ConvertFrom-Json -AsHashtable
+    Write-Output "status: $($status['status']) / $($status['workflowStatus'])"
+    if ($status['status'] -eq 'Completed') { break }
+    if ($status['isFinalStatus'] -and $status['status'] -ne 'Completed') {
+        throw "signing failed: $($status['status']) / $($status['workflowStatus'])"
     }
 }
-if (-not $status -or $status.status -ne 'Completed') { throw 'signing timeout' }
+if (-not $status -or $status['status'] -ne 'Completed') { throw 'signing timeout' }
 
 # 3) 署名済みアーティファクト取得
 Write-Output "downloading signed artifact..."
 & curl.exe -s --max-time 300 -H "Authorization: Bearer $token" `
-    "$base/SigningRequests/$($req.signingRequestId)/SignedArtifact" -o $OutputPath
+    "$base/SigningRequests/$reqId/SignedArtifact" -o $OutputPath
 if ($LASTEXITCODE -ne 0) { throw "download failed (curl exit $LASTEXITCODE)" }
 if (-not (Test-Path $OutputPath)) { throw 'signed artifact not downloaded' }
 Write-Output "signed: $OutputPath ($((Get-Item $OutputPath).Length) bytes)"
