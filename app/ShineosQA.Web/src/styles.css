@@ -262,6 +262,23 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .web-retry-btn svg { width: 12.5px; height: 12.5px; }
 .web-retry-btn:hover { background: #ecfdf5; }
 
+/* ---- 作成モード（v2.5.0） ---- */
+.draft-panel { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; margin-bottom: 6px; border: 1px solid var(--accent); border-radius: 10px; background: #ecfdf5; font-size: 12px; }
+.draft-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.draft-label { color: var(--muted); flex: none; }
+.draft-select { font-size: 12px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+.draft-refbtn { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 12px; padding: 2px 8px; cursor: pointer; }
+.draft-refbtn svg { width: 12.5px; height: 12.5px; }
+.draft-reflist { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto; }
+.draft-reflist label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.draft-chips { color: var(--accent); font-size: 11.5px; }
+.draft-seed { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+.draft-badge { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 6px; color: var(--muted); font-size: 11px; border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; width: fit-content; }
+.draft-badge svg { width: 12px; height: 12px; }
+.brand-icon { width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px; color: var(--accent); }
+.newchat { display: flex; align-items: center; gap: 6px; }
+.newchat svg { width: 14px; height: 14px; flex: none; }
+
 /* ---- 図面PDF検索・Q&A 拡張パック（製造業向け） ---- */
 .badge-drawing { display: inline-block; background: #e0f2fe; color: #0369a1; border-radius: 999px; padding: 1px 8px; font-size: 10.5px; font-weight: 600; }
 .file-thumb { width: 34px; height: 44px; object-fit: cover; object-position: top left; border: 1px solid var(--border); border-radius: 4px; vertical-align: middle; margin-right: 8px; background: #fff; }
