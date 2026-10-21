@@ -970,8 +970,34 @@ public sealed class ChatFlow
         }
         await Sse(ctx, "outline", new { title = outline.Title, sections = outline.Sections.Select(s => new { s.Title, s.Goal }).ToArray() });
 
-        // 章ごと生成（Difyの反復ノード相当・進捗はphaseイベント）
+        // ③参照なし時は単発生成に切替（v2.5.8・根本対策）: 章ごと独立生成は参照ありで最適だが、
+        // 参照なしでは「各章が同じパターンで満たされる」劣化を実測（Dify単発なら自己抑制が働く）。
+        // 参照/種がある場合のみ章ごと分解の恩恵を受け、無い場合は1回生成で多様性を担保する
         var sectionsOut = new List<(string, string)>();
+        if (!hasRefs)
+        {
+            await Sse(ctx, "phase", new { text = "下書きを生成中…" });
+            await Sse(ctx, "section_start", new { index = 1, title = outline.Title });
+            var singleBody = new StringBuilder();
+            var singleMsgs = new List<(string, string)>
+            {
+                ("system", "あなたは社内文書の下書き担当。参照情報なしで、指示に基づいて文書全体を書く。"
+                    + $"この文書の書式: {tpl.SectionFormat}\n書式の例:\n{tpl.Example}\n"
+                    + "一般知識や推測で事実を作らない。指示に含まれた内容だけで構成し、内容が無い部分は省略する。同じ主語+動詞の繰り返しで項目を水増ししない。各項目は異なる内容について書く。500字以内。"),
+                ("user", $"指示: {message}\n\n文書全体を書いてください。"),
+            };
+            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, singleMsgs, 0.0, 500, async delta =>
+            {
+                singleBody.Append(delta);
+                await Sse(ctx, "delta", new { content = delta });
+            }, ctx.RequestAborted);
+            var singleText = (Rag.CollapseDuplicateSentences(singleBody.ToString()) ?? singleBody.ToString()).Trim();
+            sectionsOut.Add((outline.Title, singleText));
+            await Sse(ctx, "section_done", new { index = 1 });
+        }
+        else
+        {
+        // 章ごと生成（Difyの反復ノード相当・進捗はphaseイベント）— 参照ありの場合のみ
         var writtenMemos = new List<string>(); // 既出章の要点（章間重複抑制・v2.5.3）
         for (int i = 0; i < outline.Sections.Count; i++)
         {
@@ -1002,13 +1028,22 @@ public sealed class ChatFlow
             writtenMemos.Add($"- {sec.Title}: {TruncateForMemo(bodyText)}");
             await Sse(ctx, "section_done", new { index = i + 1 });
         }
+        } // end of else (参照あり=章ごと生成)
 
-        // 組み立て → patch で全文差し替え → 履歴保存（kind=draft）
-        // 章をまたいだFAQ質問の重複を除去（v2.5.5・実測の参照なし劣化パターン対策）
-        var deduped = Draft.DedupRepeatedQuestions(sectionsOut);
-        for (var i = 0; i < Math.Min(deduped.Count, sectionsOut.Count); i++)
-            if (deduped[i].Item2 != sectionsOut[i].Item2) { _log.Info("draft dedup: repeated question items removed"); break; }
-        sectionsOut = deduped;
+        // 後処理パイプライン（v2.5.8）: ①空章除去 → ②FAQ質問重複除去 → ③パターントリム
+        var before = sectionsOut.Count;
+        sectionsOut = Draft.PostProcess(sectionsOut);
+        if (sectionsOut.Count != before)
+            _log.Info($"draft postprocess: sections {before} -> {sectionsOut.Count}");
+        if (sectionsOut.Count == 0)
+        {
+            var empty = "参照文書から内容を生成できませんでした。参照ファイルを追加してからもう一度お試しください。";
+            _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", empty));
+            await Sse(ctx, "delta", new { content = empty });
+            await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "draft-empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+            return;
+        }
+
         var md = Draft.AssembleMarkdown(tpl.Label, auto, outline.Title, sectionsOut, refs.Select(r => r.name).ToList());
         await Sse(ctx, "patch", new { content = md });
         var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
