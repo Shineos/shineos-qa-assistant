@@ -232,11 +232,10 @@ export class ChatView {
   private lastUserText = '';
   private webSearch = false;
   private selTier = '';
-  // 作成モード（v2.5.0）: ONで質問文=文書作成の指示。テンプレート（auto=指示から自動判定）・
-  // 参照ファイル・「回答→資料にする」の種（直前のQ&A）を保持
+  // 作成モード（v2.6.0）: ONで質問文=文書作成の指示。参照はナレッジ全体から自動検索するため
+  // 選択操作はない（テンプレートのみ）。種（直前のQ&A）は1回だけ消費
   private draftMode = false;
   private draftTemplate = 'auto';
-  private draftRefs = new Set<number>();
   private draftSeed: { question: string; answer: string } | null = null;
   // 1回限りの送信オプション（v2.4.1）: ナレッジ一覧「要約」ボタンの対象ファイル /
   // 拒否回答の「Webで検索する」チップからの再送（トグル状態は変更しない）
@@ -962,20 +961,14 @@ export class ChatView {
     el.hidden = !show || !text;
   }
 
-  /** 作成モードのインラインパネル（テンプレート選択+参照ファイル。ON時のみ表示）。
-   * パネルは「状態の表示」に徹する（v2.5.2）: 参照の追加はコンポーザーの添付（クリップ）と
-   * ドラッグ＆ドロップが担い（作成モード中は登録+参照追加）、ここにはチップと
-   * 「ナレッジから選択」（再アップロードなしの副経路）だけを置く */
+  /** 作成モードのインラインパネル（v2.6.0）: テンプレート選択のみ。参照はナレッジ全体から
+   * 自動検索するため選択操作はない（ご指摘: いちいちドキュメントを選ぶのは違和感）。
+   * 登録済みナレッジは全て自動で参照候補になる */
   private async renderDraftPanel(): Promise<void> {
     const host = document.getElementById('draft-host')!;
     const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
     webBtn.disabled = this.draftMode;
     webBtn.title = this.draftMode ? '作成モード中は使用できません（作成をOFFにすると使えます）' : 'Web検索（ONにすると質問が外部の検索サービスへ送信されます）';
-    // クリップは常時表示（v2.5.2）: 作成モード中は挙動が「登録+参照に追加」に変わるだけ
-    const attachBtn = document.getElementById('attach-btn') as HTMLButtonElement;
-    attachBtn.title = this.draftMode
-      ? 'ファイルをナレッジに登録して作成の参照に追加します（ドラッグ＆ドロップでも追加できます）'
-      : 'ナレッジにファイルを添付（PDF / Word / Excel / CSV / Markdown / テキストをその場で登録）';
     if (!this.draftMode) { host.innerHTML = ''; return; }
 
     const box = document.createElement('div');
@@ -991,80 +984,11 @@ export class ChatView {
     sel.value = this.draftTemplate;
     sel.addEventListener('change', () => { this.draftTemplate = sel.value; });
     tplRow.appendChild(sel);
+    const hint = document.createElement('span');
+    hint.className = 'draft-hint';
+    hint.textContent = 'ナレッジに登録した文書は自動で参照されます';
+    tplRow.appendChild(hint);
     box.appendChild(tplRow);
-
-    const refRow = document.createElement('div');
-    refRow.className = 'draft-row';
-    refRow.innerHTML = '<span class="draft-label">参照</span>';
-    // チップ表示は下の chipsWrap に集約（チェック/解除で再描画なしに更新できるように・v2.5.3）
-    // 副経道: 登録済みナレッジから選択（再アップロードなし）。
-    // チェックのたびにパネル全体を再描画するとリストが閉じて複数選択に再オープンが要るため、
-    // チェックではチップ表示だけを差し替え、リストは開いたままにする（v2.5.3）
-    const fromKb = document.createElement('button');
-    fromKb.type = 'button';
-    fromKb.className = 'draft-kbbtn';
-    fromKb.textContent = 'ナレッジから選択';
-    const chipsWrap = document.createElement('span');
-    chipsWrap.className = 'draft-chipswrap';
-    const renderChips = async () => {
-      chipsWrap.innerHTML = '';
-      try {
-        const files = await api.knowledge();
-        let n = 0;
-        for (const f of files.filter(x => this.draftRefs.has(x.file_id))) {
-          const chip = document.createElement('span');
-          chip.className = 'draft-filechip';
-          chip.textContent = f.name;
-          const x = document.createElement('button');
-          x.type = 'button';
-          x.className = 'icon-btn';
-          x.textContent = '×';
-          x.title = '参照から外す';
-          x.addEventListener('click', () => { this.draftRefs.delete(f.file_id); void renderChips(); });
-          chip.appendChild(x);
-          chipsWrap.appendChild(chip);
-          n++;
-        }
-        if (n === 0) {
-          const hint = document.createElement('span');
-          hint.className = 'draft-hint';
-          hint.textContent = 'ファイルを添付またはドラッグ＆ドロップで追加';
-          chipsWrap.appendChild(hint);
-        }
-      } catch { /* 一覧取得失敗時は既存表示を維持 */ }
-    };
-    // チップ表示は chipsWrap に集約し、renderDraftPanel の再描画でもここが更新対象になる
-    refRow.appendChild(chipsWrap);
-    void renderChips();
-    fromKb.addEventListener('click', async () => {
-      const list = document.createElement('div');
-      list.className = 'draft-reflist';
-      try {
-        const files = await api.knowledge();
-        for (const f of files.filter(x => x.status === 'ready')) {
-          const label = document.createElement('label');
-          const cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.checked = this.draftRefs.has(f.file_id);
-          cb.addEventListener('change', () => {
-            if (cb.checked) this.draftRefs.add(f.file_id); else this.draftRefs.delete(f.file_id);
-            void renderChips(); // パネル再描画せずチップのみ更新（リスト維持）
-          });
-          label.append(cb, document.createTextNode(' ' + f.name));
-          list.appendChild(label);
-        }
-        const close = document.createElement('button');
-        close.type = 'button';
-        close.className = 'draft-kbbtn';
-        close.textContent = '閉じる';
-        close.addEventListener('click', () => list.replaceWith(fromKb));
-        list.appendChild(close);
-        if (files.length === 0) list.innerHTML = '<span class="muted">登録済みファイルがありません</span>';
-      } catch { list.innerHTML = '<span class="muted">一覧を取得できませんでした</span>'; }
-      fromKb.replaceWith(list);
-    });
-    refRow.appendChild(fromKb);
-    box.appendChild(refRow);
 
     if (this.draftSeed) {
       const seed = document.createElement('div');
@@ -1083,32 +1007,26 @@ export class ChatView {
     host.appendChild(box);
   }
 
-  /** 添付ファイルの共通処理（クリック/D&D・v2.5.2）: ナレッジへ登録し、
-   * 作成モード中は成功したものを参照にも加える。通常モードは登録のみ */
+  /** 添付ファイルの共通処理（クリック/D&D）: ナレッジへ登録する。
+   * 作成モードでも特別扱いは不要（v2.6.0: 参照は自動検索のため） */
   private async addAttachedFiles(files: File[]): Promise<void> {
     if (files.length === 0) return;
     this.setStatus(`${SVG_PAPER} ${files.map(f => f.name).join(', ')} を登録中…（解析とベクトル化に時間がかかります）`);
     try {
       const r = await api.upload(files);
-      const okIds = r.results.filter(x => x.ok && x.file_id != null).map(x => x.file_id!);
+      const ok = r.results.filter(x => x.ok).length;
       const errs = r.results.filter(x => !x.ok).map(x => `${x.name}: ${x.message ?? x.error ?? ''}`);
-      if (this.draftMode) {
-        for (const id of okIds) this.draftRefs.add(id);
-        this.setStatus(`${SVG_PAPER} ${okIds.length}/${r.results.length}件を参照に追加しました${errs.length ? ' ／ 失敗: ' + errs.join(', ') : ''}`);
-        await this.renderDraftPanel();
-      } else {
-        this.setStatus(`${SVG_PAPER} ${okIds.length}/${r.results.length}件を登録しました。すぐに質問できます${errs.length ? ' ／ 失敗: ' + errs.join(', ') : ''}`);
-      }
+      this.setStatus(`${SVG_PAPER} ${ok}/${r.results.length}件を登録しました。すぐに質問できます${errs.length ? ' ／ 失敗: ' + errs.join(', ') : ''}`);
     } catch (ex) {
       this.setStatus(`${SVG_PAPER} 登録に失敗しました: ${(ex as Error).message}`);
     }
   }
 
-  /** 「資料にする」（回答→下書き）: 作成モードON+参照事前選択+指示の事前入力（v2.5.0） */
-  private startDraftFromAnswer(answer: string, sources: SourceInfo[]): void {
+  /** 「資料にする」（回答→下書き）: 作成モードON+種の事前入力（v2.5.0）。
+   * 参照は自動検索（v2.6.0）のため選択は不要。出典は回答表示で確認済みの想定 */
+  private startDraftFromAnswer(answer: string): void {
     this.draftMode = true;
     this.draftSeed = { question: this.lastUserText, answer };
-    this.draftRefs = new Set(sources.filter(s => (s.kind ?? 'kb') === 'kb' && s.file_id).map(s => s.file_id!));
     this.draftTemplate = 'auto';
     const draftBtn = document.getElementById('draft-btn') as HTMLButtonElement;
     draftBtn.classList.add('active');
@@ -1126,15 +1044,6 @@ export class ChatView {
     // キャプチャ（図面拡張）があれば質問文なしでも送信可: 図番やAI読取した形状キーワードが
     // 検索の手がかりになる（文字なし図形キャプチャからの検索要求）
     if (!text && !this.pendingCapture) return;
-    // 作成モードで参照も種も無い場合は確認（v2.5.5）: 参照なしの下書きは根拠のない
-    // 内容になりやすい実測（FAQテンプレ回答の量産）。入力は消さずに確認だけ出す
-    if (this.draftMode && this.draftRefs.size === 0 && !this.draftSeed) {
-      const proceed = confirm('参照ファイルと種が選ばれていません。\n参照なしの作成は、根拠のない内容になりやすいです（参照ファイルの追加を推奨します）。\n\nOK: このまま作成する　／　キャンセル: 参照を選ぶ');
-      if (!proceed) {
-        input.focus();
-        return;
-      }
-    }
     input.value = '';
     input.style.height = 'auto';
     // キャプチャ（拡張パック）: 確認チップの図番（修正可）を質問文に前置きする
@@ -1168,7 +1077,7 @@ export class ChatView {
       this.webOverrideOnce = null;
       // 作成モード（v2.5.0）: ONなら指示としてdraftペイロードを送る。種は1回だけ消費
       const draftPayload = this.draftMode
-        ? { refs: Array.from(this.draftRefs), template: this.draftTemplate, seed: this.draftSeed ?? undefined }
+        ? { template: this.draftTemplate, seed: this.draftSeed ?? undefined }
         : undefined;
       if (this.draftMode) this.draftSeed = null;
       await streamChat(
@@ -1314,7 +1223,7 @@ export class ChatView {
                 mk.className = 'web-retry-btn';
                 mk.innerHTML = SVG_FILE_PLUS + '<span>資料にする</span>';
                 mk.title = 'この回答と出典を種に、作成モードで下書きを作ります';
-                mk.addEventListener('click', () => this.startDraftFromAnswer(acc, d.sources ?? []));
+                mk.addEventListener("click", () => this.startDraftFromAnswer(acc));
                 draftRow.appendChild(mk);
                 actionsRow.after(draftRow);
               }
