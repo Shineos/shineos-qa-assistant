@@ -396,3 +396,35 @@ public class RagSelectSummaryTextTests
         Assert.False(truncated);
     }
 }
+
+/// <summary>連続同一行の畳み込み（v2.5.3・章生成の箇条書き重複対策）</summary>
+public class RagCollapseLinesTests
+{
+    [Fact]
+    public void ConsecutiveIdenticalBullet_Collapses()
+    {
+        var t = "- 人事規程に基づくFAQを記載します。\n- 人事規程に基づくFAQを記載します。\n- 別の行";
+        var r = Rag.CollapseDuplicateSentences(t);
+        Assert.Equal("- 人事規程に基づくFAQを記載します。\n- 別の行", r);
+    }
+
+    [Fact]
+    public void WhitespaceOnlyDifferenceLines_Collapse()
+    {
+        Assert.Equal("- 同じ行", Rag.CollapseDuplicateSentences("- 同じ行\n- 同じ 行"));
+    }
+
+    [Fact]
+    public void NonConsecutiveSameLine_Kept()
+    {
+        var t = "- A\n- B\n- A";
+        Assert.Equal(t, Rag.CollapseDuplicateSentences(t));
+    }
+
+    [Fact]
+    public void DifferentLines_Kept()
+    {
+        var t = "- 宿泊費の上限は15,000円です。\n- 交通費は電車・バス・タクシーが対象です。";
+        Assert.Equal(t, Rag.CollapseDuplicateSentences(t));
+    }
+}

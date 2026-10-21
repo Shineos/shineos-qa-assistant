@@ -973,36 +973,46 @@ export class ChatView {
     const refRow = document.createElement('div');
     refRow.className = 'draft-row';
     refRow.innerHTML = '<span class="draft-label">参照</span>';
-    // 選択済み参照チップ（×で解除）。未選択時は追加方法のヒントのみ
-    let chipCount = 0;
-    try {
-      const files = await api.knowledge();
-      for (const f of files.filter(x => this.draftRefs.has(x.file_id))) {
-        const chip = document.createElement('span');
-        chip.className = 'draft-filechip';
-        chip.textContent = f.name;
-        const x = document.createElement('button');
-        x.type = 'button';
-        x.className = 'icon-btn';
-        x.textContent = '×';
-        x.title = '参照から外す';
-        x.addEventListener('click', () => { this.draftRefs.delete(f.file_id); void this.renderDraftPanel(); });
-        chip.appendChild(x);
-        refRow.appendChild(chip);
-        chipCount++;
-      }
-    } catch { /* 名前解決失敗時はチップ無し（選択状態は維持） */ }
-    if (chipCount === 0) {
-      const hint = document.createElement('span');
-      hint.className = 'draft-hint';
-      hint.textContent = 'ファイルを添付またはドラッグ＆ドロップで追加';
-      refRow.appendChild(hint);
-    }
-    // 副経道: 登録済みナレッジから選択（再アップロードなし）
+    // チップ表示は下の chipsWrap に集約（チェック/解除で再描画なしに更新できるように・v2.5.3）
+    // 副経道: 登録済みナレッジから選択（再アップロードなし）。
+    // チェックのたびにパネル全体を再描画するとリストが閉じて複数選択に再オープンが要るため、
+    // チェックではチップ表示だけを差し替え、リストは開いたままにする（v2.5.3）
     const fromKb = document.createElement('button');
     fromKb.type = 'button';
     fromKb.className = 'draft-kbbtn';
     fromKb.textContent = 'ナレッジから選択';
+    const chipsWrap = document.createElement('span');
+    chipsWrap.className = 'draft-chipswrap';
+    const renderChips = async () => {
+      chipsWrap.innerHTML = '';
+      try {
+        const files = await api.knowledge();
+        let n = 0;
+        for (const f of files.filter(x => this.draftRefs.has(x.file_id))) {
+          const chip = document.createElement('span');
+          chip.className = 'draft-filechip';
+          chip.textContent = f.name;
+          const x = document.createElement('button');
+          x.type = 'button';
+          x.className = 'icon-btn';
+          x.textContent = '×';
+          x.title = '参照から外す';
+          x.addEventListener('click', () => { this.draftRefs.delete(f.file_id); void renderChips(); });
+          chip.appendChild(x);
+          chipsWrap.appendChild(chip);
+          n++;
+        }
+        if (n === 0) {
+          const hint = document.createElement('span');
+          hint.className = 'draft-hint';
+          hint.textContent = 'ファイルを添付またはドラッグ＆ドロップで追加';
+          chipsWrap.appendChild(hint);
+        }
+      } catch { /* 一覧取得失敗時は既存表示を維持 */ }
+    };
+    // チップ表示は chipsWrap に集約し、renderDraftPanel の再描画でもここが更新対象になる
+    refRow.appendChild(chipsWrap);
+    void renderChips();
     fromKb.addEventListener('click', async () => {
       const list = document.createElement('div');
       list.className = 'draft-reflist';
@@ -1015,11 +1025,17 @@ export class ChatView {
           cb.checked = this.draftRefs.has(f.file_id);
           cb.addEventListener('change', () => {
             if (cb.checked) this.draftRefs.add(f.file_id); else this.draftRefs.delete(f.file_id);
-            void this.renderDraftPanel();
+            void renderChips(); // パネル再描画せずチップのみ更新（リスト維持）
           });
           label.append(cb, document.createTextNode(' ' + f.name));
           list.appendChild(label);
         }
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'draft-kbbtn';
+        close.textContent = '閉じる';
+        close.addEventListener('click', () => list.replaceWith(fromKb));
+        list.appendChild(close);
         if (files.length === 0) list.innerHTML = '<span class="muted">登録済みファイルがありません</span>';
       } catch { list.innerHTML = '<span class="muted">一覧を取得できませんでした</span>'; }
       fromKb.replaceWith(list);

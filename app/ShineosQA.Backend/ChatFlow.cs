@@ -77,6 +77,13 @@ public sealed class ChatFlow
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
+    /// <summary>章間重複抑制用の要点メモ（改行を詰めて80字に切り詰める）</summary>
+    private static string TruncateForMemo(string s)
+    {
+        var flat = s.Replace("\r", "").Replace("\n", " ").Trim();
+        return Truncate(flat, 80);
+    }
+
     /// <summary>会話文脈から独立した検索クエリをLLMに生成させる（Web検索フォローアップ改善・A案）。
     /// 例: 「今日の天気は」→「こちらは神奈川県ですよ」→「神奈川県 天気 予報」</summary>
     private async Task<string> GenerateSearchQueryAsync(
@@ -961,6 +968,7 @@ public sealed class ChatFlow
 
         // 章ごと生成（Difyの反復ノード相当・進捗はphaseイベント）
         var sectionsOut = new List<(string, string)>();
+        var writtenMemos = new List<string>(); // 既出章の要点（章間重複抑制・v2.5.3）
         for (int i = 0; i < outline.Sections.Count; i++)
         {
             ctx.RequestAborted.ThrowIfCancellationRequested();
@@ -968,10 +976,17 @@ public sealed class ChatFlow
             await Sse(ctx, "phase", new { text = $"第{i + 1}/{outline.Sections.Count}章「{sec.Title}」を生成中…" });
             await Sse(ctx, "section_start", new { index = i + 1, title = sec.Title });
             var body = new StringBuilder();
+            // テンプレート別の章形式＋表記保全＋章間重複抑制（v2.5.3: 実測の品質課題への対応。
+            // FAQ章が説明文調になる/英語ソース由来の混種表記/前章との事実重複）
+            var priorCtx = writtenMemos.Count > 0
+                ? "\n\n【すでに書いた章とその要点】\n" + string.Join("\n", writtenMemos) + "\n前の章に書いた事実の繰り返しは書かないこと（別の角度を扱う場合のみ書く）。\n"
+                : "";
             var msgs = new List<(string, string)>
             {
-                ("system", "あなたは社内文書の下書き担当。指定された1章の本文だけを書く。参照情報に書かれた事実のみを使い、書かれていない数値・名前を作らない。見出しは書かない（章名は別で付与される）。400字以内で、箇条書き（- ）も使ってよい。前置きと締めの挨拶は不要。"),
-                ("user", $"文書タイトル: {outline.Title}\n全体指示: {message}\nこの章の役割: {sec.Title}（{(string.IsNullOrEmpty(sec.Goal) ? sec.Title : sec.Goal)}）\n\n{refText}\n\nこの章の本文のみを書いてください。"),
+                ("system", "あなたは社内文書の下書き担当。指定された1章の本文だけを書く。参照情報に書かれた事実のみを使い、書かれていない数値・名前を作らない。見出しは書かない（章名は別で付与される）。400字以内。前置きと締めの挨拶は不要。\n"
+                    + $"この文書の章の書式: {tpl.SectionFormat}\n書式の例:\n{tpl.Example}\n"
+                    + "参照情報の数値・固有名詞・英単語は表記を変えないこと。英語の語は正しい英語のまま使うか自然な日本語に訳すこと。英字と日本語を混ぜた表記（例: メeting）は作らない。"),
+                ("user", $"文書タイトル: {outline.Title}\n全体指示: {message}\nこの章の役割: {sec.Title}（{(string.IsNullOrEmpty(sec.Goal) ? sec.Title : sec.Goal)}）{priorCtx}\n{refText}\n\nこの章の本文のみを書いてください。"),
             };
             await _gw.ChatStreamAsync(_cfg.EnginePortLlm, msgs, 0.0, 400, async delta =>
             {
@@ -980,6 +995,7 @@ public sealed class ChatFlow
             }, ctx.RequestAborted);
             var bodyText = (Rag.CollapseDuplicateSentences(body.ToString()) ?? body.ToString()).Trim();
             sectionsOut.Add((sec.Title, bodyText));
+            writtenMemos.Add($"- {sec.Title}: {TruncateForMemo(bodyText)}");
             await Sse(ctx, "section_done", new { index = i + 1 });
         }
 
