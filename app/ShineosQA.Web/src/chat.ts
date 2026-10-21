@@ -579,13 +579,13 @@ export class ChatView {
       const t = parseServerTime(msg.created_at);
       // 過去チャットでもキャプチャ画像を表示する（ローカル保存された画像をサーバから配信）
       const imageUrl = msg.image && msg.id ? api.messageImageUrl(msg.id) : undefined;
-      this.appendMessage(msg.role, msg.content, sources, t ?? undefined, imageUrl, msg.kind ?? undefined);
+      this.appendMessage(msg.role, msg.content, sources, t ?? undefined, imageUrl, msg.kind ?? undefined, msg.id);
     }
     void this.refreshList(uuid);
     m.scrollTop = m.scrollHeight;
   }
 
-  private appendMessage(role: string, content: string, sources: SourceInfo[] = [], time?: Date, imageUrl?: string, kind?: string): HTMLElement {
+  private appendMessage(role: string, content: string, sources: SourceInfo[] = [], time?: Date, imageUrl?: string, kind?: string, messageId?: number): HTMLElement {
     const m = document.getElementById('messages')!;
     const empty = m.querySelector('.empty');
     if (empty) empty.remove();
@@ -593,8 +593,31 @@ export class ChatView {
     wrap.className = 'msg ' + (role === 'user' ? 'user' : 'assistant');
     const card = document.createElement('div');
     card.className = 'msg-card';
-    // 下書き作成（v2.5.0）: 履歴の kind=draft には file-text SVGバッジを付ける
-    if (kind === 'draft') {
+    // 下書き作成（v2.5.6・ChatGPT方式）: kind=draft にはバッジ+ダウンロードボタンを付ける。
+    // 履歴からでもいつでもダウンロード可能（サーバの /api/messages/{id}/export から取得）
+    if (kind === 'draft' && messageId) {
+      const badge = document.createElement('div');
+      badge.className = 'draft-badge';
+      badge.innerHTML = SVG_DRAFT + '<span>AI下書き</span>';
+      card.appendChild(badge);
+      const dlRow = document.createElement('div');
+      dlRow.className = 'draft-dlrow';
+      const md = document.createElement('button');
+      md.type = 'button';
+      md.className = 'draft-dlbtn';
+      md.innerHTML = SVG_DOWNLOAD + '<span>.md</span>';
+      md.title = 'Markdownファイルとしてダウンロード';
+      md.addEventListener('click', () => window.open(`/api/messages/${messageId}/export?format=md`, '_blank'));
+      dlRow.appendChild(md);
+      const dx = document.createElement('button');
+      dx.type = 'button';
+      dx.className = 'draft-dlbtn';
+      dx.innerHTML = SVG_DOC + '<span>.docx</span>';
+      dx.title = 'Wordファイルとしてダウンロード';
+      dx.addEventListener('click', () => window.open(`/api/messages/${messageId}/export?format=docx`, '_blank'));
+      dlRow.appendChild(dx);
+      card.appendChild(dlRow);
+    } else if (kind === 'draft') {
       const badge = document.createElement('div');
       badge.className = 'draft-badge';
       badge.innerHTML = SVG_DRAFT + '<span>AI下書き</span>';
@@ -1263,24 +1286,25 @@ export class ChatView {
                 chipRow.appendChild(chip);
                 actionsRow.after(chipRow);
               }
-              // 下書き（v2.5.0）: .md/.docxで保存ボタンを報告ボタンの下に置く（押した時だけDL・v2.5.4でWord追加）
+              // 下書き（v2.5.6・ChatGPT方式）: .md/.docxで保存ボタン（履歴からでもダウンロード可能に
+              // するため、ライブパスはサーバのmessage idへリンクする）
               if (d.kind === 'draft' && liveCard.parentElement) {
                 const mdRow = document.createElement('div');
-                mdRow.className = 'web-retry-row';
-                const fname = (d.title || 'draft').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
+                mdRow.className = 'draft-dlrow';
                 const dl = document.createElement('button');
-                dl.className = 'web-retry-btn';
+                dl.className = 'draft-dlbtn';
                 dl.innerHTML = SVG_DOWNLOAD + '<span>.mdで保存</span>';
                 dl.title = '下書きをMarkdownファイルとして保存します';
-                dl.addEventListener('click', () => downloadMarkdown(acc, fname + '.md'));
+                dl.addEventListener('click', () => downloadMarkdown(acc, (d.title || 'draft').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) + '.md'));
                 mdRow.appendChild(dl);
                 const dx = document.createElement('button');
-                dx.className = 'web-retry-btn';
+                dx.className = 'draft-dlbtn';
                 dx.innerHTML = SVG_DOC + '<span>.docxで保存</span>';
                 dx.title = '下書きをWordファイルとして保存します';
                 dx.addEventListener('click', () => { void downloadDocx(d.title || 'draft', acc); });
                 mdRow.appendChild(dx);
-                actionsRow.after(mdRow);
+                // 履歴からでもダウンロードできるよう、actionsの代わりにカード内に置く
+                liveCard.appendChild(mdRow);
               }
               // 回答→資料化（v2.5.0）: 通常回答の下に「資料にする」を置く（作成モードへ種を渡す）
               if (d.kind === 'answer' && liveCard.parentElement) {

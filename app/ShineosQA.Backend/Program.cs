@@ -267,6 +267,26 @@ public static class Api
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, statusCode: 400); }
         });
 
+        // 下書きメッセージのファイル化ダウンロード（v2.5.6・ChatGPT方式: 履歴からでもいつでも）:
+        // kind=draft のメッセージ内容を md または docx として返す
+        app.MapGet("/api/messages/{id}/export", (long id, string format) =>
+        {
+            var rows = db.Query("SELECT content, kind FROM messages WHERE id=$i", ("$i", id));
+            if (rows.Count == 0 || (string)rows[0]["kind"]! != "draft")
+                return Results.NotFound(new { error = "SHINE_E_NOT_FOUND", message = "下書きメッセージが見つかりません" });
+            var content = (string)rows[0]["content"]!;
+            // タイトル行（# 〜）からファイル名を取り、無ければ先頭40字
+            var title = content.Split('\n').FirstOrDefault(l => l.StartsWith("# "))?[2..].Trim() ?? content[..Math.Min(40, content.Length)];
+            var file = string.Join("_", title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim();
+            if (file.Length > 40) file = file[..40];
+            if (string.IsNullOrEmpty(file)) file = "draft";
+            return format == "docx"
+                ? Results.File(DocxExport.MdToDocx(title, content),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"{file}.docx")
+                : Results.File(System.Text.Encoding.UTF8.GetBytes("\uFEFF" + content),
+                    "text/markdown; charset=utf-8", $"{file}.md");
+        });
+
         // ---- ナレッジ ----
 
         // 下書きのWord(.docx)出力（v2.5.4）: クライアント側の生成済みMarkdownを受け取り変換して返す。
