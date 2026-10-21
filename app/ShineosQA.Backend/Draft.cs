@@ -125,6 +125,54 @@ public static class Draft
         return sb.ToString().TrimEnd();
     }
 
+    /// <summary>章をまたいで重複したFAQ質問項目を除去（v2.5.5）。実測: 参照なし生成で
+    /// 同一の「- 質問は？」＋回答が別の章に繰り返された。前方の章で出た質問と
+    /// （空白除去・末尾？?を無視して）一致する項目は、後方の章から項目ブロック
+    /// （質問行+直後の字下げ回答行）ごと落とす。質問形（？/?を含む箇条書き）のみ対象</summary>
+    public static List<(string Title, string Body)> DedupRepeatedQuestions(IReadOnlyList<(string Title, string Body)> sections)
+    {
+        var seen = new HashSet<string>();
+        var result = new List<(string, string)>();
+        foreach (var (title, body) in sections)
+        {
+            var lines = body.Replace("\r", "").Split('\n');
+            var kept = new List<string>();
+            var i = 0;
+            while (i < lines.Length)
+            {
+                var line = lines[i];
+                var q = NormalizeQuestion(line);
+                if (q is null) { kept.Add(line); i++; continue; }
+                if (!seen.Add(q))
+                {
+                    // 重複: 質問行と直後の字下げ回答行（- で始まらない行）を落とす
+                    i++;
+                    while (i < lines.Length && lines[i].Trim().Length > 0 && !lines[i].TrimStart().StartsWith("- "))
+                        i++;
+                    continue;
+                }
+                kept.Add(line);
+                i++;
+            }
+            // 落とした結果末尾が寂しくならないよう、空行の連続を1つに詰める
+            var bodyOut = string.Join("\n", kept).TrimEnd();
+            result.Add((title, bodyOut));
+        }
+        return result;
+
+        static string? NormalizeQuestion(string line)
+        {
+            var t = line.TrimStart();
+            if (!t.StartsWith("- ")) return null;
+            var raw = t[2..].Trim();
+            // 質問形の判定は末尾の？/?（確実）。「- ○○は？」のような短い質問も対象。
+            // 〜は/〜ですで終わる除外は「デジタルデバイスの使用は？」を miss したため廃止
+            if (!raw.EndsWith("？") && !raw.EndsWith("?")) return null;
+            var q = raw.Replace(" ", "").Replace("\u3000", "").TrimEnd('？', '?');
+            return q.Length >= 4 ? q : null;
+        }
+    }
+
     /// <summary>完成ドラフトのMarkdown組み立て（純関数）</summary>
     public static string AssembleMarkdown(string templateLabel, bool autoInferred, string title,
         IReadOnlyList<(string title, string body)> sections, IReadOnlyList<string> refFiles)
