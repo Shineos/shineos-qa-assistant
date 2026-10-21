@@ -178,3 +178,79 @@ public class DraftDedupTests
         Assert.Equal("B", r[1].Title);
     }
 }
+
+/// <summary>空章除去とパターントリム（v2.5.8）</summary>
+public class DraftPostProcessTests
+{
+    // ---- ① RemoveEmptySections ----
+
+    [Fact]
+    public void EmptySection_Removed()
+    {
+        var sections = new List<(string, string)>
+        {
+            ("第一章", "内容がある章の本文です。十分な長さがあります。"),
+            ("空章", ""),  // 完全に空
+            ("短すぎ", "2文字"),  // 閾値未満
+        };
+        var r = Draft.RemoveEmptySections(sections);
+        Assert.Single(r);
+        Assert.Equal("第一章", r[0].Title);
+    }
+
+    [Fact]
+    public void AllSectionsHaveContent_Kept()
+    {
+        var sections = new List<(string, string)> { ("A", "a".PadLeft(60, 'a')), ("B", "b".PadLeft(80, 'b')) };
+        Assert.Equal(2, Draft.RemoveEmptySections(sections).Count);
+    }
+
+    // ---- ② TrimRepetitivePattern ----
+
+    [Fact]
+    public void SameVerbMajority_TrimsTo3()
+    {
+        // 同一動詞「提出」が5個中5個=100% → 3個までトリム
+        var body = "- 申請書を部門長に提出？\n  部門長に提出する。\n" +
+                   "- 申請書を経理に提出？\n  経理に提出する。\n" +
+                   "- 申請書を委員会に提出？\n  委員会に提出する。\n" +
+                   "- 申請書を総務に提出？\n  総務に提出する。\n" +
+                   "- 申請書を直属に提出？\n  直属に提出する。";
+        var r = Draft.TrimRepetitivePattern(new List<(string, string)> { ("章", body) });
+        var count = r[0].Body.Split('\n').Count(l => l.TrimStart().StartsWith("- "));
+        Assert.Equal(3, count); // 最大3個まで
+    }
+
+    [Fact]
+    public void DiverseVerbs_NotTrimmed()
+    {
+        var body = "- 申請書を提出？\n  提出する。\n- 承認を受ける？\n  受ける。\n- 保存する？\n  する。\n- 削除する？\n  する。";
+        var r = Draft.TrimRepetitivePattern(new List<(string, string)> { ("章", body) });
+        Assert.Equal(4, r[0].Body.Split('\n').Count(l => l.TrimStart().StartsWith("- ")));
+    }
+
+    [Fact]
+    public void FewItems_NotProcessed()
+    {
+        var body = "- 申請書をAに提出？\n  Aに提出。\n- 申請書をBに提出？\n  Bに提出。";
+        var r = Draft.TrimRepetitivePattern(new List<(string, string)> { ("章", body) });
+        Assert.Equal(body.Trim(), r[0].Body.Trim()); // 4個未満は対象外
+    }
+
+    // ---- PostProcess pipeline ----
+
+    [Fact]
+    public void PostProcess_RemovesEmptyThenTrims()
+    {
+        var sections = new List<(string, string)>
+        {
+            ("まともな章", "十分な内容がここにあります。" + new string('あ', 60)),
+            ("空章", ""),
+            ("パターン章", "- 申請書をAに提出？\n  Aに提出。\n- 申請書をBに提出？\n  Bに提出。\n- 申請書をCに提出？\n  Cに提出。\n- 申請書をDに提出？\n  Dに提出。\n- 申請書をEに提出？\n  Eに提出。"),
+        };
+        var r = Draft.PostProcess(sections);
+        Assert.Equal(2, r.Count); // 空章除去後2章
+        var patternItems = r.First(s => s.Title == "パターン章").Body.Split('\n').Count(l => l.TrimStart().StartsWith("- "));
+        Assert.True(patternItems <= 3); // パターントリムで最大3個
+    }
+}

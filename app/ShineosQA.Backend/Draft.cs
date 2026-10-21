@@ -173,6 +173,93 @@ public static class Draft
         }
     }
 
+    /// <summary>①空章の除去（v2.5.8）: 本文がthreshold字未満の章（見出しのみ・実質なし）を落とす。
+    /// 実測: 参照なし生成で「承認プロセス」章が見出しのみになった</summary>
+    public static List<(string Title, string Body)> RemoveEmptySections(IReadOnlyList<(string Title, string Body)> sections, int threshold = 20)
+    {
+        return sections.Where(s => s.Body.Replace(" ", "").Replace("\u3000", "").Trim().Length >= threshold).ToList();
+    }
+
+    /// <summary>②同一動詞パターンのトリム（v2.5.8）: 章内の箇条書き項目のうち、同一の
+    /// 動詞パターン（「○○をXXする」のXX部分）が50%超を占める場合、後半の同パターン項目を落として
+    /// 多様性を確保する。実測: 参照なしで「申請書をAに提出/申請書をBに提出…」が92%を占めた</summary>
+    public static List<(string Title, string Body)> TrimRepetitivePattern(IReadOnlyList<(string Title, string Body)> sections)
+    {
+        var result = new List<(string, string)>();
+        foreach (var (title, body) in sections)
+        {
+            var lines = body.Replace("\r", "").Split('\n');
+            var bulletIdx = new List<int>(); // 箇条書き項目のインデックス
+            for (var i = 0; i < lines.Length; i++)
+                if (lines[i].TrimStart().StartsWith("- ")) bulletIdx.Add(i);
+
+            if (bulletIdx.Count < 4) { result.Add((title, body)); continue; } // 項目が少ないなら対象外
+
+            // 各箇条書きから動詞パターンを抽出（FAQ質問形「○○をXXする/した？」と回答形の両方に対応）
+            var patterns = new Dictionary<int, string>();
+            foreach (var i in bulletIdx)
+            {
+                var t = lines[i].TrimStart()[2..].Trim();
+                // 質問形: 末尾に「XXする？」/「XXした？」が来る → 動詞XXを取り出す
+                var m = System.Text.RegularExpressions.Regex.Match(t,
+                    @"(提出|返還|承認|確認|申請|登録|保存|削除|変更|更新|設定|利用|使用|作成|発行|受領|却下|差し戻し)[しましたる？?]*$");
+                if (m.Success)
+                    patterns[i] = m.Groups[1].Value;
+            }
+
+            if (patterns.Count == 0) { result.Add((title, body)); continue; }
+            // 最頻出パターン
+            var top = patterns.Values.GroupBy(v => v).OrderByDescending(g => g.Count()).First();
+            var topVerb = top.Key;
+            var topCount = top.Count();
+            // 50%超かつ4個以上なら後半をトリム
+            if (topCount >= 4 && topCount * 100 > bulletIdx.Count * 50)
+            {
+                var keep = new bool[lines.Length];
+                for (var i = 0; i < lines.Length; i++) keep[i] = true;
+                var removed = 0;
+                var seen = 0;
+                foreach (var bi in bulletIdx)
+                {
+                    if (patterns.TryGetValue(bi, out var v) && v == topVerb)
+                    {
+                        seen++;
+                        if (seen > 3) // 同一動詞は最大3項目まで
+                        {
+                            // この項目（質問行+直後の回答行）を落とす
+                            keep[bi] = false;
+                            var j = bi + 1;
+                            while (j < lines.Length && lines[j].Trim().Length > 0 && !lines[j].TrimStart().StartsWith("- "))
+                            {
+                                keep[j] = false;
+                                j++;
+                            }
+                            removed++;
+                        }
+                    }
+                }
+                if (removed > 0)
+                {
+                    var keptLines = lines.Where((l, i) => keep[i]).ToArray();
+                    result.Add((title, string.Join("\n", keptLines).TrimEnd()));
+                    continue;
+                }
+            }
+            result.Add((title, body));
+        }
+        return result;
+    }
+
+    /// <summary>下書き品質の後処理パイプライン（v2.5.8・純関数）:
+    /// ①空章除去 → ②FAQ質問重複除去 → ③パターントリム の順に適用</summary>
+    public static List<(string Title, string Body)> PostProcess(IReadOnlyList<(string Title, string Body)> sections)
+    {
+        var r = RemoveEmptySections(sections);
+        r = DedupRepeatedQuestions(r);
+        r = TrimRepetitivePattern(r);
+        return r;
+    }
+
     /// <summary>完成ドラフトのMarkdown組み立て（純関数）</summary>
     public static string AssembleMarkdown(string templateLabel, bool autoInferred, string title,
         IReadOnlyList<(string title, string body)> sections, IReadOnlyList<string> refFiles)
