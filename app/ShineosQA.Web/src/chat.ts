@@ -1103,6 +1103,15 @@ export class ChatView {
     // キャプチャ（図面拡張）があれば質問文なしでも送信可: 図番やAI読取した形状キーワードが
     // 検索の手がかりになる（文字なし図形キャプチャからの検索要求）
     if (!text && !this.pendingCapture) return;
+    // 作成モードで参照も種も無い場合は確認（v2.5.5）: 参照なしの下書きは根拠のない
+    // 内容になりやすい実測（FAQテンプレ回答の量産）。入力は消さずに確認だけ出す
+    if (this.draftMode && this.draftRefs.size === 0 && !this.draftSeed) {
+      const proceed = confirm('参照ファイルと種が選ばれていません。\n参照なしの作成は、根拠のない内容になりやすいです（参照ファイルの追加を推奨します）。\n\nOK: このまま作成する　／　キャンセル: 参照を選ぶ');
+      if (!proceed) {
+        input.focus();
+        return;
+      }
+    }
     input.value = '';
     input.style.height = 'auto';
     // キャプチャ（拡張パック）: 確認チップの図番（修正可）を質問文に前置きする

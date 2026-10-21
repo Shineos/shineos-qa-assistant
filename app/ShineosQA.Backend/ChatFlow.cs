@@ -935,6 +935,7 @@ public sealed class ChatFlow
             if (q.Length + a.Length > 0) seed = (q, a);
         }
         var refText = Draft.BuildReferenceText(refs.Select(r => (r.name, r.text)).ToList(), seed);
+        var hasRefs = refText.Length > 0;
         var sources = refs.Select(r => new SourceInfo { File = r.name, Snippet = "下書き参照", Kind = "kb", FileId = r.id }).ToList();
         if (sources.Count > 0)
             await Sse(ctx, "refs", new { files = sources.Select(s => s.File).ToArray(), web = Array.Empty<object>() });
@@ -945,9 +946,12 @@ public sealed class ChatFlow
         string? outlineRaw = null;
         try
         {
+            // 参照なし（v2.5.5）: 一般知識・推測を書かせず指示の範囲で組み立てさせる（実測の
+            // 「参照ゼロでテンプレ回答が量産される」劣化への指示面対策。章も3個に抑える）
+            var noRefsNote = hasRefs ? "" : " 参照情報が無いので、一般知識や推測で事実を作らないこと。指示に含まれた内容だけで章立てする。章は3個。";
             var outlinePrompt = new List<(string, string)>
             {
-                ("system", "あなたは文書構成のプランナー。指示と参照情報から文書の章立てをJSONで作る。出力はJSONのみ（説明文なし）: {\"title\":\"文書タイトル\",\"sections\":[{\"title\":\"章名\",\"goal\":\"その章で書くこと\"}]}。章は3〜5個。参照文書の内容を踏まえる。指示が文書作成でない（単なる質問・検索）場合は sections を空配列にする。"),
+                ("system", "あなたは文書構成のプランナー。指示と参照情報から文書の章立てをJSONで作る。出力はJSONのみ（説明文なし）: {\"title\":\"文書タイトル\",\"sections\":[{\"title\":\"章名\",\"goal\":\"その章で書くこと\"}]}。章は3〜5個。参照文書の内容を踏まえる。指示が文書作成でない（単なる質問・検索）場合は sections を空配列にする。" + noRefsNote),
                 ("user", $"指示: {message}\n\n{refText}"),
             };
             outlineRaw = await _gw.ChatOnceAsync(_cfg.EnginePortLlm, outlinePrompt, 0.0, 200, ctx.RequestAborted);
@@ -1000,6 +1004,11 @@ public sealed class ChatFlow
         }
 
         // 組み立て → patch で全文差し替え → 履歴保存（kind=draft）
+        // 章をまたいだFAQ質問の重複を除去（v2.5.5・実測の参照なし劣化パターン対策）
+        var deduped = Draft.DedupRepeatedQuestions(sectionsOut);
+        for (var i = 0; i < Math.Min(deduped.Count, sectionsOut.Count); i++)
+            if (deduped[i].Item2 != sectionsOut[i].Item2) { _log.Info("draft dedup: repeated question items removed"); break; }
+        sectionsOut = deduped;
         var md = Draft.AssembleMarkdown(tpl.Label, auto, outline.Title, sectionsOut, refs.Select(r => r.name).ToList());
         await Sse(ctx, "patch", new { content = md });
         var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);

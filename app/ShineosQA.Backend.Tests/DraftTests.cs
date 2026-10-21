@@ -126,3 +126,55 @@ public class DraftTests
         }
     }
 }
+
+/// <summary>章をまたいだFAQ質問重複の除去（v2.5.5・参照なし生成の劣化パターン対策）</summary>
+public class DraftDedupTests
+{
+    [Fact]
+    public void SameQuestionInLaterSection_RemovedWithAnswer()
+    {
+        var sections = new List<(string, string)>
+        {
+            ("はじめに", "- メールの送受はどの時間帯ですか？\n  午前8時から午後5時です。\n- 別の質問は？\n  答え。"),
+            ("よくある質問", "- メールの送受はどの時間帯ですか？\n  通常、可能です。\n- 新しい質問は？\n  答え2。"),
+        };
+        var r = Draft.DedupRepeatedQuestions(sections);
+        Assert.Equal(2, r.Count);
+        Assert.DoesNotContain("通常、可能です", r[1].Body);   // 重複項目の回答も消える
+        Assert.Contains("新しい質問は？", r[1].Body);          // 非重複は残る
+        Assert.Contains("別の質問は？", r[0].Body);
+    }
+
+    [Fact]
+    public void WhitespaceAndMarkDifferences_StillMatch()
+    {
+        var sections = new List<(string, string)>
+        {
+            ("A", "- ファイルの保存場所はどこですか？\n  共有ドライブ。"),
+            ("B", "- ファイルの保存場所はどこですか？ \n  回答。"),
+        };
+        var r = Draft.DedupRepeatedQuestions(sections);
+        Assert.DoesNotContain("回答。", r[1].Body);
+        Assert.Equal("", r[1].Body.Trim());
+    }
+
+    [Fact]
+    public void NonQuestionBullets_NotTouched()
+    {
+        var sections = new List<(string, string)>
+        {
+            ("A", "- 宿泊費の上限は15,000円です。"),
+            ("B", "- 宿泊費の上限は15,000円です。"),
+        };
+        var r = Draft.DedupRepeatedQuestions(sections);
+        Assert.Contains("15,000円", r[1].Body); // 質問形でない箇条書きは維持
+    }
+
+    [Fact]
+    public void AllSectionsKept_TitlesUntouched()
+    {
+        var r = Draft.DedupRepeatedQuestions(new List<(string, string)> { ("A", "x"), ("B", "y") });
+        Assert.Equal("A", r[0].Title);
+        Assert.Equal("B", r[1].Title);
+    }
+}
