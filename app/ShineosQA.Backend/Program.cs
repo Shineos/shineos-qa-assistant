@@ -268,6 +268,22 @@ public static class Api
         });
 
         // ---- ナレッジ ----
+
+        // 下書きのWord(.docx)出力（v2.5.4）: クライアント側の生成済みMarkdownを受け取り変換して返す。
+        // 生成物のダウンロードはボタン押下時のみ（自動送信・自動ダウンロードは無い）
+        app.MapPost("/api/export/docx", async (HttpRequest req) =>
+        {
+            using var body = await JsonDocument.ParseAsync(req.Body);
+            var root = body.RootElement;
+            var title = root.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString()! : "下書き";
+            var markdown = root.TryGetProperty("markdown", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString()! : "";
+            if (markdown.Trim().Length == 0) return Results.BadRequest(new { error = "SHINE_E_BAD_REQUEST", message = "markdown が必要です" });
+            var bytes = DocxExport.MdToDocx(title, markdown);
+            var file = string.Join("_", title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim();
+            if (file.Length > 40) file = file[..40];
+            return Results.File(bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", $"{file}.docx");
+        });
+
         app.MapGet("/api/knowledge", (HttpRequest req) =>
         {
             // 拡張パック: 図面メタデータを結合。?q= で図番(正規形)・品名・材質・ファイル名の部分一致フィルタ
