@@ -79,8 +79,9 @@ export interface ModelEntry {
 }
 
 /// POST /api/chat をSSE受信する。イベント: meta / model / web / delta / done / error
+/// （作成モード v2.5.0 追加: phase / outline / section_start / section_done）
 export async function streamChat(
-  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string; capture_image?: string; summary_file_id?: number },
+  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string; capture_image?: string; summary_file_id?: number; draft?: { refs?: number[]; template?: string; seed?: { question: string; answer: string } } },
   handlers: {
     meta?: (d: { chat_id: number; chat_uuid: string }) => void;
     model?: (d: { tier: string; model_file: string }) => void;
@@ -88,7 +89,11 @@ export async function streamChat(
     refs?: (d: { files: string[]; web: string[] }) => void;
     patch?: (content: string) => void;
     delta?: (content: string) => void;
-    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; suggest_web?: boolean; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
+    phase?: (d: { text: string }) => void;
+    outline?: (d: { title: string; sections: { Title: string; Goal: string }[] }) => void;
+    section_start?: (d: { index: number; title: string }) => void;
+    section_done?: (d: { index: number }) => void;
+    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; suggest_web?: boolean; template?: string; auto_inferred?: boolean; title?: string; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
     clarify?: (d: { zuban: string; message: string; options: { file_id: number; file: string; zuban: string; revision: string | null; hinmei: string | null }[] }) => void;
     error?: (d: { code: string; message: string }) => void;
   },
@@ -128,6 +133,10 @@ export async function streamChat(
           case 'refs': handlers.refs?.(parsed); break;
           case 'patch': handlers.patch?.(parsed.content ?? ''); break;
           case 'delta': handlers.delta?.(parsed.content ?? ''); break;
+          case 'phase': handlers.phase?.(parsed); break;
+          case 'outline': handlers.outline?.(parsed); break;
+          case 'section_start': handlers.section_start?.(parsed); break;
+          case 'section_done': handlers.section_done?.(parsed); break;
           case 'done': handlers.done?.(parsed); break;
           case 'clarify': handlers.clarify?.(parsed); break;
           case 'error': handlers.error?.(parsed); break;
@@ -135,4 +144,16 @@ export async function streamChat(
       } catch { /* 不完全フレームは無視 */ }
     }
   }
+}
+
+/// テキストをUTF-8 BOM付きの.mdファイルとしてダウンロードする（作成モード v2.5.0。
+/// BOM付きでExcel/メモ帳で開いた際の文字化けを防ぐ）
+export function downloadMarkdown(text: string, filename: string): void {
+  const blob = new Blob(['\uFEFF' + text], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }

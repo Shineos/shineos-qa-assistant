@@ -9,7 +9,7 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <div class="brand"><span class="brand-name">📖 社内知恵袋</span><a class="brand-sub" href="https://shineos.com" target="_blank" rel="noopener">powered by Shineos</a></div>
+      <div class="brand"><span class="brand-name"><svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>社内知恵袋</span><a class="brand-sub" href="https://shineos.com" target="_blank" rel="noopener">powered by Shineos</a></div>
       <nav class="tabs">
         <button data-tab="chat" class="tab active">チャット</button>
         <button data-tab="knowledge" class="tab">ナレッジ</button>
@@ -25,7 +25,7 @@
       <!-- チャット -->
       <section id="tab-chat" class="tabpane active">
         <aside class="sidebar">
-          <button id="new-chat" class="newchat">＋ 新規チャット</button>
+          <button id="new-chat" class="newchat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>新規チャット</button>
           <input id="chat-search" class="chat-search" type="text" placeholder="履歴を検索" autocomplete="off" />
           <button id="bookmark-toggle" class="archive-toggle" type="button"></button>
           <button id="archive-toggle" class="archive-toggle" type="button"></button>
@@ -47,6 +47,7 @@
           <div id="chat-status" class="chat-status" hidden></div>
           <form id="chat-form" class="composer">
             <textarea id="chat-input" rows="1" placeholder="質問を入力してください（Enterで送信 / Shift+Enterで改行）"></textarea>
+            <div id="draft-host"></div>
             <div id="capture-host"></div>
             <input type="file" id="attach-input" multiple accept=".pdf,.docx,.md,.txt,.xlsx,.csv,.tsv" hidden />
             <div class="composer-bar">
@@ -67,6 +68,10 @@
               <button type="button" id="web-btn" class="tool-btn" title="Web検索（ONにすると質問が外部の検索サービスへ送信されます）">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
                 <span>Web検索</span>
+              </button>
+              <button type="button" id="draft-btn" class="tool-btn" title="作成モード（ONにすると質問文が文書作成の指示として扱われます。参照文書を選んで下書きを生成します）">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m13.4 10.6 2.9 2.9L8 21.8H5v-3z"/></svg>
+                <span>作成</span>
               </button>
               <span class="spacer"></span>
               <button type="submit" id="send-btn" class="send-btn" title="送信">

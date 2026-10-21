@@ -1,4 +1,4 @@
-import { api, streamChat, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
+import { api, streamChat, downloadMarkdown, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
 import { renderMarkdown } from './markdown';
 import { openReportModal } from './report';
 import { onSuccessfulAnswer } from './review-prompt';
@@ -13,6 +13,12 @@ const SVG_CLIP = svgWrap('<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.
 const SVG_GLOBE = svgWrap('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>');
 const SVG_DOC = svgWrap('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/>');
 const SVG_ZAP = svgWrap('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>');
+// 作成モード（v2.5.0）: 下書きバッジ（file-text）・資料にする（file-plus）・md保存（download）
+const SVG_DRAFT = svgWrap('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8M16 17H8M10 9H8"/>');
+const SVG_FILE_PLUS = svgWrap('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 9v6M9 12h6"/>');
+const SVG_DOWNLOAD = svgWrap('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>');
+const SVG_PAPER = svgWrap('<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>');
+const SVG_CAMERA = svgWrap('<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>');
 // 標準モデルのアイコン: 同心円だけの図形は「読み込み中スピナー」と紛らわしいので
 // 十字線付きの照準（crosshair）型にして区別させる
 const SVG_TARGET = svgWrap('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>');
@@ -226,6 +232,12 @@ export class ChatView {
   private lastUserText = '';
   private webSearch = false;
   private selTier = '';
+  // 作成モード（v2.5.0）: ONで質問文=文書作成の指示。テンプレート（auto=指示から自動判定）・
+  // 参照ファイル・「回答→資料にする」の種（直前のQ&A）を保持
+  private draftMode = false;
+  private draftTemplate = 'auto';
+  private draftRefs = new Set<number>();
+  private draftSeed: { question: string; answer: string } | null = null;
   // 1回限りの送信オプション（v2.4.1）: ナレッジ一覧「要約」ボタンの対象ファイル /
   // 拒否回答の「Webで検索する」チップからの再送（トグル状態は変更しない）
   private pendingSummaryId: number | null = null;
@@ -305,8 +317,21 @@ export class ChatView {
       void this.refreshList(); // ブックマークビュー中なら一覧の並びにも反映
     });
     webBtn.addEventListener('click', () => {
+      if (this.draftMode) return; // 作成モード中はWeb検索と排他
       this.webSearch = !this.webSearch;
       webBtn.classList.toggle('active', this.webSearch);
+    });
+    // 作成モード（v2.5.0）: ONで質問文が文書作成の指示になる。Web検索とは排他
+    const draftBtn = document.getElementById('draft-btn') as HTMLButtonElement;
+    draftBtn.addEventListener('click', () => {
+      this.draftMode = !this.draftMode;
+      draftBtn.classList.toggle('active', this.draftMode);
+      if (this.draftMode) {
+        this.draftSeed = null;
+        this.webSearch = false;
+        webBtn.classList.remove('active');
+      }
+      this.renderDraftPanel();
     });
 
     // 📎 添付: ファイルをその場でナレッジ登録（ZCodeスタイル）
@@ -317,20 +342,20 @@ export class ChatView {
       const files = [...attachInput.files!];
       attachInput.value = '';
       if (files.length === 0) return;
-      this.setStatus(`📎 ${files.map(f => f.name).join(', ')} を登録中…（解析とベクトル化に時間がかかります）`);
+      this.setStatus(`${SVG_PAPER} ${files.map(f => f.name).join(', ')} を登録中…（解析とベクトル化に時間がかかります）`);
       try {
         const r = await api.upload(files);
         const ok = r.results.filter(x => x.ok).length;
         const errs = r.results.filter(x => !x.ok).map(x => `${x.name}: ${x.message ?? x.error}`);
-        this.setStatus(`📎 ${ok}/${r.results.length}件を登録しました。すぐに質問できます${errs.length ? ' ／ 失敗: ' + errs.join(', ') : ''}`);
+        this.setStatus(`${SVG_PAPER} ${ok}/${r.results.length}件を登録しました。すぐに質問できます${errs.length ? ' ／ 失敗: ' + errs.join(', ') : ''}`);
       } catch (ex) {
-        this.setStatus(`📎 登録失敗: ${(ex as Error).message}`);
+        this.setStatus(`${SVG_PAPER} 登録失敗: ${(ex as Error).message}`);
       }
     });
     // 📸 キャプチャ（拡張パックON時のみ表示）: Win+Shift+S → Ctrl+V で図面の一部から質問
     const captureBtn = document.getElementById('capture-btn') as HTMLButtonElement;
     captureBtn.addEventListener('click', () =>
-      this.setStatus('📸 Win+Shift+S で画面（図面の表題欄など）を切り取り、入力欄に Ctrl+V で貼り付けてください'));
+      this.setStatus(`${SVG_CAMERA} Win+Shift+S で画面（図面の表題欄など）を切り取り、入力欄に Ctrl+V で貼り付けてください`));
     input.addEventListener('paste', (e) => this.onPaste(e));
 
     // モデルセレクター: 現在の階級を表示し、未導入モデルはその場でダウンロード可能
@@ -543,13 +568,13 @@ export class ChatView {
       const t = parseServerTime(msg.created_at);
       // 過去チャットでもキャプチャ画像を表示する（ローカル保存された画像をサーバから配信）
       const imageUrl = msg.image && msg.id ? api.messageImageUrl(msg.id) : undefined;
-      this.appendMessage(msg.role, msg.content, sources, t ?? undefined, imageUrl);
+      this.appendMessage(msg.role, msg.content, sources, t ?? undefined, imageUrl, msg.kind ?? undefined);
     }
     void this.refreshList(uuid);
     m.scrollTop = m.scrollHeight;
   }
 
-  private appendMessage(role: string, content: string, sources: SourceInfo[] = [], time?: Date, imageUrl?: string): HTMLElement {
+  private appendMessage(role: string, content: string, sources: SourceInfo[] = [], time?: Date, imageUrl?: string, kind?: string): HTMLElement {
     const m = document.getElementById('messages')!;
     const empty = m.querySelector('.empty');
     if (empty) empty.remove();
@@ -557,6 +582,13 @@ export class ChatView {
     wrap.className = 'msg ' + (role === 'user' ? 'user' : 'assistant');
     const card = document.createElement('div');
     card.className = 'msg-card';
+    // 下書き作成（v2.5.0）: 履歴の kind=draft には file-text SVGバッジを付ける
+    if (kind === 'draft') {
+      const badge = document.createElement('div');
+      badge.className = 'draft-badge';
+      badge.innerHTML = SVG_DRAFT + '<span>AI下書き</span>';
+      card.appendChild(badge);
+    }
     const body = document.createElement('div');
     body.className = 'msg-body';
     body.innerHTML = renderMarkdown(content);
@@ -723,11 +755,12 @@ export class ChatView {
     const refsEl = wrap.querySelector('.thinking-refs') as HTMLElement;
     let kbRefs: string[] = [], webRefs: string[] = [];
     const renderRefs = () => {
-      const lines: string[] = [];
-      if (kbRefs.length > 0) lines.push(`📄 ${kbRefs.join('、')}`);
-      if (webRefs.length > 0) lines.push(`🌐 ${webRefs.join('、')}`);
-      refsEl.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join('');
-      refsEl.hidden = lines.length === 0;
+      // 絵文字不使用（v2.5.0）: 📄/🌐 → file/globe SVG。アイコンはHTMLのまま、ファイル名のみesc
+      const parts: string[] = [];
+      if (kbRefs.length > 0) parts.push(`<div>${SVG_DOC} ${esc(kbRefs.join('、'))}</div>`);
+      if (webRefs.length > 0) parts.push(`<div>${SVG_GLOBE} ${esc(webRefs.join('、'))}</div>`);
+      refsEl.innerHTML = parts.join('');
+      refsEl.hidden = parts.length === 0;
     };
     const t0 = Date.now();
     const timer = window.setInterval(() => {
@@ -890,8 +923,106 @@ export class ChatView {
 
   private setStatus(text: string, show = true) {
     const el = document.getElementById('chat-status') as HTMLElement;
-    el.textContent = text;
+    // 絵文字不使用（v2.5.0）: ⏱→clock SVG。HTMLでなくテキストの呼び出し側はそのまま表示
+    el.innerHTML = text.replace('⏱ ', svgWrap('<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>') + ' ');
     el.hidden = !show || !text;
+  }
+
+  /** 作成モードのインラインパネル（テンプレート選択+参照ファイル選択。ON時のみ表示・v2.5.0） */
+  private async renderDraftPanel(): Promise<void> {
+    const host = document.getElementById('draft-host')!;
+    const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
+    webBtn.disabled = this.draftMode;
+    webBtn.title = this.draftMode ? '作成モード中は使用できません（作成をOFFにすると使えます）' : 'Web検索（ONにすると質問が外部の検索サービスへ送信されます）';
+    if (!this.draftMode) { host.innerHTML = ''; return; }
+
+    const box = document.createElement('div');
+    box.className = 'draft-panel';
+    const tplRow = document.createElement('div');
+    tplRow.className = 'draft-row';
+    tplRow.innerHTML = '<span class="draft-label">テンプレート</span>';
+    const sel = document.createElement('select');
+    sel.className = 'draft-select';
+    sel.innerHTML = '<option value="auto">自動（指示から判定）</option>' +
+      '<option value="procedure">手順書</option><option value="report">報告書</option>' +
+      '<option value="proposal">提案書</option><option value="faq">FAQ集</option><option value="free">自由形式</option>';
+    sel.value = this.draftTemplate;
+    sel.addEventListener('change', () => { this.draftTemplate = sel.value; });
+    tplRow.appendChild(sel);
+    box.appendChild(tplRow);
+
+    const refRow = document.createElement('div');
+    refRow.className = 'draft-row';
+    refRow.innerHTML = '<span class="draft-label">参照</span>';
+    const pick = document.createElement('button');
+    pick.type = 'button';
+    pick.className = 'draft-refbtn';
+    pick.innerHTML = SVG_FILE_PLUS + '<span>ファイルを選択</span>';
+    pick.addEventListener('click', async () => {
+      const list = document.createElement('div');
+      list.className = 'draft-reflist';
+      try {
+        const files = await api.knowledge();
+        for (const f of files.filter(x => x.status === 'ready')) {
+          const label = document.createElement('label');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = this.draftRefs.has(f.file_id);
+          cb.addEventListener('change', () => {
+            if (cb.checked) this.draftRefs.add(f.file_id); else this.draftRefs.delete(f.file_id);
+            this.renderDraftPanel();
+          });
+          label.append(cb, document.createTextNode(' ' + f.name));
+          list.appendChild(label);
+        }
+        if (files.length === 0) list.innerHTML = '<span class="muted">登録済みファイルがありません</span>';
+      } catch { list.innerHTML = '<span class="muted">一覧を取得できませんでした</span>'; }
+      pick.replaceWith(list);
+    });
+    refRow.appendChild(pick);
+    if (this.draftRefs.size > 0) {
+      try {
+        const files = await api.knowledge();
+        const names = this.draftRefs.size > 0
+          ? files.filter(x => this.draftRefs.has(x.file_id)).map(x => x.name) : [];
+        const chips = document.createElement('span');
+        chips.className = 'draft-chips';
+        chips.textContent = names.join('、');
+        refRow.appendChild(chips);
+      } catch { /* 名前解決できなくても選択状態は維持 */ }
+    }
+    box.appendChild(refRow);
+
+    if (this.draftSeed) {
+      const seed = document.createElement('div');
+      seed.className = 'draft-seed';
+      seed.textContent = '直前の回答とその出典を種にします（指示文で内容を調整できます）';
+      const off = document.createElement('button');
+      off.type = 'button';
+      off.className = 'icon-btn';
+      off.textContent = '×';
+      off.title = '種を解除';
+      off.addEventListener('click', () => { this.draftSeed = null; void this.renderDraftPanel(); });
+      seed.appendChild(off);
+      box.appendChild(seed);
+    }
+    host.innerHTML = '';
+    host.appendChild(box);
+  }
+
+  /** 「資料にする」（回答→下書き）: 作成モードON+参照事前選択+指示の事前入力（v2.5.0） */
+  private startDraftFromAnswer(answer: string, sources: SourceInfo[]): void {
+    this.draftMode = true;
+    this.draftSeed = { question: this.lastUserText, answer };
+    this.draftRefs = new Set(sources.filter(s => (s.kind ?? 'kb') === 'kb' && s.file_id).map(s => s.file_id!));
+    this.draftTemplate = 'auto';
+    const draftBtn = document.getElementById('draft-btn') as HTMLButtonElement;
+    draftBtn.classList.add('active');
+    void this.renderDraftPanel();
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement;
+    input.value = 'この回答をもとにFAQ集を作成して';
+    input.style.height = 'auto';
+    input.focus();
   }
 
   private async send() {
@@ -932,8 +1063,13 @@ export class ChatView {
       const webOverride = this.webOverrideOnce;
       this.pendingSummaryId = null;
       this.webOverrideOnce = null;
+      // 作成モード（v2.5.0）: ONなら指示としてdraftペイロードを送る。種は1回だけ消費
+      const draftPayload = this.draftMode
+        ? { refs: Array.from(this.draftRefs), template: this.draftTemplate, seed: this.draftSeed ?? undefined }
+        : undefined;
+      if (this.draftMode) this.draftSeed = null;
       await streamChat(
-        { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined },
+        { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined, draft: draftPayload },
         {
           meta: (d) => {
             if (!this.chatUuid && d.chat_uuid) {
@@ -964,6 +1100,31 @@ export class ChatView {
             const domains = [...new Set((d.web ?? []).map(u => domainOf(u)))].slice(0, 3);
             thinking.setRefs(d.files ?? [], domains);
           },
+          // 作成モード（v2.5.0）: 進捗と章区切りを流す。最終mdはpatchで全文差し替え
+          phase: (d) => {
+            thinking.setPhase(d.text ?? '…');
+          },
+          outline: (d) => {
+            const titles = (d.sections ?? []).map(s => s.Title).join(' / ');
+            if (titles) thinking.setPhase(`章立て: ${titles}`);
+          },
+          section_start: (d) => {
+            if (!liveCard) {
+              thinking.remove();
+              const wrap = document.createElement('div');
+              wrap.className = 'msg assistant';
+              liveCard = document.createElement('div');
+              liveCard.className = 'msg-card';
+              liveBody = document.createElement('div');
+              liveBody.className = 'msg-body';
+              liveCard.appendChild(liveBody);
+              wrap.appendChild(liveCard);
+              document.getElementById('messages')!.appendChild(wrap);
+            }
+            acc += (acc ? '\n\n' : '') + `### ${d.title}\n\n`;
+            liveBody!.innerHTML = renderMarkdown(acc);
+          },
+          section_done: () => { /* 章の区切り（本文はdeltaで到達済み） */ },
           patch: (content) => {
             // 出典行正規化などの最終版本文で差し替え
             acc = content;
@@ -1021,6 +1182,31 @@ export class ChatView {
                 });
                 chipRow.appendChild(chip);
                 actionsRow.after(chipRow);
+              }
+              // 下書き（v2.5.0）: .mdで保存ボタンを報告ボタンの下に置く
+              if (d.kind === 'draft' && liveCard.parentElement) {
+                const mdRow = document.createElement('div');
+                mdRow.className = 'web-retry-row';
+                const dl = document.createElement('button');
+                dl.className = 'web-retry-btn';
+                dl.innerHTML = SVG_DOWNLOAD + '<span>.mdで保存</span>';
+                dl.title = '下書きをMarkdownファイルとして保存します';
+                const fname = (d.title || 'draft').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) + '.md';
+                dl.addEventListener('click', () => downloadMarkdown(acc, fname));
+                mdRow.appendChild(dl);
+                actionsRow.after(mdRow);
+              }
+              // 回答→資料化（v2.5.0）: 通常回答の下に「資料にする」を置く（作成モードへ種を渡す）
+              if (d.kind === 'answer' && liveCard.parentElement) {
+                const draftRow = document.createElement('div');
+                draftRow.className = 'web-retry-row';
+                const mk = document.createElement('button');
+                mk.className = 'web-retry-btn';
+                mk.innerHTML = SVG_FILE_PLUS + '<span>資料にする</span>';
+                mk.title = 'この回答と出典を種に、作成モードで下書きを作ります';
+                mk.addEventListener('click', () => this.startDraftFromAnswer(acc, d.sources ?? []));
+                draftRow.appendChild(mk);
+                actionsRow.after(draftRow);
               }
             } else {
               thinking.remove();

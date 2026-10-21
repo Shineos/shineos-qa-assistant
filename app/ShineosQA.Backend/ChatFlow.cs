@@ -273,6 +273,14 @@ public sealed class ChatFlow
             return;
         }
 
+        // 下書き作成モード（v2.5.0）: draft {refs, template, seed} がある場合のみ作成パイプラインへ。
+        // 通常Q&A（出典・拒否・チップ）の契約は無改変
+        if (root.TryGetProperty("draft", out var draftEl) && draftEl.ValueKind == JsonValueKind.Object)
+        {
+            await DraftAsync(ctx, chatId, message, draftEl, sw);
+            return;
+        }
+
         try
         {
             _sup.StartEmbedAndRank(); // 前回クラッシュ・tier変更後のStopAll等で止まっていたら自己修復
@@ -886,5 +894,102 @@ public sealed class ChatFlow
             ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
         _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
         await Sse(ctx, "done", new { cached = false, kind = "answer", sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
+    }
+
+    /// <summary>下書き作成（v2.5.0）: 指示を章立て（タスク）に分解し、参照チャンクを注入して章ごとに
+    /// 生成する決定的パイプライン（Draft.cs参照）。出典契約ではなく「参照: ファイル名」フッターで
+    /// 出所を示す。検索ガード・回答キャッシュ・評価カウントは不経由。kind='draft'で履歴保存</summary>
+    private async Task DraftAsync(HttpContext ctx, long chatId, string message, JsonElement draft, System.Diagnostics.Stopwatch sw)
+    {
+        // テンプレート: 手動指定（auto以外の有効ID）を優先、なければ指示文から自動判定
+        var templateId = draft.TryGetProperty("template", out var te) && te.ValueKind == JsonValueKind.String ? te.GetString()! : "auto";
+        bool auto = templateId is "" or "auto" || !Draft.Templates.ContainsKey(templateId);
+        if (auto) templateId = Draft.InferTemplate(message);
+        var tpl = Draft.Templates[templateId];
+
+        // 参照収集（readyなファイルのみ・種となるQ&A）
+        var refs = new List<(long id, string name, string text)>();
+        if (draft.TryGetProperty("refs", out var re) && re.ValueKind == JsonValueKind.Array)
+            foreach (var idEl in re.EnumerateArray())
+            {
+                if (idEl.ValueKind != JsonValueKind.Number) continue;
+                long id = idEl.GetInt64();
+                var row = _db.Query("SELECT name, status FROM files WHERE file_id=$i", ("$i", id));
+                if (row.Count == 0 || (string)row[0]["status"]! != "ready") continue;
+                var text = string.Join("\n", _index.ByFile(id).Select(c => c.Text));
+                if (text.Trim().Length == 0) continue;
+                refs.Add((id, (string)row[0]["name"]!, text));
+            }
+        (string question, string answer)? seed = null;
+        if (draft.TryGetProperty("seed", out var se) && se.ValueKind == JsonValueKind.Object)
+        {
+            var q = se.TryGetProperty("question", out var qe) && qe.ValueKind == JsonValueKind.String ? qe.GetString()! : "";
+            var a = se.TryGetProperty("answer", out var ae) && ae.ValueKind == JsonValueKind.String ? ae.GetString()! : "";
+            if (q.Length + a.Length > 0) seed = (q, a);
+        }
+        var refText = Draft.BuildReferenceText(refs.Select(r => (r.name, r.text)).ToList(), seed);
+        var sources = refs.Select(r => new SourceInfo { File = r.name, Snippet = "下書き参照", Kind = "kb", FileId = r.id }).ToList();
+        if (sources.Count > 0)
+            await Sse(ctx, "refs", new { files = sources.Select(s => s.File).ToArray(), web = Array.Empty<object>() });
+        _log.Info($"draft: template={tpl.Id}{(auto ? "(auto)" : "")} refs={refs.Count} seed={seed != null} refChars={refText.Length}");
+
+        // タスク分解（アウトライン生成）: 1呼び出しで章立てのJSONを作る。防衛的パースは Draft.ParseOutline
+        await Sse(ctx, "phase", new { text = "アウトラインを作成中…" });
+        string? outlineRaw = null;
+        try
+        {
+            var outlinePrompt = new List<(string, string)>
+            {
+                ("system", "あなたは文書構成のプランナー。指示と参照情報から文書の章立てをJSONで作る。出力はJSONのみ（説明文なし）: {\"title\":\"文書タイトル\",\"sections\":[{\"title\":\"章名\",\"goal\":\"その章で書くこと\"}]}。章は3〜5個。参照文書の内容を踏まえる。指示が文書作成でない（単なる質問・検索）場合は sections を空配列にする。"),
+                ("user", $"指示: {message}\n\n{refText}"),
+            };
+            outlineRaw = await _gw.ChatOnceAsync(_cfg.EnginePortLlm, outlinePrompt, 0.0, 200, ctx.RequestAborted);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { _log.Warn($"draft outline failed: {ex.Message}"); }
+        var outline = Draft.ParseOutline(outlineRaw, tpl, message);
+        if (outline.Sections.Count == 0)
+        {
+            // 作成意図がない指示: 下書きではなく案内を返す（clarify契約）
+            var guide = "作成モードがONになっています。作成したい文書を指示してください（例:「PCの貸出の手順書を作成して」「この回答をFAQ集にまとめて」）。通常の質問に戻る場合は「作成」をOFFにしてください。";
+            _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'clarify')", ("$c", chatId), ("$m", guide));
+            await Sse(ctx, "delta", new { content = guide });
+            await Sse(ctx, "done", new { cached = false, kind = "clarify", guard = "draft-intent", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+            return;
+        }
+        await Sse(ctx, "outline", new { title = outline.Title, sections = outline.Sections.Select(s => new { s.Title, s.Goal }).ToArray() });
+
+        // 章ごと生成（Difyの反復ノード相当・進捗はphaseイベント）
+        var sectionsOut = new List<(string, string)>();
+        for (int i = 0; i < outline.Sections.Count; i++)
+        {
+            ctx.RequestAborted.ThrowIfCancellationRequested();
+            var sec = outline.Sections[i];
+            await Sse(ctx, "phase", new { text = $"第{i + 1}/{outline.Sections.Count}章「{sec.Title}」を生成中…" });
+            await Sse(ctx, "section_start", new { index = i + 1, title = sec.Title });
+            var body = new StringBuilder();
+            var msgs = new List<(string, string)>
+            {
+                ("system", "あなたは社内文書の下書き担当。指定された1章の本文だけを書く。参照情報に書かれた事実のみを使い、書かれていない数値・名前を作らない。見出しは書かない（章名は別で付与される）。400字以内で、箇条書き（- ）も使ってよい。前置きと締めの挨拶は不要。"),
+                ("user", $"文書タイトル: {outline.Title}\n全体指示: {message}\nこの章の役割: {sec.Title}（{(string.IsNullOrEmpty(sec.Goal) ? sec.Title : sec.Goal)}）\n\n{refText}\n\nこの章の本文のみを書いてください。"),
+            };
+            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, msgs, 0.0, 400, async delta =>
+            {
+                body.Append(delta);
+                await Sse(ctx, "delta", new { content = delta });
+            }, ctx.RequestAborted);
+            var bodyText = (Rag.CollapseDuplicateSentences(body.ToString()) ?? body.ToString()).Trim();
+            sectionsOut.Add((sec.Title, bodyText));
+            await Sse(ctx, "section_done", new { index = i + 1 });
+        }
+
+        // 組み立て → patch で全文差し替え → 履歴保存（kind=draft）
+        var md = Draft.AssembleMarkdown(tpl.Label, auto, outline.Title, sectionsOut, refs.Select(r => r.name).ToList());
+        await Sse(ctx, "patch", new { content = md });
+        var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
+        _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,'draft')",
+            ("$c", chatId), ("$m", md), ("$s", sourcesJson));
+        _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
+        await Sse(ctx, "done", new { cached = false, kind = "draft", template = tpl.Label, auto_inferred = auto, title = outline.Title, sources, ms = sw.ElapsedMilliseconds });
     }
 }

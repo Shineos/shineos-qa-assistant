@@ -197,6 +197,7 @@
 > ・速度と精度でモデルを切り替え可能（クイック1.7B／標準4B／高品質30B・アプリ内で追加ダウンロード）
 > ・閉じるとAIエンジンも完全停止。他アプリの作業を優先する低負荷モード搭載
 > ・複合質問をまとめて調べる試験的なエージェント機能（設定で有効化）
+> ・作成モード: 参照する文書を選んで指示するだけで、FAQ集・手順書・報告書などの下書きを生成（テンプレートは指示から自動判定）。各回答から「資料にする」で下書きに展開もできます。生成物はAI下書きとして履歴に残り、.mdで保存可能
 >
 > ■ 動作環境
 > Windows 10/11（64bit）・メモリ8GB以上・空き容量4GB以上（GPU不要）。初回起動時のモデル取得にのみインターネット接続が必要です
@@ -226,6 +227,7 @@
 > - Quick (1.7B) / Standard (4B) / Quality (30B) models switch in-app; extras download on demand
 > - Closing the app stops the AI engine completely; a low-load mode prioritizes your other apps
 > - Experimental agent mode (opt-in) answers compound questions in one pass
+> - Draft mode: pick reference documents, give an instruction, and get a draft FAQ / procedure / report (template auto-detected) — each answer also has a "turn into a document" button. Drafts stay in history and export as .md
 >
 > Requirements: Windows 10/11 (64-bit), 8 GB+ RAM, ~4 GB free disk space, internet on first launch only. No GPU needed.
 >
@@ -266,6 +268,7 @@
 | スクリーンショット5 モデル選択 | `assets/screenshots/app-04-models.png`（1500x1000） | ✓ 2026-10-16更新 |
 | スクリーンショット6 図面QA（図番ST-1042Aの材質・品名+出典。製造業向けの差別化） | `assets/screenshots/app-05-drawing.png`（1500x1000・v2.2.0追加） | ✓ 2026-10-16追加 |
 | スクリーンショット7 **実績接続QA**（「ST-1042Aの過去見積と原価は？」→150,000円/98,000円を出典付き回答。差別化の中核ビジュアル・**スクショ一覧の2枚目に配置推奨**） | `assets/screenshots/app-06-jisseki.png`（1500x1000） | ✓ 2026-10-20追加 |
+| スクリーンショット8 **作成モード**（参照ファイル選択→指示→章立て生成中のFAQ下書き+.md保存。仕事効率ツールとしての訴求） | `assets/screenshots/app-07-draft.png`（1500x1000） | ✓ 2026-10-21追加 |
 | MSIXパッケージ内ロゴ（150/44/50px） | CIが `store-logo-300.png` から自動生成 | ✓ |
 
 ※ 1枚目（モデルDL画面）は日本語UIのまま掲載してよい（対象市場が日本のため。多言語展開時にキャプションのローカライズを検討）。
