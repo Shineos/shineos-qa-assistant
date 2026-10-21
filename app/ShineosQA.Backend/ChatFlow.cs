@@ -272,6 +272,12 @@ public sealed class ChatFlow
         _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'user',$m)", ("$c", chatId), ("$m", message));
         if (captureImage != null) SaveCaptureImage(chatId, captureImage);
 
+        // 要約・作成モード（v2.5.10修正）: 通常Q&A経路のStartEmbedAndRank/EnsureLlmより前に分岐するため、
+        // ここでLLM自己修復を行う。idle unload（既定60分）後に作成/要約すると
+        // 「接続できませんでした」network errorになる実測への対策
+        try { _sup.EnsureLlm(); }
+        catch (Exception ex) { _log.Warn($"draft/summary: llm ensure failed: {ex.Message}"); }
+
         // 文書要約（v2.4.1）: ナレッジ一覧の「要約」ボタンからの確定経路。検索top-kを経ず
         // 指定ファイルの全チャンクを注入する（出典=ファイル全体・検索ミスによる幻覚源が存在しない）
         if (root.TryGetProperty("summary_file_id", out var sfid) && sfid.ValueKind == JsonValueKind.Number)
