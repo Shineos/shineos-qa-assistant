@@ -371,5 +371,5 @@ button.small { padding: 5px 10px; font-size: 12px; }
 .draft-chipswrap { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .draft-dlrow { display: flex; gap: 8px; margin: 6px 0; }
 .draft-dlbtn { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg); color: var(--accent); font-size: 12px; padding: 4px 12px; cursor: pointer; }
-.draft-dlbtn svg { width: 14px; height: 14px; }
+.draft-dlbtn svg { width: 11px; height: 11px; }
 .draft-dlbtn:hover { background: #ecfdf5; }
