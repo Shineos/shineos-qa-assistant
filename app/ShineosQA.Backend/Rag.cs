@@ -102,9 +102,20 @@ public static partial class Rag
     public static string? CollapseDuplicateSentences(string? text)
     {
         if (string.IsNullOrEmpty(text)) return text;
-        var lines = text.Split('\n');
-        for (var i = 0; i < lines.Length; i++) lines[i] = CollapseSentencesInLine(lines[i]);
-        return CollapseRepeatedBlock(string.Join("\n", lines));
+        // 連続する同一行の畳み込み（v2.5.3）: 章生成で同一の箇条書き行が2連続することがある
+        // （人事規程章の同一行×2を実測）。トリム+空白正規化で一致した完全同一行のみ畳む
+        var collapsed = new List<string>();
+        string? prevLine = null;
+        foreach (var raw in text.Split('\n'))
+        {
+            var norm = raw.Replace(" ", "").Replace("\u3000", "").TrimEnd('\r');
+            if (norm.Length > 0 && norm == prevLine) continue;
+            collapsed.Add(raw);
+            prevLine = norm.Length > 0 ? norm : null;
+        }
+        var parts = collapsed.ToArray();
+        for (var i = 0; i < parts.Length; i++) parts[i] = CollapseSentencesInLine(parts[i]);
+        return CollapseRepeatedBlock(string.Join("\n", parts));
     }
 
     /// <summary>A+A反復の判定: 本文長の半分で分割し、空白を除去した正規形が一致すれば前半のみ返す。
