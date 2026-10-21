@@ -157,3 +157,20 @@ export function downloadMarkdown(text: string, filename: string): void {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+
+/// 下書きMarkdownをWord(.docx)に変換してダウンロードする（v2.5.4・ボタン押下時のみ）
+export async function downloadDocx(title: string, markdown: string): Promise<void> {
+  const resp = await fetch('/api/export/docx', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, markdown }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (title.replace(/[\/:*?"<>|]/g, '_').slice(0, 40) || 'draft') + '.docx';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}

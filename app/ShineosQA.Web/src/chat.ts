@@ -1,4 +1,4 @@
-import { api, streamChat, downloadMarkdown, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
+import { api, streamChat, downloadMarkdown, downloadDocx, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
 import { renderMarkdown } from './markdown';
 import { openReportModal } from './report';
 import { onSuccessfulAnswer } from './review-prompt';
@@ -1254,17 +1254,23 @@ export class ChatView {
                 chipRow.appendChild(chip);
                 actionsRow.after(chipRow);
               }
-              // 下書き（v2.5.0）: .mdで保存ボタンを報告ボタンの下に置く
+              // 下書き（v2.5.0）: .md/.docxで保存ボタンを報告ボタンの下に置く（押した時だけDL・v2.5.4でWord追加）
               if (d.kind === 'draft' && liveCard.parentElement) {
                 const mdRow = document.createElement('div');
                 mdRow.className = 'web-retry-row';
+                const fname = (d.title || 'draft').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40);
                 const dl = document.createElement('button');
                 dl.className = 'web-retry-btn';
                 dl.innerHTML = SVG_DOWNLOAD + '<span>.mdで保存</span>';
                 dl.title = '下書きをMarkdownファイルとして保存します';
-                const fname = (d.title || 'draft').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) + '.md';
-                dl.addEventListener('click', () => downloadMarkdown(acc, fname));
+                dl.addEventListener('click', () => downloadMarkdown(acc, fname + '.md'));
                 mdRow.appendChild(dl);
+                const dx = document.createElement('button');
+                dx.className = 'web-retry-btn';
+                dx.innerHTML = SVG_DOC + '<span>.docxで保存</span>';
+                dx.title = '下書きをWordファイルとして保存します';
+                dx.addEventListener('click', () => { void downloadDocx(d.title || 'draft', acc); });
+                mdRow.appendChild(dx);
                 actionsRow.after(mdRow);
               }
               // 回答→資料化（v2.5.0）: 通常回答の下に「資料にする」を置く（作成モードへ種を渡す）
