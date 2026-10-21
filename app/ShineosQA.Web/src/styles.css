@@ -136,6 +136,7 @@ button.newchat:hover { background: var(--hover); }
 
 /* ステータス行 */
 .chat-status { max-width: 768px; margin: 0 auto; padding: 2px 20px; font-size: 12px; color: var(--muted); min-height: 18px; }
+.chat-status svg { width: 11px; height: 11px; vertical-align: -1.5px; }
 
 /* ── コンポーザー（OpenWebUI風・フロートカード） ── */
 .composer { max-width: 768px; width: calc(100% - 32px); margin: 0 auto 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 6px; }
