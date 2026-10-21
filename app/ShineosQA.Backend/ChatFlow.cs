@@ -920,9 +920,21 @@ public sealed class ChatFlow
         if (auto) templateId = Draft.InferTemplate(message);
         var tpl = Draft.Templates[templateId];
 
-        // 参照収集（readyなファイルのみ・種となるQ&A）
+        // 種となるQ&A（回答→資料にする、v2.5.0）
+        (string question, string answer)? seed = null;
+        if (draft.TryGetProperty("seed", out var se) && se.ValueKind == JsonValueKind.Object)
+        {
+            var q = se.TryGetProperty("question", out var qe) && qe.ValueKind == JsonValueKind.String ? qe.GetString()! : "";
+            var a = se.TryGetProperty("answer", out var ae) && ae.ValueKind == JsonValueKind.String ? ae.GetString()! : "";
+            if (q.Length + a.Length > 0) seed = (q, a);
+        }
+
+        // 参照は自動（v2.6.0）: 指示文（+種の質問）でナレッジ全体をハイブリッド検索し、
+        // ヒットしたチャンクを参照として使う。手動のrefs指定（API互換）があればそちらを優先
+        _sup.StartEmbedAndRank(); // 検索にembed/rankが必要。止まっていれば自己修復
         var refs = new List<(long id, string name, string text)>();
-        if (draft.TryGetProperty("refs", out var re) && re.ValueKind == JsonValueKind.Array)
+        if (draft.TryGetProperty("refs", out var re) && re.ValueKind == JsonValueKind.Array && re.EnumerateArray().Any())
+        {
             foreach (var idEl in re.EnumerateArray())
             {
                 if (idEl.ValueKind != JsonValueKind.Number) continue;
@@ -933,129 +945,84 @@ public sealed class ChatFlow
                 if (text.Trim().Length == 0) continue;
                 refs.Add((id, (string)row[0]["name"]!, text));
             }
-        (string question, string answer)? seed = null;
-        if (draft.TryGetProperty("seed", out var se) && se.ValueKind == JsonValueKind.Object)
-        {
-            var q = se.TryGetProperty("question", out var qe) && qe.ValueKind == JsonValueKind.String ? qe.GetString()! : "";
-            var a = se.TryGetProperty("answer", out var ae) && ae.ValueKind == JsonValueKind.String ? ae.GetString()! : "";
-            if (q.Length + a.Length > 0) seed = (q, a);
-        }
-        var refText = Draft.BuildReferenceText(refs.Select(r => (r.name, r.text)).ToList(), seed);
-        var hasRefs = refText.Length > 0;
-        var sources = refs.Select(r => new SourceInfo { File = r.name, Snippet = "下書き参照", Kind = "kb", FileId = r.id }).ToList();
-        if (sources.Count > 0)
-            await Sse(ctx, "refs", new { files = sources.Select(s => s.File).ToArray(), web = Array.Empty<object>() });
-        _log.Info($"draft: template={tpl.Id}{(auto ? "(auto)" : "")} refs={refs.Count} seed={seed != null} refChars={refText.Length}");
-
-        // タスク分解（アウトライン生成）: 1呼び出しで章立てのJSONを作る。防衛的パースは Draft.ParseOutline
-        await Sse(ctx, "phase", new { text = "アウトラインを作成中…" });
-        string? outlineRaw = null;
-        try
-        {
-            // 参照なし（v2.5.5）: 一般知識・推測を書かせず指示の範囲で組み立てさせる（実測の
-            // 「参照ゼロでテンプレ回答が量産される」劣化への指示面対策。章も3個に抑える）
-            var noRefsNote = hasRefs ? "" : " 参照情報が無いので、一般知識や推測で事実を作らないこと。指示に含まれた内容だけで章立てする。章は3個。";
-            var outlinePrompt = new List<(string, string)>
-            {
-                ("system", "あなたは文書構成のプランナー。指示と参照情報から文書の章立てをJSONで作る。出力はJSONのみ（説明文なし）: {\"title\":\"文書タイトル\",\"sections\":[{\"title\":\"章名\",\"goal\":\"その章で書くこと\"}]}。章は3〜5個。参照文書の内容を踏まえる。指示が文書作成でない（単なる質問・検索）場合は sections を空配列にする。" + noRefsNote),
-                ("user", $"指示: {message}\n\n{refText}"),
-            };
-            outlineRaw = await _gw.ChatOnceAsync(_cfg.EnginePortLlm, outlinePrompt, 0.0, 200, ctx.RequestAborted);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { _log.Warn($"draft outline failed: {ex.Message}"); }
-        var outline = Draft.ParseOutline(outlineRaw, tpl, message);
-        if (outline.Sections.Count == 0)
-        {
-            // 作成意図がない指示: 下書きではなく案内を返す（clarify契約）
-            var guide = "作成モードがONになっています。作成したい文書を指示してください（例:「PCの貸出の手順書を作成して」「この回答をFAQ集にまとめて」）。通常の質問に戻る場合は「作成」をOFFにしてください。";
-            _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'clarify')", ("$c", chatId), ("$m", guide));
-            await Sse(ctx, "delta", new { content = guide });
-            await Sse(ctx, "done", new { cached = false, kind = "clarify", guard = "draft-intent", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
-            return;
-        }
-        await Sse(ctx, "outline", new { title = outline.Title, sections = outline.Sections.Select(s => new { s.Title, s.Goal }).ToArray() });
-
-        // ③参照なし時は単発生成に切替（v2.5.8・根本対策）: 章ごと独立生成は参照ありで最適だが、
-        // 参照なしでは「各章が同じパターンで満たされる」劣化を実測（Dify単発なら自己抑制が働く）。
-        // 参照/種がある場合のみ章ごと分解の恩恵を受け、無い場合は1回生成で多様性を担保する
-        var sectionsOut = new List<(string, string)>();
-        if (!hasRefs)
-        {
-            await Sse(ctx, "phase", new { text = "下書きを生成中…" });
-            await Sse(ctx, "section_start", new { index = 1, title = outline.Title });
-            var singleBody = new StringBuilder();
-            var singleMsgs = new List<(string, string)>
-            {
-                ("system", "あなたは社内文書の下書き担当。参照情報なしで、指示に基づいて文書全体を書く。"
-                    + $"この文書の書式: {tpl.SectionFormat}\n書式の例:\n{tpl.Example}\n"
-                    + "一般知識や推測で事実を作らない。指示に含まれた内容だけで構成し、内容が無い部分は省略する。同じ主語+動詞の繰り返しで項目を水増ししない。各項目は異なる内容について書く。500字以内。"),
-                ("user", $"指示: {message}\n\n文書全体を書いてください。"),
-            };
-            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, singleMsgs, 0.0, 500, async delta =>
-            {
-                singleBody.Append(delta);
-                await Sse(ctx, "delta", new { content = delta });
-            }, ctx.RequestAborted);
-            var singleText = (Rag.CollapseDuplicateSentences(singleBody.ToString()) ?? singleBody.ToString()).Trim();
-            sectionsOut.Add((outline.Title, singleText));
-            await Sse(ctx, "section_done", new { index = 1 });
         }
         else
         {
-        // 章ごと生成（Difyの反復ノード相当・進捗はphaseイベント）— 参照ありの場合のみ
-        var writtenMemos = new List<string>(); // 既出章の要点（章間重複抑制・v2.5.3）
-        for (int i = 0; i < outline.Sections.Count; i++)
-        {
-            ctx.RequestAborted.ThrowIfCancellationRequested();
-            var sec = outline.Sections[i];
-            await Sse(ctx, "phase", new { text = $"第{i + 1}/{outline.Sections.Count}章「{sec.Title}」を生成中…" });
-            await Sse(ctx, "section_start", new { index = i + 1, title = sec.Title });
-            var body = new StringBuilder();
-            // テンプレート別の章形式＋表記保全＋章間重複抑制（v2.5.3: 実測の品質課題への対応。
-            // FAQ章が説明文調になる/英語ソース由来の混種表記/前章との事実重複）
-            var priorCtx = writtenMemos.Count > 0
-                ? "\n\n【すでに書いた章とその要点】\n" + string.Join("\n", writtenMemos) + "\n前の章に書いた事実の繰り返しは書かないこと（別の角度を扱う場合のみ書く）。\n"
-                : "";
-            var msgs = new List<(string, string)>
+            // 自動検索（v2.6.0）: 指示文+テンプレート種別のキーワードでナレッジ全体を検索する。
+            // 指示文だけではKBチャンクの語彙と合わず拾い漏れることがあるため（実測: 新入社員FAQで
+            // 経費精算のみヒット、宿泊費/パスワード等が漏れた）、テンプレート種別の関連語をクエリに足す
+            var tplKeywords = tpl.Id switch
             {
-                ("system", "あなたは社内文書の下書き担当。指定された1章の本文だけを書く。参照情報に書かれた事実のみを使い、書かれていない数値・名前を作らない。見出しは書かない（章名は別で付与される）。400字以内。前置きと締めの挨拶は不要。\n"
-                    + $"この文書の章の書式: {tpl.SectionFormat}\n書式の例:\n{tpl.Example}\n"
-                    + "参照情報の数値・固有名詞・英単語は表記を変えないこと。英語の語は正しい英語のまま使うか自然な日本語に訳すこと。英字と日本語を混ぜた表記（例: メeting）は作らない。"),
-                ("user", $"文書タイトル: {outline.Title}\n全体指示: {message}\nこの章の役割: {sec.Title}（{(string.IsNullOrEmpty(sec.Goal) ? sec.Title : sec.Goal)}）{priorCtx}\n{refText}\n\nこの章の本文のみを書いてください。"),
+                "procedure" => " 手順 申請 承認 方法",
+                "report" => " 報告 実績 結果",
+                "proposal" => " 提案 見積 条件",
+                "faq" => " よくある質問 規定 マニュアル 手続き",
+                _ => "",
             };
-            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, msgs, 0.0, 400, async delta =>
+            var draftQuery = seed is { } sd && sd.question.Length > 0 ? sd.question + " " + message : message + tplKeywords;
+            var qEmb = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { draftQuery }, ctx.RequestAborted))[0];
+            var tokens = Rag.Tokenize(draftQuery + " " + tplKeywords).ToHashSet();
+            foreach (var h in _index.Search(qEmb, tokens, 12))
             {
-                body.Append(delta);
-                await Sse(ctx, "delta", new { content = delta });
-            }, ctx.RequestAborted);
-            var bodyText = (Rag.CollapseDuplicateSentences(body.ToString()) ?? body.ToString()).Trim();
-            sectionsOut.Add((sec.Title, bodyText));
-            writtenMemos.Add($"- {sec.Title}: {TruncateForMemo(bodyText)}");
-            await Sse(ctx, "section_done", new { index = i + 1 });
+                var rec = h.Rec;
+                var dup = refs.FirstOrDefault(r => r.id == rec.FileId);
+                if (dup != default) dup.text += "\n" + rec.Text;
+                else refs.Add((rec.FileId, rec.FileName, rec.Text));
+            }
         }
-        } // end of else (参照あり=章ごと生成)
-
-        // 後処理パイプライン（v2.5.8）: ①空章除去 → ②FAQ質問重複除去 → ③パターントリム
-        var before = sectionsOut.Count;
-        sectionsOut = Draft.PostProcess(sectionsOut);
-        if (sectionsOut.Count != before)
-            _log.Info($"draft postprocess: sections {before} -> {sectionsOut.Count}");
-        if (sectionsOut.Count == 0)
+        var refText = Draft.BuildReferenceText(refs.Select(r => (r.name, r.text)).ToList(), seed);
+        var sources = refs.Select(r => new SourceInfo { File = r.name, Snippet = "下書き参照", Kind = "kb", FileId = r.id }).ToList();
+        if (sources.Count > 0)
+            await Sse(ctx, "refs", new { files = sources.Select(s => s.File).ToArray(), web = Array.Empty<object>() });
+        _log.Info($"draft: template={tpl.Id}{(auto ? "(auto)" : "")} refs={refs.Count} auto-search={refs.Count > 0 && !draft.TryGetProperty("refs", out var _)} seed={seed != null} refChars={refText.Length}");
+        if (refText.Trim().Length == 0)
         {
-            var empty = "参照文書から内容を生成できませんでした。参照ファイルを追加してからもう一度お試しください。";
-            _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", empty));
-            await Sse(ctx, "delta", new { content = empty });
+            var emptyKb = "ナレッジに文書が登録されていません。参照する文書を先にナレッジへ登録してください（作成をOFFにして通常の質問もできます）。";
+            _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", emptyKb));
+            await Sse(ctx, "delta", new { content = emptyKb });
             await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "draft-empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
             return;
         }
 
-        var md = Draft.AssembleMarkdown(tpl.Label, auto, outline.Title, sectionsOut, refs.Select(r => r.name).ToList());
-        await Sse(ctx, "patch", new { content = md });
+        // 単発生成（v2.6.0）: 検索で集めた参照を1コンテキストへ注入し、1回の生成で下書き全体を作る。
+        // 章ごとの独立生成は廃止 — 参照なし生成で「各章が同一パターンで満たされる」劣化の
+        // 根本原因は、章が互いの内容を知らずに同じ材料で埋まることだった（実測: 同一動詞92%）。
+        // 1コンテキスト内ならモデルの自己抑制が働き、繰り返しが構造的に起きない（Difyの検索+LLMノードと同一構造）
+        await Sse(ctx, "phase", new { text = "下書きを生成中…" });
+        var messages = new List<(string, string)>
+        {
+            ("system", "あなたは社内文書の下書き担当。参照情報と指示に基づいて、文書全体を1つまとめて書く。"
+                + $"この文書の書式: {tpl.SectionFormat}\n書式の例:\n{tpl.Example}\n"
+                + "参照情報に書かれた事実のみを使い、書かれていない数値・名前を作らない。参照情報の数値・固有名詞・英単語は表記を変えないこと。英語の語は正しい英語のまま使うか自然な日本語に訳すこと。英字と日本語を混ぜた表記（例: メeting）は作らない。\n"
+                + "構成: 冒頭に文書タイトルの見出し（# ）は付けない（別途付与される）。内容が豊富なら章見出し（## ）で整理してよい。同じ主語+動詞の繰り返しで項目を水増ししない。各項目は異なる内容について書く。600字以内。前置きと締めの挨拶は不要。"),
+            ("user", $"指示: {message}\n\n{refText}\n\n指示に沿って文書全体を書いてください。"),
+        };
+        var answer = new StringBuilder();
+        await _gw.ChatStreamAsync(_cfg.EnginePortLlm, messages, 0.0, 600, async delta =>
+        {
+            answer.Append(delta);
+            await Sse(ctx, "delta", new { content = delta });
+        }, ctx.RequestAborted);
+
+        var finalText = Draft.AssembleMarkdown(tpl.Label, auto,
+            outlineTitleFrom(message, answer.ToString()), new List<(string, string)> { ("本文", answer.ToString()) },
+            refs.Select(r => r.name).ToList());
         var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
         _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,'draft')",
-            ("$c", chatId), ("$m", md), ("$s", sourcesJson));
+            ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
         _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
-        await Sse(ctx, "done", new { cached = false, kind = "draft", template = tpl.Label, auto_inferred = auto, title = outline.Title, sources, ms = sw.ElapsedMilliseconds });
+        await Sse(ctx, "patch", new { content = finalText });
+        await Sse(ctx, "done", new { cached = false, kind = "draft", template = tpl.Label, auto_inferred = auto, title = outlineTitleFrom(message, answer.ToString()), sources, ms = sw.ElapsedMilliseconds });
+    }
+
+    /// <summary>下書きのタイトル決定: 生成文の先頭が「# 」見出しならそれを使い、無ければ指示文から作る</summary>
+    private static string outlineTitleFrom(string instruction, string generated)
+    {
+        foreach (var line in (generated ?? "").Split('\n'))
+        {
+            var t = line.Trim();
+            if (t.StartsWith("# ")) return t[2..].Trim();
+        }
+        return instruction.Length > 24 ? instruction[..24] : instruction;
     }
 }
