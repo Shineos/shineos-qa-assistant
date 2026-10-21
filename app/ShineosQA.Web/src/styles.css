@@ -367,3 +367,4 @@ button.small { padding: 5px 10px; font-size: 12px; }
 
 /* ブックマーク済みチャットの星アイコン（currentColorで塗りと線の両方に効く） */
 .bookmark-btn.bookmarked { color: #f59e0b; }
+.draft-hint { color: var(--muted); font-size: 11.5px; }
