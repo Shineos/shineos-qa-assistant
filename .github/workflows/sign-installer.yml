@@ -1,11 +1,15 @@
-# 社内知恵袋 v2 - インストーラ署名ワークフロー（SignPath Foundation）
+# 社内知恵袋 v2 - インストーラ署名ワークフロー（Azure Artifact Signing / SignPath）
 #
-# - 手動実行（workflow_dispatch）: 軽量インストーラをビルドし、SignPath REST API
-#   （scripts/sign_with_signpath.ps1）で SignPath Foundation のコード署名証明書で署名する。
-#   Microsoft Store ポリシー 10.2.9（Microsoft Trusted Root Program 参加CA発行の
-#   コード署名証明書）対応用。
-# - 署名ポリシーが手動承認を要求する場合、signpath.io で Approver が承認するまで
-#   このワークフローは待機する（最大60分）。
+# - 手動実行（workflow_dispatch）: 軽量インストーラをビルドし、選択したプロバイダで
+#   コード署名する。Microsoft Store ポリシー 10.2.9（Microsoft Trusted Root Program
+#   参加CA発行のコード署名証明書）対応用。
+# - signing_provider=azure（既定）: Azure Artifact Signing（旧Trusted Signing）。
+#   GitHub OIDC フェデレーション（Entra アプリ AZURE_CLIENT_ID）でパスワードレス認証し、
+#   azuresigntool（Azure.CodeSigning.SignTool）で Public Trust 証明書プロファイルにより署名。
+#   必要なリポジトリ変数: AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_SIGNING_ENDPOINT /
+#   AZURE_CERT_PROFILE_NAME（プロファイル名はcert_profile_name入力でも可）。
+# - signing_provider=signpath: 従来のSignPath REST API（scripts/sign_with_signpath.ps1）。
+#   署名ポリシーが手動承認を要求する場合、signpath.io で Approver が承認するまで待機（最大60分）。
 # - 成果物: 署名済み ShineosQA-Setup-<version>-lite.exe（Actions artifact）
 name: sign-installer
 
@@ -13,16 +17,25 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'インストーラのバージョン（例: 2.1.0）'
+        description: 'インストーラのバージョン（例: 2.6.0）'
         required: false
-        default: '2.1.0'
+        default: '2.6.0'
+      signing_provider:
+        description: '署名プロバイダ (azure | signpath)'
+        required: false
+        default: 'azure'
+      cert_profile_name:
+        description: 'Azure証明書プロファイル名（azure時・空ならvars.AZURE_CERT_PROFILE_NAME）'
+        required: false
+        default: ''
       sign_timeout_seconds:
-        description: '署名完了待ち上限秒（手動承認待ちを含む）'
+        description: 'SignPath署名完了待ち上限秒（手動承認待ちを含む）'
         required: false
         default: '3600'
 
 permissions:
   contents: read
+  id-token: write
 
 env:
   LLAMA_RELEASE_URL: https://github.com/ggml-org/llama.cpp/releases/download/b10936/llama-b10936-bin-win-cpu-x64.zip
@@ -56,7 +69,7 @@ jobs:
         run: |
           dotnet publish app/ShineosQA.Backend -c Release -r win-x64 --self-contained true -o output/backend-pub
           if ($LASTEXITCODE -ne 0) { throw "backend publish failed" }
-          Set-Content -Path output/backend-pub/version.txt -Value '${{ inputs.version || '2.1.0' }}'
+          Set-Content -Path output/backend-pub/version.txt -Value '${{ inputs.version || '2.6.0' }}'
 
       - name: Build WebView2 wrapper
         shell: pwsh
@@ -102,11 +115,41 @@ jobs:
       - name: Build installer (lite)
         shell: pwsh
         run: |
-          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=${{ inputs.version || '2.1.0' }}" '/DLiteBuild' 'installer/installer-v2.iss'
+          & 'C:\InnoSetup\ISCC.exe' "/DMyAppVersion=${{ inputs.version || '2.6.0' }}" '/DLiteBuild' 'installer/installer-v2.iss'
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
-          if (-not (Test-Path "dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe")) { throw "installer not found" }
+          if (-not (Test-Path "dist/ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite.exe")) { throw "installer not found" }
+
+      - name: Azure sign-in (OIDC)
+        if: ${{ inputs.signing_provider != 'signpath' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Sign with Azure Artifact Signing
+        if: ${{ inputs.signing_provider != 'signpath' }}
+        shell: pwsh
+        env:
+          AZURE_CERT_PROFILE_NAME_VAR: ${{ vars.AZURE_CERT_PROFILE_NAME }}
+        run: |
+          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite.exe"
+          $prof = '${{ inputs.cert_profile_name }}'
+          if (-not $prof) { $prof = $env:AZURE_CERT_PROFILE_NAME_VAR }
+          if (-not $prof) { throw "certificate profile name missing (input cert_profile_name or vars.AZURE_CERT_PROFILE_NAME)" }
+          dotnet tool install --global Azure.CodeSigning.SignTool
+          if ($LASTEXITCODE -ne 0) { throw "azuresigntool install failed" }
+          azuresigntool sign `
+            -kvu '${{ vars.AZURE_SIGNING_ENDPOINT }}' `
+            -kvc $prof `
+            -d "ShineosQA installer v${{ inputs.version || '2.6.0' }}" `
+            -du 'https://shineos.com' `
+            -tr 'http://timestamp.acs.microsoft.com' -td sha256 `
+            $exe
+          if ($LASTEXITCODE -ne 0) { throw "azuresigntool sign failed" }
 
       - name: Sign with SignPath
+        if: ${{ inputs.signing_provider == 'signpath' }}
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -114,7 +157,7 @@ jobs:
           SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
           SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
         run: |
-          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe"
+          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite.exe"
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/sign_with_signpath.ps1 `
             -ArtifactPath $exe -OutputPath $exe `
             -TimeoutSeconds ([int]'${{ inputs.sign_timeout_seconds || '3600' }}')
@@ -123,7 +166,7 @@ jobs:
       - name: Verify signature
         shell: pwsh
         run: |
-          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe"
+          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite.exe"
           $sig = Get-AuthenticodeSignature $exe
           Write-Output "Status: $($sig.Status)"
           Write-Output "StatusMessage: $($sig.StatusMessage)"
@@ -155,7 +198,7 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          VERSION: ${{ inputs.version || '2.1.0' }}
+          VERSION: ${{ inputs.version || '2.6.0' }}
         run: |
           if (-not $env:VERSION) { throw "VERSION input is empty" }
           $version = $env:VERSION
@@ -194,7 +237,7 @@ jobs:
       - name: Submission sheet (Partner Center)
         shell: pwsh
         env:
-          VERSION: ${{ inputs.version || '2.1.0' }}
+          VERSION: ${{ inputs.version || '2.6.0' }}
         run: |
           # 注意: VERSIONはenv経由。PowerShell変数 $VERSION は未定義(null)になるため必ず代入する
           if (-not $env:VERSION) { throw "VERSION input is empty" }
@@ -225,7 +268,7 @@ jobs:
       - name: Upload signed installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite-signed
-          path: dist/ShineosQA-Setup-${{ inputs.version || '2.1.0' }}-lite.exe
+          name: ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite-signed
+          path: dist/ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite.exe
           if-no-files-found: error
           compression-level: 0
