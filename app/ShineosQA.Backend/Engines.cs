@@ -257,6 +257,9 @@ public sealed class Supervisor
         var extra = _cfg.EngineVariant == "vulkan"
             ? new[] { "-ngl", "99", "-fa", fa }
             : new[] { "-fa", fa, "-ub", "2048" }; // pp大きなバッチ=スループット優先（初トークン前に一括処理のため純増）
+        // ※repeat-penaltyの追加は取り下げ（2026-10-23実測）: 1.1をかけると日本語出力が劣化
+        // （「慶弔」→「忦弔」の文字化けトークン、列挙項目の欠落）。繰り返し事象は
+        // ChatFlowの繰り返しガード（検出→1回再生成）で対処する
         // 大型MoEモデル（>5GB）はREPACKでRAM内コピーが作られてOOMするため --no-repack 必須（ds4方式）
         var modelPath = Path.Combine(_cfg.ModelsDir, _cfg.ChatModelFile);
         if (new FileInfo(modelPath).Length > 5L * 1024 * 1024 * 1024)

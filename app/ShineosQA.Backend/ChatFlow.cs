@@ -221,6 +221,35 @@ public sealed class ChatFlow
         await ctx.Response.Body.FlushAsync();
     }
 
+    // チャット処理の直列化（2026-10-23実機E2E）: llama-serverは単一インスタンスのため質問が
+    // 競合すると両方の応答が遅延・劣化する（prompt評価が通常の数倍に伸長を実測）。
+    // 2件目以降はphaseイベントで順番待ちを通知してから待つ。using宣言でメソッド末尾まで保持し、
+    // 要約/作成モードの早期return経路でも確実に解放する
+    private static readonly SemaphoreSlim ChatGate = new(1, 1);
+
+    private static async Task<IDisposable> EnterChatGateAsync(HttpContext ctx, CancellationToken ct)
+    {
+        if (await ChatGate.WaitAsync(0, ct)) return new ChatGateReleaser();
+        await Sse(ctx, "phase", new { text = "他の質問を処理中です。順番にお答えします…" });
+        // 待ち時間が長いとクライアント/中間層のボディタイムアウトで接続が切れるため
+        // 3秒ごとにSSEコメント(ping)を送り、10秒ごとに経過秒を通知する（2026-10-23実測）
+        var waits = 0;
+        while (!await ChatGate.WaitAsync(3000, ct))
+        {
+            waits++;
+            await ctx.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(": ping\n\n"));
+            await ctx.Response.Body.FlushAsync();
+            if (waits % 3 == 0)
+                await Sse(ctx, "phase", new { text = $"他の質問を処理中です… {waits * 3}秒経過" });
+        }
+        return new ChatGateReleaser();
+    }
+
+    private sealed class ChatGateReleaser : IDisposable
+    {
+        public void Dispose() => ChatGate.Release();
+    }
+
     public async Task RunAsync(HttpContext ctx)
     {
         using var body = await JsonDocument.ParseAsync(ctx.Request.Body);
@@ -260,6 +289,7 @@ public sealed class ChatFlow
             _db.Exec("UPDATE chats SET title=$t WHERE id=$c", ("$t", message.Length > 24 ? message.Substring(0, 24) : message), ("$c", chatId));
         }
         await Sse(ctx, "meta", new { chat_id = chatId, chat_uuid = chatUuid });
+        using var _chatGate = await EnterChatGateAsync(ctx, ctx.RequestAborted);
 
         // 会話コンテキスト: 同一チャットの直近やり取り（2往復・各250字）を記憶する
         var historyRows = _db.Query("SELECT role, content FROM messages WHERE chat_id=$c ORDER BY id DESC LIMIT 4", ("$c", chatId));
@@ -795,9 +825,43 @@ public sealed class ChatFlow
 
             // 連続同一文の畳み込み（繰り返し出力クセ対策・v2.3.2）: 出典行正規化の前に適用し、
             // DB・回答キャッシュには畳み後のテキストを保存する（キャッシュ経由で繰り返しを恒久化しない）
-            var collapsedText = Rag.CollapseDuplicateSentences(answer.ToString()) ?? answer.ToString();
-            if (collapsedText != answer.ToString())
+            var rawAnswer = answer.ToString();
+            var collapsedText = Rag.CollapseDuplicateSentences(rawAnswer) ?? rawAnswer;
+            if (collapsedText != rawAnswer)
+            {
                 _log.Info("repeat collapse: consecutive duplicated sentence removed");
+                // 繰り返しガード（2026-10-23実機E2Eの「回答が不自然」対応）: 小型モデルが同一文を
+                // 連発した場合、畳み込みだけでなくvalidation guardと同じくサイレント再生成→patchで
+                // 差し替える。短い重複は畳み込みで十分なため、回答がある程度長い場合のみ再生成
+                if (rawAnswer.Length >= 80 && !clarifyConfirm && !timeSensitive)
+                {
+                    try
+                    {
+                        _log.Warn("repeat guard: repetition detected — regenerating once");
+                        var retryMsgs = new List<(string, string)>(messages)
+                        {
+                            ("assistant", rawAnswer),
+                            ("user", "直前の回答は同じ文章を繰り返しています。繰り返しを無くし、【参照情報】の内容に基づいて簡潔に答え直してください。参照情報に該当が無い場合は「該当する記載がありません」と答えてください。")
+                        };
+                        var retry = new StringBuilder();
+                        await _gw.ChatStreamAsync(_cfg.EnginePortLlm, retryMsgs, 0.0, 300, _ => Task.CompletedTask, ctx.RequestAborted);
+                        var fixedText = retry.ToString();
+                        if (fixedText.Trim().Length > 0 && (Rag.CollapseDuplicateSentences(fixedText) ?? fixedText) == fixedText)
+                        {
+                            collapsedText = fixedText;
+                            _log.Info("repeat guard: regenerated answer is clean — replacing");
+                        }
+                        else
+                        {
+                            _log.Warn("repeat guard: regenerated answer still repetitive or empty — keeping collapsed");
+                        }
+                    }
+                    catch (Exception ex2)
+                    {
+                        _log.Warn("repeat regeneration failed: " + ex2.Message);
+                    }
+                }
+            }
 
             // 出典行を出典パネルと完全一致する正規形へ（モデルが省略・1件のみ記載するのを防止）
             var finalText = NormalizeSourcesLine(collapsedText, sources);

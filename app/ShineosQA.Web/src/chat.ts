@@ -1060,30 +1060,38 @@ export class ChatView {
     (document.getElementById('send-btn') as HTMLButtonElement).disabled = true;
     this.setStatus('', false); // 前回質問の残置ステータスを消す
     this.appendMessage('user', message, [], new Date(), captureUrl);
+    // 接続断の自動再送（2026-10-23）: meta受信前＝サーバに何も保存されていない初期接続失敗のときは
+    // バックエンド疎通確認のうえ1回だけ自動再送する。meta後（回答生成中）の切断は再送せず
+    // 分類したメッセージを出す（回答の二重表示・ユーザー発言の二重保存を避けるため）
+    let attempt = 0;
+    let leaving = false;
+    while (true) {
+    attempt++;
     const thinking = this.createThinking();
     let acc = '';
     let liveCard: HTMLElement | null = null;
     let liveBody: HTMLElement | null = null;
+    let gotMeta = false;
     const t0 = performance.now();
 
     try {
       // キャプチャ画像をローカル保存用に送る（data URL。サーバ側で data/files/captures/ に保存し過去チャットでも表示）
       const captureImage = captureFile ? await fileToDataUrl(captureFile) : undefined;
       // 1回限りの送信オプション（v2.4.1）: 文書要約の対象ファイルID・拒否回答からのWeb再送。
-      // 消費したら即クリア（通常送信・トグル状態には影響しない）
+      // 消費（null化）は送信成功後に行う。失敗時の自動再送で種・要約対象・Web再送フラグが
+      // 欠落するのを防ぐ（2026-10-23）
       const summaryFileId = this.pendingSummaryId;
       const webOverride = this.webOverrideOnce;
-      this.pendingSummaryId = null;
-      this.webOverrideOnce = null;
-      // 作成モード（v2.5.0）: ONなら指示としてdraftペイロードを送る。種は1回だけ消費
+      const seedSnapshot = this.draftMode ? this.draftSeed : null;
+      // 作成モード（v2.5.0）: ONなら指示としてdraftペイロードを送る
       const draftPayload = this.draftMode
-        ? { template: this.draftTemplate, seed: this.draftSeed ?? undefined }
+        ? { template: this.draftTemplate, seed: seedSnapshot ?? undefined }
         : undefined;
-      if (this.draftMode) this.draftSeed = null;
       await streamChat(
         { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined, draft: draftPayload },
         {
           meta: (d) => {
+            gotMeta = true;
             if (!this.chatUuid && d.chat_uuid) {
               this.chatUuid = d.chat_uuid;
               history.replaceState({}, '', `/c/${this.chatUuid}`);
@@ -1276,14 +1284,51 @@ export class ChatView {
           },
         },
       );
+      // 送信成功後にフラグを消費する（失敗時の自動再送で種・要約対象が欠落しないように）
+      this.pendingSummaryId = null;
+      this.webOverrideOnce = null;
+      if (this.draftMode) this.draftSeed = null;
+      leaving = true;
+      break;
     } catch (ex) {
+      const received = gotMeta || acc.length > 0 || liveCard !== null;
+      if (received || attempt >= 2) {
+        // 回答生成中の切断・2回連続失敗は再送せず、分類したメッセージを表示
+        thinking.remove();
+        this.appendMessage('assistant', `⚠️ ${this.classifySendError(ex)}`, [], new Date());
+        leaving = true;
+        break;
+      }
+      // meta未受信=サーバ側に何も保存されていない初期接続失敗。
+      // バックエンドが復帰していれば1回だけ自動再送する
+      const up = await fetch('/health', { signal: AbortSignal.timeout(3000) }).then(r => r.ok).catch(() => false);
+      if (!up) {
+        thinking.remove();
+        this.appendMessage('assistant', '⚠️ バックエンドが起動していません。アプリを再起動するか、少し待ってからもう一度送信してください。', [], new Date());
+        leaving = true;
+        break;
+      }
       thinking.remove();
-      this.appendMessage('assistant', `⚠️ 接続エラー: ${(ex as Error).message}`, [], new Date());
+      const msgs = document.getElementById('messages')!;
+      const stale = msgs.querySelector('.msg.user:last-of-type');
+      if (stale && (stale.textContent || '').includes(message.slice(0, 20))) stale.remove();
+      this.appendMessage('user', message, [], new Date(), captureUrl);
+      this.setStatus('⚠️ 接続が切れたため自動再送します…', false);
     } finally {
       thinking.remove();
-      this.sending = false;
-      (document.getElementById('send-btn') as HTMLButtonElement).disabled = false;
-      input.focus();
+      if (leaving) {
+        this.sending = false;
+        (document.getElementById('send-btn') as HTMLButtonElement).disabled = false;
+        input.focus();
+      }
     }
+    }
+  }
+
+  private classifySendError(ex: unknown): string {
+    const msg = ex instanceof Error ? ex.message : String(ex);
+    if (/failed to fetch|network ?error|load failed/i.test(msg)) return 'バックエンドに接続できませんでした。アプリが起動しているか確認してください。';
+    if (/abort|timed? ?out/i.test(msg)) return 'タイムアウトしました。もう一度お試しください。';
+    return '接続エラー: ' + msg;
   }
 }
