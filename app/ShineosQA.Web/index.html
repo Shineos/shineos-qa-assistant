@@ -46,7 +46,7 @@
           </div>
           <div id="chat-status" class="chat-status" hidden></div>
           <form id="chat-form" class="composer">
-            <textarea id="chat-input" rows="1" placeholder="質問を入力してください（Enterで送信 / Shift+Enterで改行）"></textarea>
+            <textarea id="chat-input" rows="1" placeholder="質問や文書作成の依頼を入力してください（Enterで送信 / Shift+Enterで改行）"></textarea>
             <div id="draft-host"></div>
             <div id="capture-host"></div>
             <input type="file" id="attach-input" multiple accept=".pdf,.docx,.md,.txt,.xlsx,.csv,.tsv" hidden />
@@ -68,10 +68,6 @@
               <button type="button" id="web-btn" class="tool-btn" title="Web検索（ONにすると質問が外部の検索サービスへ送信されます）">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
                 <span>Web検索</span>
-              </button>
-              <button type="button" id="draft-btn" class="tool-btn" title="作成モード（ONにすると質問文が文書作成の指示として扱われます。参照文書を選んで下書きを生成します）">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m13.4 10.6 2.9 2.9L8 21.8H5v-3z"/></svg>
-                <span>作成</span>
               </button>
               <span class="spacer"></span>
               <button type="submit" id="send-btn" class="send-btn" title="送信">

@@ -234,8 +234,6 @@ export class ChatView {
   private selTier = '';
   // 作成モード（v2.6.0）: ONで質問文=文書作成の指示。参照はナレッジ全体から自動検索するため
   // 選択操作はない（テンプレートのみ）。種（直前のQ&A）は1回だけ消費
-  private draftMode = false;
-  private draftTemplate = 'auto';
   private draftSeed: { question: string; answer: string } | null = null;
   // 1回限りの送信オプション（v2.4.1）: ナレッジ一覧「要約」ボタンの対象ファイル /
   // 拒否回答の「Webで検索する」チップからの再送（トグル状態は変更しない）
@@ -316,33 +314,15 @@ export class ChatView {
       void this.refreshList(); // ブックマークビュー中なら一覧の並びにも反映
     });
     webBtn.addEventListener('click', () => {
-      if (this.draftMode) return; // 作成モード中はWeb検索と排他
       this.webSearch = !this.webSearch;
       webBtn.classList.toggle('active', this.webSearch);
     });
-    // 作成モード（v2.5.0）: ONで質問文が文書作成の指示になる。Web検索とは排他
-    const draftBtn = document.getElementById('draft-btn') as HTMLButtonElement;
-    draftBtn.addEventListener('click', () => {
-      this.draftMode = !this.draftMode;
-      draftBtn.classList.toggle('active', this.draftMode);
-      if (this.draftMode) {
-        this.draftSeed = null;
-        this.webSearch = false;
-        webBtn.classList.remove('active');
-      }
-      this.renderDraftPanel();
-    });
-    // 作成モード中は入力欄へのドラッグ＆ドロップで参照ファイルを追加（＋追加と同経路・v2.5.1）
+    // 作成モードのトグルは廃止（2026-10-23・Dify式UX）: 文書作成の意図はバックエンドの
+    // 意図自動判定（Draft.LooksLikeCreationRequest）で振り分けるため、ユーザーはモードを
+    // 意識せず1つの入力箱だけで使える。「資料にする」ボタンは種付きの1回だけ再送として動く
     const chatForm = document.getElementById('chat-form')!;
-    chatForm.addEventListener('dragover', (e) => {
-      if (this.draftMode && e.dataTransfer?.types.includes('Files')) {
-        e.preventDefault();
-        chatForm.classList.add('over');
-      }
-    });
     chatForm.addEventListener('dragleave', () => chatForm.classList.remove('over'));
     chatForm.addEventListener('drop', (e) => {
-      if (!this.draftMode) return;
       const files = [...(e.dataTransfer?.files ?? [])];
       if (files.length === 0) return;
       e.preventDefault();
@@ -397,8 +377,8 @@ export class ChatView {
       // 拡張パックON時は入力欄にキャプチャ機能の存在を案内する（ボタンだけでは気づきにくい）
       // 絵文字は使わない（アイコンはコンポーザーのSVGボタンに統一）
       input.placeholder = this.packDrawing
-        ? '質問を入力してください（Enterで送信 / 図面キャプチャの貼り付けも可能）'
-        : '質問を入力してください（Enterで送信 / Shift+Enterで改行）';
+        ? '質問や文書作成の依頼を入力してください（Enterで送信 / 図面キャプチャの貼り付けも可能）'
+        : '質問や文書作成の依頼を入力してください（Enterで送信 / Shift+Enterで改行）';
     } catch { /* 設定取得失敗時は現状維持 */ }
   }
   /** 現在のチャットのURLパス（タブ復帰用） */
@@ -961,48 +941,24 @@ export class ChatView {
     el.hidden = !show || !text;
   }
 
-  /** 作成モードのインラインパネル（v2.6.0）: テンプレート選択のみ。参照はナレッジ全体から
-   * 自動検索するため選択操作はない（ご指摘: いちいちドキュメントを選ぶのは違和感）。
-   * 登録済みナレッジは全て自動で参照候補になる */
-  private async renderDraftPanel(): Promise<void> {
+  /** 作成モードのインラインパネル（v2.6.0→v2.6.3で簡素化）: トグル廃止に伴いテンプレート選択は
+   * サーバの自動判定へ。残る表示は「資料にする」で設定された種のチップのみ */
+  private renderDraftPanel(): void {
     const host = document.getElementById('draft-host')!;
-    const webBtn = document.getElementById('web-btn') as HTMLButtonElement;
-    webBtn.disabled = this.draftMode;
-    webBtn.title = this.draftMode ? '作成モード中は使用できません（作成をOFFにすると使えます）' : 'Web検索（ONにすると質問が外部の検索サービスへ送信されます）';
-    if (!this.draftMode) { host.innerHTML = ''; return; }
-
+    if (!this.draftSeed) { host.innerHTML = ''; return; }
     const box = document.createElement('div');
     box.className = 'draft-panel';
-    const tplRow = document.createElement('div');
-    tplRow.className = 'draft-row';
-    tplRow.innerHTML = '<span class="draft-label">テンプレート</span>';
-    const sel = document.createElement('select');
-    sel.className = 'draft-select';
-    sel.innerHTML = '<option value="auto">自動（指示から判定）</option>' +
-      '<option value="procedure">手順書</option><option value="report">報告書</option>' +
-      '<option value="proposal">提案書</option><option value="faq">FAQ集</option><option value="free">自由形式</option>';
-    sel.value = this.draftTemplate;
-    sel.addEventListener('change', () => { this.draftTemplate = sel.value; });
-    tplRow.appendChild(sel);
-    const hint = document.createElement('span');
-    hint.className = 'draft-hint';
-    hint.textContent = 'ナレッジに登録した文書は自動で参照されます';
-    tplRow.appendChild(hint);
-    box.appendChild(tplRow);
-
-    if (this.draftSeed) {
-      const seed = document.createElement('div');
-      seed.className = 'draft-seed';
-      seed.textContent = '直前の回答とその出典を種にします（指示文で内容を調整できます）';
-      const off = document.createElement('button');
-      off.type = 'button';
-      off.className = 'icon-btn';
-      off.textContent = '×';
-      off.title = '種を解除';
-      off.addEventListener('click', () => { this.draftSeed = null; void this.renderDraftPanel(); });
-      seed.appendChild(off);
-      box.appendChild(seed);
-    }
+    const seed = document.createElement('div');
+    seed.className = 'draft-seed';
+    seed.textContent = '直前の回答とその出典を種にします（指示文で内容を調整できます）';
+    const off = document.createElement('button');
+    off.type = 'button';
+    off.className = 'icon-btn';
+    off.textContent = '×';
+    off.title = '種を解除';
+    off.addEventListener('click', () => { this.draftSeed = null; this.renderDraftPanel(); });
+    seed.appendChild(off);
+    box.appendChild(seed);
     host.innerHTML = '';
     host.appendChild(box);
   }
@@ -1022,15 +978,11 @@ export class ChatView {
     }
   }
 
-  /** 「資料にする」（回答→下書き）: 作成モードON+種の事前入力（v2.5.0）。
-   * 参照は自動検索（v2.6.0）のため選択は不要。出典は回答表示で確認済みの想定 */
+  /** 「資料にする」（回答→下書き）: 種の事前入力（v2.5.0）。
+   * 参照は自動検索（v2.6.0）のため選択は不要。送信時にdraftペイロードとして消費される */
   private startDraftFromAnswer(answer: string): void {
-    this.draftMode = true;
     this.draftSeed = { question: this.lastUserText, answer };
-    this.draftTemplate = 'auto';
-    const draftBtn = document.getElementById('draft-btn') as HTMLButtonElement;
-    draftBtn.classList.add('active');
-    void this.renderDraftPanel();
+    this.renderDraftPanel();
     const input = document.getElementById('chat-input') as HTMLTextAreaElement;
     input.value = 'この回答をもとにFAQ集を作成して';
     input.style.height = 'auto';
@@ -1082,10 +1034,11 @@ export class ChatView {
       // 欠落するのを防ぐ（2026-10-23）
       const summaryFileId = this.pendingSummaryId;
       const webOverride = this.webOverrideOnce;
-      const seedSnapshot = this.draftMode ? this.draftSeed : null;
-      // 作成モード（v2.5.0）: ONなら指示としてdraftペイロードを送る
-      const draftPayload = this.draftMode
-        ? { template: this.draftTemplate, seed: seedSnapshot ?? undefined }
+      const seedSnapshot = this.draftSeed;
+      // 種が設定されている場合（「資料にする」フロー）はdraftペイロードで送る。
+      // 通常の文書作成依頼（「〜を作成してください」）はバックエンドの意図自動判定で振り分けられる
+      const draftPayload = seedSnapshot
+        ? { template: 'auto', seed: seedSnapshot ?? undefined }
         : undefined;
       await streamChat(
         { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined, draft: draftPayload },
@@ -1287,7 +1240,7 @@ export class ChatView {
       // 送信成功後にフラグを消費する（失敗時の自動再送で種・要約対象が欠落しないように）
       this.pendingSummaryId = null;
       this.webOverrideOnce = null;
-      if (this.draftMode) this.draftSeed = null;
+      this.draftSeed = null; // 消費（失敗時の自動再送で種が欠落しないよう成功後に消す）
       leaving = true;
       break;
     } catch (ex) {
