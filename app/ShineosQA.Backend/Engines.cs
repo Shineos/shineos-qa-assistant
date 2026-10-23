@@ -279,11 +279,14 @@ public sealed class Supervisor
     /// ChatFlow/Ingest の自己修復呼び出し（StartEmbedAndRank）がオンデマンドで再起動する</summary>
     private async Task IdleLoopAsync()
     {
-        var llmIdle = TimeSpan.FromMinutes(Math.Max(1, _cfg.IdleUnloadMinutes));
         DateTime? rankDueAt = null, embDueAt = null;
         while (true)
         {
             await Task.Delay(TimeSpan.FromMinutes(1));
+            // 設定UIから変更されるため毎ループでcfgを読む。0=無効（常駐: 放置後の初回質問も即答）。
+            // 無効へ切り替えた場合は解放予定も取り消す
+            if (_cfg.IdleUnloadMinutes <= 0) { rankDueAt = null; embDueAt = null; continue; }
+            var llmIdle = TimeSpan.FromMinutes(Math.Max(1, _cfg.IdleUnloadMinutes));
             EngineProc? toStopLlm = null, toStopRank = null, toStopEmb = null, toStopVision = null;
             lock (_lock)
             {

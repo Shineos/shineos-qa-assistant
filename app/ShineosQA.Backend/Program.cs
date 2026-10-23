@@ -59,7 +59,7 @@ public static class Api
         {
             web_search = bool.TryParse(db.GetSetting("web_search", cfg.WebSearch.ToString()), out var w) && w,
             tier = db.GetSetting("tier", "auto"),
-            idle_unload_minutes = cfg.IdleUnloadMinutes,
+            idle_unload_minutes = int.TryParse(db.GetSetting("idle_unload_minutes", cfg.IdleUnloadMinutes.ToString()), out var idleMin) ? idleMin : cfg.IdleUnloadMinutes,
             bg_friendly = bool.TryParse(db.GetSetting("bg_friendly", cfg.BgFriendly.ToString()), out var b) && b,
             extensions = new { drawing = Extensions.IsEnabled(db, Extensions.DrawingId) },
         }));
@@ -100,6 +100,15 @@ public static class Api
                             Extensions.SetEnabled(db, Extensions.DrawingId, e.Value.GetBoolean());
                 if (p.Name == "ext.drawing" && p.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
                     Extensions.SetEnabled(db, Extensions.DrawingId, p.Value.GetBoolean());
+                // アイドル停止までの時間（分）。0=無効（エンジン常駐・放置後も即答）。
+                // IdleLoopAsyncが毎ループでcfgを読むため即時反映される
+                if (p.Name == "idle_unload_minutes" && p.Value.ValueKind == JsonValueKind.Number)
+                {
+                    var idle = p.Value.GetInt32();
+                    if (idle is < 0 or > 240) idle = 60;
+                    cfg.IdleUnloadMinutes = idle;
+                    db.SetSetting("idle_unload_minutes", idle.ToString());
+                }
             }
             return Results.Ok(new { ok = true });
         });

@@ -60,6 +60,15 @@ export class SettingsView {
           </div>
           <label class="switch"><input type="checkbox" id="set-bg" ${settings.bg_friendly ? 'checked' : ''} /><span class="slider"></span></label>
         </div>
+        <div class="setting-row">
+          <div class="setting-text"><b>アイドル停止までの時間</b><span>この時間AIを使わないとエンジンを停止して省電力化します（無効で常駐＝放置後の初回質問もすぐ答えます）</span></div>
+          <select id="set-idle">
+            <option value="30" ${settings.idle_unload_minutes === 30 ? 'selected' : ''}>30分</option>
+            <option value="60" ${settings.idle_unload_minutes === 60 ? 'selected' : ''}>60分</option>
+            <option value="120" ${settings.idle_unload_minutes === 120 ? 'selected' : ''}>120分</option>
+            <option value="0" ${settings.idle_unload_minutes === 0 ? 'selected' : ''}>無効（常駐）</option>
+          </select>
+        </div>
       </div>
       <div id="models-host"></div>
       <div class="settings-card">
@@ -86,6 +95,9 @@ export class SettingsView {
     });
     document.getElementById('set-bg')!.addEventListener('change', async (e) => {
       await api.saveSettings({ bg_friendly: (e.target as HTMLInputElement).checked });
+    });
+    document.getElementById('set-idle')!.addEventListener('change', async (e) => {
+      await api.saveSettings({ idle_unload_minutes: Number((e.target as HTMLSelectElement).value) });
     });
     // 拡張パック（図面検索・Excel/CSV）: 即時反映。取り込み済み図面件数をカード内に表示
     const extDrawingCount = await api.knowledge().then(fs => fs.filter(f => f.kind === 'drawing').length).catch(() => 0);

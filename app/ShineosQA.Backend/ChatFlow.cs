@@ -250,6 +250,10 @@ public sealed class ChatFlow
         public void Dispose() => ChatGate.Release();
     }
 
+    /// <summary>全量常駐モードの閾値: チャンク合計がこの文字数以下なら検索/リランクをスキップし
+    /// 全文をプロンプトへ注入する（2026-10-23・Dify FAQボット式の全量コンテキスト設計）</summary>
+    private const int FullContextMaxChars = 3000;
+
     public async Task RunAsync(HttpContext ctx)
     {
         using var body = await JsonDocument.ParseAsync(ctx.Request.Body);
@@ -411,12 +415,40 @@ public sealed class ChatFlow
                 await Sse(ctx, "web", new { results = webResults ?? new List<WebSearch.WebResult>(), error = webFailed ? "Web検索の結果を取得できませんでした（ナレッジのみで回答します）" : null });
             }
 
-            // 4) ハイブリッド検索 top8
+            // 4) ハイブリッド検索 top8。ナレッジ合計が小さい(≤3,000字)場合は全量常駐モード:
+            // 検索・リランク・スニペット化をスキップし全文を【参照情報】へ注入する
+            // （Dify FAQボットと同じ「全量コンテキスト」設計。検索ミス・スニペット切断が構造的に起きず、
+            //   embed後の検索/リランク待ちも消える。KB拡大時は自動で従来のRAGへ戻る）
             var qTokens = Rag.Tokenize(queryForRetrieval).ToHashSet();
-            var hits = _index.Search(qEmb, qTokens, Rag.RerankPool);
-            // 図面チャンクの判別（意図ブーストとスニペット免除で共用。files は小型テーブルなので都度照会で即時反映）
             var drawingIds = _db.Query("SELECT file_id FROM files WHERE kind='drawing'")
                 .Select(r => Convert.ToInt64(r["file_id"] ?? 0L)).ToHashSet();
+            string webNote = webFailed ? "\n※Web検索に失敗したため、社内ナレッジのみで判定しています。" : "";
+            var docs = new List<string>();
+            var sources = new List<SourceInfo>();
+            List<ChunkIndex.HybridHit> chosen = new();
+            bool rerankValidated = true;  // 全量モード=全文注入のため弱一致バックストップの対象外
+            var rerankTop1 = double.NegativeInfinity; // リランク実行時のtop1スコア（低信頼×低Kw判定用・未実行時は∞で不発）
+            long totalChars = -1;
+            try { totalChars = Convert.ToInt64(_db.Scalar("SELECT COALESCE(SUM(LENGTH(text)),0) FROM chunks")); } catch { }
+            bool fullContext = totalChars > 0 && totalChars <= FullContextMaxChars;
+            string fullKb = ""; // 全量モードの社内文書全文（systemブロックへ入れる）
+            List<ChunkIndex.HybridHit> hits = new(); // 全量モードでは未使用（図番あいまい性スキャンはchosenで代替）
+            if (fullContext)
+            {
+                foreach (var row in _db.Query("SELECT f.name AS name, c.text AS text, c.file_id AS fid FROM chunks c JOIN files f ON f.file_id = c.file_id ORDER BY f.file_id, c.seq"))
+                {
+                    var fid = Convert.ToInt64(row["fid"] ?? 0L);
+                    var text = Convert.ToString(row["text"]) ?? "";
+                    chosen.Add(new ChunkIndex.HybridHit { Rec = new ChunkIndex.Rec(fid, fid, Convert.ToString(row["name"]) ?? "?", 0, text, Array.Empty<float>(), new HashSet<string>()) });
+                    docs.Add(text);
+                }
+                fullKb = string.Join("\n\n", docs);
+                _log.Info($"full-context mode: {chosen.Count} chunks / {totalChars} chars injected (search+rerank skipped)");
+            }
+            else
+            {
+            hits = _index.Search(qEmb, qTokens, Rag.RerankPool);
+            // 図面チャンクの判別（意図ブーストとスニペット免除で共用。files は小型テーブルなので都度照会で即時反映）
             // 図面意図ブースト: 「図面/図番」や図番パターンを含む質問では、寸法数値ノイズでキーワード一致が
             // 希薄になる図面チャンクを広めのプールから上位へ浮上させる（実図面検証cr02の根本対策）。
             // リランク以降の判断は変わらないため、通常質問への影響はこの分岐の外に出ない
@@ -427,7 +459,6 @@ public sealed class ChatFlow
                     if (drawingIds.Contains(h.Rec.FileId)) h.Hybrid *= 1.4;
                 hits = pool.OrderByDescending(h => h.Hybrid).Take(Rag.RerankPool).ToList();
             }
-            string webNote = webFailed ? "\n※Web検索に失敗したため、社内ナレッジのみで判定しています。" : "";
             // 日付感応質問（「今日は何日」「今何時」等）は参照情報がなくてもシステム日時から
             // 直接回答する（PCのシステム時計が根拠。ガードで「該当なし」にしない）
             if (hits.Count == 0 && string.IsNullOrEmpty(webContext) && !timeSensitive)
@@ -443,11 +474,9 @@ public sealed class ChatFlow
             // 注意: 160字への圧縮は実測で品質を落とした（Golden QA 108→101/118。タクシー22時・会議室等の
             // 事実が窓外に切れた）。240字が実測上の最適点
             var qTokForSnip = qTokens;
-            var docs = hits.Select(h => Rag.Snippet(h.Rec.Text, qTokForSnip, 240)).ToList();
-            var sources = new List<SourceInfo>();
-            List<ChunkIndex.HybridHit> chosen = hits;
-            bool rerankValidated = false; // リランクを実行しガード(GuardThreshold)を通過→弱一致バックストップの対象外
-            var rerankTop1 = double.NegativeInfinity; // リランク実行時のtop1スコア（低信頼×低Kw判定用・未実行時は∞で不発）
+            docs = hits.Select(h => Rag.Snippet(h.Rec.Text, qTokForSnip, 240)).ToList();
+            chosen = hits;
+            rerankValidated = false; // リランクを実行しガード(GuardThreshold)を通過→弱一致バックストップの対象外
             if (docs.Count > 0)
             {
                 // 高信頼ショートカット: ベクトル・キーワードがともに強一致ならリランク（実測~2秒）を省略して
@@ -503,6 +532,7 @@ public sealed class ChatFlow
                     }
                 }
             }
+            } // end else (従来RAG経路)
             // 回答材料が全く無い場合（Web検索0件＋タイムセンシティブ等）: 空回答の代わりに再試行を案内。
             // Web検索OFF（未試行）なのに「検索に失敗」と案内するのは誤解を招くため、文言を分岐する
             if (chosen.Count == 0 && (webResults == null || webResults.Count == 0) && string.IsNullOrEmpty(webContext))
@@ -525,7 +555,7 @@ public sealed class ChatFlow
             // Maxの引数を0にすると IsWeakMatch はWeb文脈/時間感応で免除されるため実質無害
             // （v2.2.0から潜在・Web検索ON×KB全棄却で初めて到達する経路。実機E2Eで発見）
             var maxKw = chosen.Count > 0 ? chosen.Max(h => h.Kw) : 0;
-            if (Rag.IsWeakMatch(maxKw,
+            if (!fullContext && Rag.IsWeakMatch(maxKw,
                     hasWebContext: !string.IsNullOrEmpty(webContext),
                     timeSensitive: timeSensitive,
                     drawingIntent: Rag.HasDrawingIntent(message),
@@ -543,7 +573,7 @@ public sealed class ChatFlow
             // 表層のみ類似の無関係チャンクで一般知識+偽出典回答ができる最後の経路を塞ぐ
             // （実測: 正解top1≥+7.3 vs 無関係≤-10.6 — グレー帯に落ちる半端な組み合わせのみ拒否）。
             // 言い換えヒット(top1≥RerankHighConf)とキーワード確認済み(maxKw≥MinAcceptKw)は通す
-            if (Rag.IsLowConfidenceWeak(rerankTop1, maxKw, rerankValidated)
+            if (!fullContext && Rag.IsLowConfidenceWeak(rerankTop1, maxKw, rerankValidated)
                 && string.IsNullOrEmpty(webContext) && !timeSensitive && !Rag.HasDrawingIntent(message))
             {
                 _log.Info($"low-conf guard: rerankTop1={rerankTop1:F2} kw={maxKw:F2} — 該当なし拒否へ（偽出典防止）: {Truncate(message, 40)}");
@@ -646,7 +676,8 @@ public sealed class ChatFlow
             {
                 var qZubanNorm = DrawingIngest.ZubansIn(message).FirstOrDefault();
                 var ambScan = new List<(ChunkIndex.HybridHit Hit, string ZubanNorm)>();
-                foreach (var h in (qZubanNorm != null ? hits : chosen))
+                // 全量モードではchosen=全チャンク（検索プールの代わりに全文から走査する）
+                foreach (var h in (fullContext ? chosen : (qZubanNorm != null ? hits : chosen)))
                 {
                     if (!drawingIds.Contains(h.Rec.FileId)) continue;
                     var z = DrawingMetaOfFile(h.Rec.FileId)?.Zuban;
@@ -708,6 +739,9 @@ public sealed class ChatFlow
             }
             var covered = new HashSet<(long, int)>();
             var ctxDocs = new List<(string, string)>();
+            // 全量常駐モード: 社内文書全文はsystemブロックへ置く（質問間で不変＝プリフィックス
+            // キャッシュが効き、2問目以降のプリフィルが質問部分だけになる）。ctxPartには入れない
+            if (!fullContext)
             foreach (var h in chosen)
             {
                 // 直前チャンクとの連結で既に含めた続きチャンクは二重注入しない
@@ -718,11 +752,15 @@ public sealed class ChatFlow
                 // 図面チャンク（1枚=1チャンク・テキスト量は取り込み時に DrawingIngest.MaxTextChars で上限）は
                 // スニペット化せず全文注入する: 240字の窓は寸法ノイズの間に散らばる表題欄・注記を切断し、
                 // 「チャンク内に記載があるのに模型に渡らない」実図面検証cr02（JIS B 0405-m）の原因だった
-                if (!drawingIds.Contains(h.Rec.FileId)) merged = Rag.Snippet(merged, qTokens);
+                // 全量常駐モードも全文注入（スニペット化すると全量モードの趣旨＝取りこぼしゼロが損なわれる）
+                if (!fullContext && !drawingIds.Contains(h.Rec.FileId)) merged = Rag.Snippet(merged, qTokens);
                 ctxDocs.Add((h.Rec.FileName, merged));
             }
             var context = Rag.BuildContext(ctxDocs, webContext);
-            var messages = new List<(string, string)> { ("system", Rag.SystemPrompt + Rag.CurrentDateLine()) };
+            // 全量常駐モード: 社内文書全文をsystemブロックへ（質問間で不変＝プリフィックスキャッシュ有効）
+            var sysText = Rag.SystemPrompt + Rag.CurrentDateLine()
+                + (fullContext ? "\n\n【社内文書（全文）】\n" + fullKb : "");
+            var messages = new List<(string, string)> { ("system", sysText) };
             // Web参照が大きい場合は履歴を直近1往復に削る（ctx=2048の予算内に本文を優先して入れるため。
             // フォローアップ文脈は検索クエリ書き換え時に既に織り込み済み）
             var promptHistory = webContext != null && webContext.Length > 600 && history.Count > 2
@@ -865,6 +903,10 @@ public sealed class ChatFlow
 
             // 出典行を出典パネルと完全一致する正規形へ（モデルが省略・1件のみ記載するのを防止）
             var finalText = NormalizeSourcesLine(collapsedText, sources);
+            // 出典表記の自然化（2026-10-23）: 出典は出典パネル（sources_json→UIの出典チップ/パネル）が担うため
+            // 本文から「出典：○○.md」行を除く。モデルが参照スニペット見出しを写して付与する行の掃除
+            finalText = System.Text.RegularExpressions.Regex.Replace(
+                finalText, "^[ \\t]*出典[：:].*$", "", System.Text.RegularExpressions.RegexOptions.Multiline).Trim();
             if (finalText != answer.ToString())
                 await Sse(ctx, "patch", new { content = finalText });
 
