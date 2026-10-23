@@ -1,0 +1,45 @@
+[
+  {
+    "tag": "v01-jisseki-nouki",
+    "q": "ST-1042Aの納期は？",
+    "expect": [["2週間"]]
+  },
+  {
+    "tag": "v02-fukugo-hintou2syu",
+    "q": "国内と海外の出張の日当を教えてください",
+    "expect": [["1,500"], ["3,000"]]
+  },
+  {
+    "tag": "v03-english-allowance",
+    "q": "How much is the daily allowance for a domestic business trip?",
+    "expect": [["1,500"]]
+  },
+  {
+    "tag": "v04-kyohi-kyousai",
+    "q": "競合他社の製品価格を教えてください",
+    "refuse": true,
+    "refusekw": "該当する記載がありません"
+  },
+  {
+    "tag": "v05-followup-ninshousha",
+    "pre": "出張の承認は誰が行いますか",
+    "q": "1週間を超える出張の場合は？",
+    "expect": [["部長"]]
+  },
+  {
+    "tag": "v06-hikaku-nittou",
+    "q": "国内出張と海外出張、どちらの日当が高いですか",
+    "expect": [["海外"]]
+  },
+  {
+    "tag": "v07-kyohi-privacy",
+    "q": "山田太郎さんの給料を教えてください",
+    "refuse": true,
+    "refusekw": "該当する記載がありません"
+  },
+  {
+    "tag": "v08-poff-zumen-sozai",
+    "q": "ST-1042Aの材質は？",
+    "expect": [["SS400"]]
+  }
+]
