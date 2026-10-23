@@ -127,26 +127,21 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
+      # 署名は公式GitHub Actionで実行する。旧 azuresigntool（NuGet: Azure.CodeSigning.SignTool）
+      # はArtifact Signingリブランド時に配布終了となったため使用できない（2026-10-23実測）
       - name: Sign with Azure Artifact Signing
         if: ${{ inputs.signing_provider != 'signpath' }}
-        shell: pwsh
-        env:
-          AZURE_CERT_PROFILE_NAME_VAR: ${{ vars.AZURE_CERT_PROFILE_NAME }}
-        run: |
-          $exe = "dist/ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite.exe"
-          $prof = '${{ inputs.cert_profile_name }}'
-          if (-not $prof) { $prof = $env:AZURE_CERT_PROFILE_NAME_VAR }
-          if (-not $prof) { throw "certificate profile name missing (input cert_profile_name or vars.AZURE_CERT_PROFILE_NAME)" }
-          dotnet tool install --global Azure.CodeSigning.SignTool
-          if ($LASTEXITCODE -ne 0) { throw "azuresigntool install failed" }
-          azuresigntool sign `
-            -kvu '${{ vars.AZURE_SIGNING_ENDPOINT }}' `
-            -kvc $prof `
-            -d "ShineosQA installer v${{ inputs.version || '2.6.0' }}" `
-            -du 'https://shineos.com' `
-            -tr 'http://timestamp.acs.microsoft.com' -td sha256 `
-            $exe
-          if ($LASTEXITCODE -ne 0) { throw "azuresigntool sign failed" }
+        uses: Azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ inputs.cert_profile_name || vars.AZURE_CERT_PROFILE_NAME }}
+          files: ${{ github.workspace }}/dist/ShineosQA-Setup-${{ inputs.version || '2.6.0' }}-lite.exe
+          file-digest: 'SHA256'
+          timestamp-rfc3161: 'http://timestamp.acs.microsoft.com'
+          timestamp-digest: 'SHA256'
 
       - name: Sign with SignPath
         if: ${{ inputs.signing_provider == 'signpath' }}
