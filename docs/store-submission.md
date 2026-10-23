@@ -99,7 +99,7 @@
 
 | フォーム項目 | 入力値 |
 |---|---|
-| パッケージURL（Package URL・必須） | `https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-2.6.1-lite.exe`（**lite版**・モデル非同梱・**54,901,632バイト・SHA256 `ebae7cf423482ea1906edf5b7daff8fcaaeeb0010288d001d2cac27a0c39aab2`（2026-10-23実DLで全文検証）・署名済みビルド**（2026-10-23にAzure Artifact Signingへ完全移行後の初回署名。署名者 `CN=株式会社シャイオス`・Get-AuthenticodeSignatureでStatus=Valid確認。CI: sign-installer.yml run 39917673926）。前回提出分: `ShineosQA-Setup-2.1.0-lite.exe`（47,944,976バイト・SHA256 `b8ab7521…`・2026-10-10実DL検証済み）。**提出後のバイナリ変更は不可** — 現行オブジェクトが申請・審査・配信の対象） |
+| パッケージURL（Package URL・必須） | `https://pub-cbe981f96fcc423d8c28124ab0fccba5.r2.dev/ShineosQA-Setup-2.6.2-lite.exe`（**lite版**・モデル非同梱・**54,903,472バイト・SHA256 `36dcbb2f9c12cdd293015bd295644866aa81bc95ceea8b5149713a5fca7334d3`（2026-10-23実DLで全文検証）・署名済みビルド**（Azure Artifact Signing・署名者 `CN=株式会社シャイオス`・Get-AuthenticodeSignature Status=Valid確認。CI: sign-installer.yml run 39946426081）。前回提出分: 2.6.1-lite（54,901,632バイト・SHA256 `ebae7cf4…`）。**提出後のバイナリ変更は不可** — 現行オブジェクトが申請・審査・配信の対象） |
 | アーキテクチャ（Architecture・必須） | `x64` |
 | 言語（Languages・必須） | `日本語`（`ja`）（英語圏listingを登録する場合は英語も追加可） |
 | アプリの種類（App type・必須） | `EXE` |
