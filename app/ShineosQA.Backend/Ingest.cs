@@ -267,6 +267,7 @@ public sealed class Ingest
                             InvalidDataException? ocrErr = null;
                             try { ocr = await OcrPdfFallbackAsync(bytes, ct); }
                             catch (InvalidDataException ex) { ocrErr = ex; } // OCR不可（言語パック無し等）→ VL救済へ
+                            catch (Exception ex) { ocrErr = new InvalidDataException("OCR救済でエラー: " + (string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message)); } // 破損PDF等のレンダリング例外。空メッセージのままUIに出るのを防ぐ（2026-10-23実機E2Eで発見）
                             if (ocr != null)
                             {
                                 var firstDim = ocr.PageDims.Count > 0 ? ocr.PageDims[0] : (0f, 0f);
@@ -335,8 +336,10 @@ public sealed class Ingest
                     text = ExtractText(fileName, new MemoryStream(bytes));
                 }
 
-                // 拡張パック: 元ファイルを保存（「開く」・サムネイル・データ資産化の前提。失敗しても取り込みは続行）
-                if (packOn) SaveOriginal(fileId, ext, bytes);
+                // 元ファイルを常時保存（「開く」・出典プレビュー・ダウンロードの前提。失敗しても取り込みは続行）。
+                // ※拡張パックON時限定で保存していた期の不具合: パックOFF環境では /api/knowledge/{id}/file・
+                //   /preview が常に404になり、取り込んだ文書を後から開けなかった（2026-10-23実機E2Eで発見）
+                SaveOriginal(fileId, ext, bytes);
 
                 var chunks = new List<string>();
                 bool isDrawing = false;

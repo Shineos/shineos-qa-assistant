@@ -116,7 +116,7 @@ public static class Api
                 // ブックマークビュー: アーカイブ済みも含めて星を付けた会話だけを一覧する
                 if (q.Length > 0)
                     return Results.Json(db.Query(
-                        "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived, c.bookmarked FROM chats c JOIN messages m ON m.chat_id = c.id " +
+                        "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived, c.bookmarked FROM chats c LEFT JOIN messages m ON m.chat_id = c.id " +
                         "WHERE c.bookmarked = 1 AND (c.title LIKE $like OR m.content LIKE $like) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50",
                         ("$like", like)));
                 return Results.Json(db.Query(
@@ -124,8 +124,10 @@ public static class Api
             }
             if (q.Length > 0)
             {
+                // LEFT JOIN: メッセージ0件のチャット（リネーム直後の新規チャット等）もタイトル検索に
+                // ヒットさせる（JOINだと本文のないチャットが検索結果から消える・2026-10-23実機E2Eで発見）
                 return Results.Json(db.Query(
-                    "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived, c.bookmarked FROM chats c JOIN messages m ON m.chat_id = c.id " +
+                    "SELECT DISTINCT c.uuid, c.id, c.title, c.updated_at, c.archived, c.bookmarked FROM chats c LEFT JOIN messages m ON m.chat_id = c.id " +
                     "WHERE c.archived = $a AND (c.title LIKE $like OR m.content LIKE $like) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50",
                     ("$like", like), ("$a", archived)));
             }
@@ -310,10 +312,11 @@ public static class Api
             var q = (req.Query["q"].ToString() ?? "").Trim();
             var like = $"%{q}%";
             var norm = q.Length > 0 ? $"%{Rag.NormalizeZuban(q)}%" : "";
+            // added_at はUTC保存のため表示時にローカル時刻へ変換する（UTCのままだと日本時間で9時間前表示になる・2026-10-23実機E2Eで発見）
             var sql = q.Length == 0
-                ? "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, f.added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
+                ? "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, datetime(f.added_at, 'localtime') AS added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
                   "FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id ORDER BY f.file_id DESC"
-                : "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, f.added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
+                : "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, datetime(f.added_at, 'localtime') AS added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
                   "FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id " +
                   "WHERE f.name LIKE $q OR d.zuban_norm LIKE $qn OR d.hinmei LIKE $q OR d.zairyo LIKE $q ORDER BY f.file_id DESC";
             return Results.Json(db.Query(sql, ("$q", like), ("$qn", norm)));
@@ -437,9 +440,11 @@ public static class Api
                 }
                 catch (Exception ex)
                 {
-                    // 1ファイルの解析失敗（破損PDF等）でフォルダ全体の取り込みを止めない
-                    ctx.Log.Warn($"import skipped {Path.GetFileName(f)}: {ex.Message}");
-                    failures.Add(new { name = Path.GetFileName(f), error = ex.Message });
+                    // 1ファイルの解析失敗（破損PDF等）でフォルダ全体の取り込みを止めない。
+                    // Messageが空の例外は型名で代替する（ナレッジ画面で「エラー ()」になるのを防ぐ・2026-10-23実機E2Eで発見）
+                    var msg = string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message;
+                    ctx.Log.Warn($"import skipped {Path.GetFileName(f)}: {msg}");
+                    failures.Add(new { name = Path.GetFileName(f), error = msg });
                 }
             }
             return Results.Json(new { imported = count, failed = failures });
