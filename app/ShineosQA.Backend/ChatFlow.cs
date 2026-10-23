@@ -1068,13 +1068,27 @@ public sealed class ChatFlow
             var draftQuery = seed is { } sd && sd.question.Length > 0 ? sd.question + " " + message : message + tplKeywords;
             var qEmb = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { draftQuery }, ctx.RequestAborted))[0];
             var tokens = Rag.Tokenize(draftQuery + " " + tplKeywords).ToHashSet();
-            foreach (var h in _index.Search(qEmb, tokens, 12))
+            // Dify流の参照選定（langgenius/dify dataset_retrieval.py: 候補→リランク→top_kファイル。
+            // Dify既定はscore_threshold無効）: ハイブリッド候補12件を指示文との関連でリランクし、
+            // 上位4ファイルに絞る。無関係文書（CID検証PDF・実績CSV等）が参照予算(2,400字)を
+            // 圧迫して関連文書が落ちる問題の対策（2026-10-23実測: FAQ集のrefsにノイズ8件混入）
+            var cand = _index.Search(qEmb, tokens, 12).ToList();
+            if (_sup.IsRankAlive && cand.Count > 0)
+            {
+                var candDocs = cand.Select(h => h.Rec.Text).ToList();
+                var ranked = await _gw.RerankAsync(_cfg.EnginePortRank, draftQuery, candDocs, cand.Count, ctx.RequestAborted);
+                cand = ranked.Select(r => cand[r.Index]).ToList();
+                _log.Info($"draft refs rerank: {cand.Count} candidates reranked, top files by relevance");
+            }
+            foreach (var h in cand)
             {
                 var rec = h.Rec;
                 var dup = refs.FirstOrDefault(r => r.id == rec.FileId);
                 if (dup != default) dup.text += "\n" + rec.Text;
                 else refs.Add((rec.FileId, rec.FileName, rec.Text));
             }
+            // Dify既定のtop_k=4ファイルに絞る（スコア順。ファイルごとのテキストは全チャンク連結）
+            refs = refs.Take(4).ToList();
         }
         var refText = Draft.BuildReferenceText(refs.Select(r => (r.name, r.text)).ToList(), seed);
         var sources = refs.Select(r => new SourceInfo { File = r.name, Snippet = "下書き参照", Kind = "kb", FileId = r.id }).ToList();
