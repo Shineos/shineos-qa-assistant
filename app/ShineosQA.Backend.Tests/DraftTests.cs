@@ -253,4 +253,19 @@ public class DraftPostProcessTests
         var patternItems = r.First(s => s.Title == "パターン章").Body.Split('\n').Count(l => l.TrimStart().StartsWith("- "));
         Assert.True(patternItems <= 3); // パターントリムで最大3個
     }
+
+    // ---- LooksLikeCreationRequest（2026-10-23・意図自動判定） ----
+
+    [Theory]
+    [InlineData("経費精算の手順書を作成してください", true)]
+    [InlineData("お詫び状を書いてください", true)]
+    [InlineData("FAQ集を作成して", true)]
+    [InlineData("エラーの解決策を作成して", true)]
+    [InlineData("会議室の予約方法を教えてください", false)]
+    [InlineData("経費精算の手順を教えてください", false)]
+    [InlineData("報告書とは何ですか", false)]
+    [InlineData("パスワードは何文字以上ですか", false)]
+    [InlineData("テスト", false)]
+    public void LooksLikeCreationRequest_DetectsIntent(string message, bool expected)
+        => Assert.Equal(expected, Draft.LooksLikeCreationRequest(message));
 }

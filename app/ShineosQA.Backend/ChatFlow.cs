@@ -327,6 +327,16 @@ public sealed class ChatFlow
             await DraftAsync(ctx, chatId, message, draftEl, sw);
             return;
         }
+        // 意図自動判定（2026-10-23・DifyのQuestion Classifier相当）: 作成トグルを押さなくても
+        // 「〜を作成してください」等の文書生成指示を検出したら作成パイプラインへ振り分ける。
+        // ユーザーはモードを意識せず1つの入力箱だけで使える。方法質問（「〜作成方法を教えて」）はQ&Aのまま
+        if (Draft.LooksLikeCreationRequest(message))
+        {
+            using var autoDraft = JsonDocument.Parse("{\"template\":\"auto\"}");
+            _log.Info($"draft auto-detected from message intent: {Truncate(message, 40)}");
+            await DraftAsync(ctx, chatId, message, autoDraft.RootElement, sw);
+            return;
+        }
 
         try
         {

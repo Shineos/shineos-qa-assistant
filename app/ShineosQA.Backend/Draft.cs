@@ -69,6 +69,26 @@ public static class Draft
         static bool Has(string s, params string[] keys) => keys.Any(s.Contains);
     }
 
+    /// <summary>文書作成の意図を検出（2026-10-23・DifyのQuestion Classifier相当）。
+    /// ユーザーが作成トグルを押さなくても「〜を作成してください」等の文書生成指示を
+    /// 自動で作成パイプラインへ振り分けるための純関数。LLM呼び出しを挟まず正規表現のみで
+    /// 判定する（全質問に分類コールを足すとTTFTが伸びるため）。疑問形（〜方法/〜とは）は
+    /// 文書作成ではなくQ&Aとして扱う</summary>
+    public static bool LooksLikeCreationRequest(string message)
+    {
+        var t = (message ?? "").Trim();
+        if (t.Length < 6) return false;
+        // 方法質問（「〜作成方法を教えて」等）は文書生成ではなくQ&A
+        if (System.Text.RegularExpressions.Regex.IsMatch(t, "(作成|作り|書き|やり)方|(作成|作る|書く)ことができますか"))
+            return false;
+        var action = System.Text.RegularExpressions.Regex.IsMatch(
+            t, "作成し(て|ます)|作って(くれ|ください|ほしい)?|書いて(くれ|ください|ほしい)?|起草し(て|ます)|作成お願い");
+        var docType = System.Text.RegularExpressions.Regex.IsMatch(
+            t, "手順書|報告書|提案書|FAQ|よくある質問|議事録|お詫び状|お礼状|案内状|メール文面|マニュアル|仕様書|取扱説明書");
+        if (System.Text.RegularExpressions.Regex.IsMatch(t, "とは|とは何|って何\\s*[？?]*$")) return false; // 「報告書とは？」等は用語QA
+        return (action && !docType) || (docType && (action || t.EndsWith("して") || t.EndsWith("してください") || t.EndsWith("ください")));
+    }
+
     public sealed record OutlineSection(string Title, string Goal);
     public sealed record OutlineDoc(string Title, List<OutlineSection> Sections);
 
