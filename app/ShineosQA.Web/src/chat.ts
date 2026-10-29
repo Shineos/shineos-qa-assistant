@@ -1,4 +1,4 @@
-import { api, streamChat, downloadMarkdown, downloadDocx, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
+import { api, streamChat, downloadMarkdown, downloadDocx, type AnswerLang, type SourceInfo, type ChatSummary, type ModelEntry } from './api';
 import { renderMarkdown } from './markdown';
 import { openReportModal } from './report';
 import { onSuccessfulAnswer } from './review-prompt';
@@ -71,6 +71,16 @@ const MODEL_CHOICES = [
   { id: 'chat-standard', tier: 'standard', label: '🎯 標準 4B', desc: '高精度（16GB以上推奨）', icon: SVG_TARGET },
   { id: 'chat-quality', tier: 'quality', label: '🏆 高品質 30B', desc: '最高精度・実験的（16GB以上・初回読込遅め）', icon: SVG_TROPHY },
 ] as const;
+
+/** 回答言語（多言語対応）: 選択値を端末に保存する際のキー。既定は ja。 */
+export const ANSWER_LANG_STORAGE_KEY = 'shineosqa-answer-lang';
+const ANSWER_LANGS: readonly AnswerLang[] = ['ja', 'en', 'vi', 'zh', 'id', 'tl'];
+
+/** 端末保存値・select値をAPI契約（ja/en/vi/zh/id/tl）へ正規化する。不明値は既定のja */
+export function normalizeAnswerLang(raw: string | null | undefined): AnswerLang {
+  const v = (raw ?? '').trim().toLowerCase();
+  return (ANSWER_LANGS as readonly string[]).includes(v) ? (v as AnswerLang) : 'ja';
+}
 
 function fmtTime(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -299,6 +309,7 @@ export class ChatView {
   private lastUserText = '';
   private webSearch = false;
   private selTier = '';
+  private answerLang: AnswerLang = 'ja'; // 回答言語（多言語対応・既定ja）
   // 作成モード（v2.6.0）: ONで質問文=文書作成の指示。参照はナレッジ全体から自動検索するため
   // 選択操作はない（テンプレートのみ）。種（直前のQ&A）は1回だけ消費
   private draftSeed: { question: string; answer: string } | null = null;
@@ -427,6 +438,19 @@ export class ChatView {
     // モデルセレクター: 現在の階級を表示し、未導入モデルはその場でダウンロード可能
     document.getElementById('model-btn')!.addEventListener('click', () => void this.toggleModelMenu());
     void this.initModelPicker();
+    // 回答言語（多言語対応）: 選択値を端末に保存し、/api/chat の answer_lang として送信する
+    const langSelect = document.getElementById('answer-lang') as HTMLSelectElement | null;
+    let storedLang: string | null = null;
+    try { storedLang = localStorage.getItem(ANSWER_LANG_STORAGE_KEY); } catch { /* 保存領域が使えない環境では既定ja */ }
+    this.answerLang = normalizeAnswerLang(storedLang);
+    if (langSelect) {
+      langSelect.value = this.answerLang;
+      langSelect.addEventListener('change', () => {
+        this.answerLang = normalizeAnswerLang(langSelect.value);
+        langSelect.value = this.answerLang; // 表示を正規化後の値に揃える
+        try { localStorage.setItem(ANSWER_LANG_STORAGE_KEY, this.answerLang); } catch { /* 保存不可でも送信は継続 */ }
+      });
+    }
     document.addEventListener('click', e => {
       if (this.modelMenu && !(e.target as HTMLElement).closest('.model-wrap')) this.closeModelMenu();
     });
@@ -1124,7 +1148,7 @@ export class ChatView {
         ? { template: 'auto', seed: seedSnapshot ?? undefined }
         : undefined;
       await streamChat(
-        { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined, draft: draftPayload },
+        { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, answer_lang: this.answerLang, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined, draft: draftPayload },
         {
           meta: (d) => {
             gotMeta = true;
@@ -1270,6 +1294,32 @@ export class ChatView {
                 mk.addEventListener("click", () => this.startDraftFromAnswer(acc));
                 draftRow.appendChild(mk);
                 actionsRow.after(draftRow);
+                // 回答フィードバック（ローカル保存のみ・外部送信なし）。FAQ候補の承認に使う。
+                if (typeof d.message_id === 'number') {
+                  const fbRow = document.createElement('div');
+                  fbRow.className = 'web-retry-row';
+                  const sendFeedback = async (rating: 1 | -1, label: string) => {
+                    try {
+                      await api.feedback({
+                        message_id: d.message_id,
+                        rating,
+                        corrected_answer: rating < 0 ? acc : undefined,
+                      });
+                      fbRow.textContent = label;
+                    } catch { fbRow.textContent = label; }
+                  };
+                  const good = document.createElement('button');
+                  good.className = 'web-retry-btn';
+                  good.textContent = '役に立った';
+                  good.addEventListener('click', () => { void sendFeedback(1, 'フィードバックを保存しました'); });
+                  const bad = document.createElement('button');
+                  bad.className = 'web-retry-btn';
+                  bad.textContent = '改善してほしい';
+                  bad.addEventListener('click', () => { void sendFeedback(-1, '改善候補として保存しました'); });
+                  fbRow.appendChild(good);
+                  fbRow.appendChild(bad);
+                  actionsRow.after(fbRow);
+                }
               }
             } else {
               thinking.remove();

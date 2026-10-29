@@ -55,14 +55,18 @@ public static partial class MfgTerms
         // 英語資料・外国人材向けの基本語（オフィス/HR系）。日本語質問×英語文書の語彙一致を作る。
         // 汎用動詞（apply/approve等）は誤マッチが増えるため入れない（名詞・複合名詞のみ）。
         new("office", new[] { "オフィス", "office" }),
-        new("chushajo", new[] { "駐車場", "parking" }),
+        new("mycar", new[] { "マイカー", "自分の車", "自家用車", "私用車", "my car", "own car" }),
+        new("chushajo", new[] { "駐車場", "パーキング", "parking" }),
         new("ryokin", new[] { "料金", "fee", "price", "charge" }),
-        new("kaigishitsu", new[] { "会議室", "meeting room", "conference room" }),
+        new("kaigishitsu", new[] { "会議室", "ミーティングルーム", "meeting room", "conference room" }),
         new("kucho", new[] { "空調", "air conditioning", "air conditioner" }),
-        new("telework", new[] { "テレワーク", "telework", "remote work" }),
-        new("teate", new[] { "手当", "allowance" }),
+        new("telework", new[] { "テレワーク", "在宅勤務", "リモートワーク", "telework", "remote work", "work from home" }),
+        new("teate", new[] { "手当", "手当て", "allowance" }),
         new("password", new[] { "パスワード", "password" }),
-        new("kyuka", new[] { "休暇", "leave", "vacation" }),
+        new("kyuka", new[] { "休暇", "有給", "有給休暇", "年次有給休暇", "leave", "vacation", "paid leave", "annual leave" }),
+        new("helpdesk", new[] { "ヘルプデスク", "窓口", "内線", "ITサポート", "help desk" }),
+        new("nyusha", new[] { "入社", "入社時", "hire", "onboarding" }),
+        new("kinsen", new[] { "お金が出る", "金銭", "補助", "助成", "給付", "subsidy" }),
         new("shutchou", new[] { "出張", "business trip" }),
         new("shukuhaku", new[] { "宿泊費", "宿泊", "accommodation", "hotel" }),
         new("kotsuhi", new[] { "交通費", "transportation" }),
@@ -87,6 +91,20 @@ public static partial class MfgTerms
 
     [GeneratedRegex(@"(?<![A-Za-z0-9])jis\s*([a-z])\s*([0-9]{3,5})", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex JisRegex();
+
+    private static readonly HashSet<string> CanonicalSet =
+        new(Groups.Select(g => g.Canonical), StringComparer.Ordinal) { "arasa", "um" };
+
+    /// <summary>正規トークン（別名展開で付与したトークン）か。キーワード一致の重み付け・
+    /// クロスリンガル候補の保持判定に使う。</summary>
+    public static bool IsCanonicalToken(string token)
+    {
+        if (CanonicalSet.Contains(token)) return true;
+        // ねじ（m8x125）・JIS（jisb0405）はパターン生成のため接頭辞で判定
+        if (token.Length > 2 && token[0] == 'm' && char.IsDigit(token[1]) && token.Contains('x')) return true;
+        if (token.Length > 3 && token.StartsWith("jis", StringComparison.Ordinal)) return true;
+        return false;
+    }
 
     /// <summary>埋め込み・リランク用のクエリ拡張。質問に含まれる用語の英語別名を末尾に足す。
     /// 日本語質問×英語図面/規格のベクトル一致を改善する（例: 「駐車場の料金」→「… parking fee」）。

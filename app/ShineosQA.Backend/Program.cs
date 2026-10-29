@@ -305,6 +305,131 @@ public static class Api
             return Results.Json(new { ok = true });
         });
 
+        // 回答フィードバック（Phase F）: 👍/👎・修正回答をローカル保存。外部送信なし。
+        app.MapPost("/api/feedback", async (HttpRequest req) =>
+        {
+            using var doc = await JsonDocument.ParseAsync(req.Body);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("rating", out var ratingEl) || !ratingEl.TryGetInt32(out var rating)
+                || (rating != 1 && rating != -1))
+                return Results.Json(new { ok = false, error = "rating must be 1 or -1" }, statusCode: 400);
+            long? messageId = root.TryGetProperty("message_id", out var mid) && mid.TryGetInt64(out var mv) ? mv : null;
+            long? chatId = root.TryGetProperty("chat_id", out var cid) && cid.TryGetInt64(out var cv) ? cv : null;
+            var comment = root.TryGetProperty("comment", out var cm) && cm.ValueKind == JsonValueKind.String ? cm.GetString() : null;
+            var corrected = root.TryGetProperty("corrected_answer", out var ca) && ca.ValueKind == JsonValueKind.String ? ca.GetString() : null;
+            db.Exec("INSERT INTO feedback(message_id, chat_id, rating, comment, corrected_answer) VALUES($m,$c,$r,$cm,$ca)",
+                ("$m", messageId), ("$c", chatId), ("$r", rating), ("$cm", comment), ("$ca", corrected));
+            return Results.Json(new { ok = true, id = db.LastInsertId() });
+        });
+        app.MapGet("/api/feedback", (int? limit) => Results.Json(new
+        {
+            items = db.Query(
+                "SELECT id, message_id, chat_id, rating, comment, corrected_answer, created_at " +
+                "FROM feedback ORDER BY id DESC LIMIT $l", ("$l", Math.Clamp(limit ?? 200, 1, 1000)))
+                .Select(r => new
+                {
+                    id = Convert.ToInt64(r["id"] ?? 0L),
+                    message_id = r["message_id"],
+                    chat_id = r["chat_id"],
+                    rating = Convert.ToInt32(r["rating"] ?? 0),
+                    comment = r["comment"],
+                    corrected_answer = r["corrected_answer"],
+                    created_at = r["created_at"],
+                }),
+        }));
+
+        // 図面台帳（Phase D）: drawing_meta を一覧・検索する。図番/品名/材質/改訂をUIで絞り込む。
+        app.MapGet("/api/drawings", (string? q) =>
+        {
+            var term = (q ?? "").Trim();
+            var rows = db.Query(
+                "SELECT f.file_id, f.name, d.zuban_raw, d.zuban_norm, d.hinmei, d.zairyo, d.scale, d.revision, d.approved_at " +
+                "FROM drawing_meta d JOIN files f ON f.file_id=d.file_id " +
+                "WHERE f.status='ready' AND ($q='' OR d.zuban_raw LIKE $like OR d.hinmei LIKE $like OR d.zairyo LIKE $like OR d.revision LIKE $like) " +
+                "ORDER BY d.zuban_norm, d.revision, f.file_id",
+                ("$q", term), ("$like", "%" + term + "%"));
+            return Results.Json(new
+            {
+                items = rows.Select(r => new
+                {
+                    file_id = Convert.ToInt64(r["file_id"] ?? 0L),
+                    file = Convert.ToString(r["name"]) ?? "",
+                    zuban = r["zuban_raw"],
+                    zuban_norm = r["zuban_norm"],
+                    hinmei = r["hinmei"],
+                    zairyo = r["zairyo"],
+                    scale = r["scale"],
+                    revision = r["revision"],
+                    approved_at = r["approved_at"],
+                }),
+            });
+        });
+
+        // 実績表の列マッピング（自動検出）。元ファイルを再パースしてヘッダ→役割を返す。
+        app.MapGet("/api/jisseki/columns", (long file_id) =>
+        {
+            var name = db.Scalar("SELECT name FROM files WHERE file_id=$i", ("$i", file_id)) as string;
+            if (string.IsNullOrWhiteSpace(name)) return Results.NotFound();
+            var stored = Directory.EnumerateFiles(ingest.FilesDir, $"{file_id}.*")
+                .FirstOrDefault(p => !p.EndsWith(".thumb.png", StringComparison.OrdinalIgnoreCase));
+            if (stored is null) return Results.NotFound();
+            var ext = Path.GetExtension(stored).ToLowerInvariant();
+            if (ext is not (".xlsx" or ".csv" or ".tsv")) return Results.BadRequest(new { error = "not a sheet" });
+            var sheets = SheetExtract.ParseToRows(name, File.ReadAllBytes(stored));
+            if (sheets.Count == 0) return Results.Json(new { items = Array.Empty<object>() });
+            var header = sheets[0].Rows.Length > 0 ? sheets[0].Rows[0] : Array.Empty<string>();
+            var (zuban, mitumori, genka, nouki) = SheetJisseki.MapColumns(header);
+            string Role(int i) => i == zuban ? "zuban" : i == mitumori ? "mitumori" : i == genka ? "genka" : i == nouki ? "nouki" : "other";
+            return Results.Json(new
+            {
+                file_id,
+                file = name,
+                items = header.Select((h, i) => new { column_name = (h ?? "").TrimStart('\uFEFF'), column_index = i, role = Role(i) }),
+            });
+        });
+
+        // 実績の集計（Phase D）: 見積/原価の合計・平均・件数。図番での絞り込みに対応。
+        app.MapGet("/api/jisseki/summary", (long? file_id, string? metric, string? aggregate, string? zuban) =>
+        {
+            static decimal? ParseYen(object? v)
+            {
+                var s = Convert.ToString(v);
+                if (string.IsNullOrWhiteSpace(s)) return null;
+                s = s.Normalize(System.Text.NormalizationForm.FormKC)
+                    .Replace(",", "").Replace("，", "").Replace("円", "").Replace("¥", "").Replace(" ", "").Trim();
+                return decimal.TryParse(s, System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+            }
+            var m = (metric ?? "mitumori").ToLowerInvariant();
+            if (m is not ("mitumori" or "genka")) return Results.BadRequest(new { error = "metric must be mitumori or genka" });
+            var agg = (aggregate ?? "sum").ToLowerInvariant();
+            if (agg is not ("sum" or "avg" or "count")) return Results.BadRequest(new { error = "aggregate must be sum, avg, or count" });
+            var column = m;
+            var where = "f.status='ready'";
+            var ps = new List<(string, object?)>();
+            if (file_id is long fid) { where += " AND j.file_id=$f"; ps.Add(("$f", fid)); }
+            if (!string.IsNullOrWhiteSpace(zuban)) { where += " AND j.zuban_norm=$z"; ps.Add(("$z", Rag.NormalizeZuban(zuban))); }
+            var rows = db.Query(
+                $"SELECT j.{column} AS value FROM jisseki_meta j JOIN files f ON f.file_id=j.file_id WHERE {where}",
+                ps.ToArray());
+            var nums = rows.Select(r => ParseYen(r["value"])).Where(v => v.HasValue).Select(v => v!.Value).ToList();
+            decimal sum = nums.Sum();
+            decimal value = agg switch
+            {
+                "count" => nums.Count,
+                "avg" => nums.Count > 0 ? Math.Round(sum / nums.Count, 2) : 0,
+                _ => sum,
+            };
+            return Results.Json(new
+            {
+                metric = m,
+                aggregate = agg,
+                count = nums.Count,
+                value,
+                unit = agg == "count" ? "" : "円",
+            });
+        });
+
         // SPAルーティング: /c/{uuid} などAPI以外のパスはindex.htmlへフォールバック
         app.MapFallback(async (HttpContext http) =>
         {

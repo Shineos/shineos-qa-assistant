@@ -1,4 +1,5 @@
 import { api, type KnowledgeFile } from './api';
+import { KnowledgeExtras } from './knowledge-extras';
 
 const statusLabel: Record<string, string> = {
   pending: '待機中', parsing: '解析中', embedding: '埋め込み中', ready: '利用可能', error: 'エラー',
@@ -9,8 +10,11 @@ const ACCEPT = '.pdf,.docx,.md,.txt,.xlsx,.csv,.tsv';
 export class KnowledgeView {
   private packDrawing = false; // 拡張パック（図面）: OFFの間は列・フィルタを表示しない（本体UI不変の要求）
   private filterText = '';
+  // ナレッジ一覧の下に置く追加セクション（FAQ管理・図面台帳・実績集計）
+  private extras: KnowledgeExtras;
 
   constructor() {
+    this.extras = new KnowledgeExtras(document.getElementById('knowledge-extras')!);
     const dz = document.getElementById('dropzone')!;
     const fi = document.getElementById('file-input') as HTMLInputElement;
     dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('over'); });
@@ -85,6 +89,7 @@ export class KnowledgeView {
     try {
       const files: KnowledgeFile[] = await api.knowledge(this.filterText || undefined);
       this.renderFiles(files);
+      this.extras.setFiles(files);
     } catch { /* 取得失敗時は無視（次のポーリングで再取得） */ }
   }
 
@@ -142,6 +147,15 @@ export class KnowledgeView {
         });
         td.appendChild(sum);
       }
+      // 実績表: この表の列の自動検出と見積/原価の集計（画面下の「実績集計」セクションを開く）
+      if (isJisseki && f.status === 'ready') {
+        const jis = document.createElement('button');
+        jis.className = 'icon-btn';
+        jis.textContent = '実';
+        jis.title = '実績集計（列の検出・見積/原価の合計）';
+        jis.addEventListener('click', () => this.extras.focusJissekiFile(f.file_id));
+        td.appendChild(jis);
+      }
       const del = document.createElement('button');
       del.className = 'icon-btn';
       del.textContent = '×';
@@ -183,7 +197,12 @@ export class KnowledgeView {
     try {
       const files: KnowledgeFile[] = await api.knowledge(this.filterText || undefined);
       this.renderFiles(files);
+      this.extras.setFiles(files);
     } catch { /* 取得失敗時は現状維持 */ }
+    // FAQ・図面台帳はナレッジタブを表示したときだけ取得する（起動時の余分な通信を避ける）
+    if (document.getElementById('tab-knowledge')?.classList.contains('active')) {
+      await this.extras.refresh();
+    }
   }
 }
 

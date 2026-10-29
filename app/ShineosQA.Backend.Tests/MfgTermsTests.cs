@@ -24,6 +24,11 @@ public class MfgTermsTests
     [InlineData("Parking fee", "chushajo")]
     [InlineData("meeting room", "kaigishitsu")]
     [InlineData("telework allowance", "telework")]
+    [InlineData("自分の車で出張", "mycar")]
+    [InlineData("オフィスのパーキング", "chushajo")]
+    [InlineData("有給の申請", "kyuka")]
+    [InlineData("ITの窓口", "helpdesk")]
+    [InlineData("入社時に支給", "nyusha")]
     public void Tokenize_AddsManufacturingCanonicalTokens(string text, string expected) =>
         Assert.Contains(expected, Rag.Tokenize(text));
 
@@ -49,5 +54,14 @@ public class MfgTermsTests
         Assert.Contains("fee", q);
         Assert.StartsWith("駐車場の料金", q);
         Assert.Equal("こんにちは", MfgTerms.ExpandQuery("こんにちは"));
+    }
+
+    [Fact]
+    public void IsCanonicalToken_RecognizesGeneratedTokens()
+    {
+        Assert.True(MfgTerms.IsCanonicalToken("sus304"));
+        Assert.True(MfgTerms.IsCanonicalToken("m8x125"));
+        Assert.True(MfgTerms.IsCanonicalToken("jisb0405"));
+        Assert.False(MfgTerms.IsCanonicalToken("経費"));
     }
 }

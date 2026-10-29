@@ -12,9 +12,8 @@ public static partial class Rag
     public const int SnippetMaxChars = 240;         // 事実切断を防ぐ関連文中心スニペット
     public const int RerankPool = 8;                // top8未満だと関連chunkが候補外に漏れる（実測）
     public const double RerankSkipCos = 0.62;       // 高信頼ショートカット: ベクトル一致が強ければリランク(~2秒)を省略
-    public const double RerankSkipKw = 0.50;        // かつキーワード一致も強い場合のみ（旧0.10→0.50: 弱一致をリランカーに
-                                                    // 必ず通す。識別器はリランクスコア(GuardThreshold)が正で、kw閾値は分離力が
-                                                    // 不足 — 実測: 正解質問kw0.39-0.48 / KB外質問0.37 と重なる）
+    public const double RerankSkipKw = 0.40;        // かつキーワード一致も強い場合のみ（0.50→0.40: 高cos質問のリランクを省略しTTFTを短縮。
+                                                    // 品質は18問・図面10問・118問のゲートで確認する。弱一致は従来どおりリランクへ）
     public const double MinAcceptKw = 0.15;         // 弱一致ガード(バックストップ): リランカーが無い環境での最終防波堤。
                                                     // kw≈0は語彙的に無関係なので、リランクを経由しない採択でも該当なし拒否へ。
                                                     // 対象外条件は IsWeakMatch 参照（図面質問/Web文脈/時間感応/リランク済み）
@@ -413,6 +412,18 @@ public static partial class Rag
         "【システム情報】の日時が示されていれば日付・時刻の質問はそれで答えてよい。" +
         "推測と一般知識は禁止。金額・日付・回数は文書どおり正確に。条件と対象の対応を混同しない。";
 
+    /// <summary>回答言語の指示（多言語対応）。参照情報は日本語のまま、回答だけ指定言語で出させる。
+    /// 未対応・jaは空文字（従来プロンプトを変えない＝prefixキャッシュ維持）。</summary>
+    public static string AnswerLanguageLine(string? lang) => lang switch
+    {
+        "en" => "\n\n【回答言語】英語（English）で回答してください。出典の文書名は原文のままでよい。",
+        "vi" => "\n\n【回答言語】ベトナム語（Tiếng Việt）で回答してください。出典の文書名は原文のままでよい。",
+        "zh" => "\n\n【回答言語】中国語（简体中文）で回答してください。出典の文書名は原文のままでよい。",
+        "id" => "\n\n【回答言語】インドネシア語（Bahasa Indonesia）で回答してください。出典の文書名は原文のままでよい。",
+        "tl" => "\n\n【回答言語】タガログ語（Tagalog）で回答してください。出典の文書名は原文のままでよい。",
+        _ => "",
+    };
+
     public static string BuildContext(IReadOnlyList<(string doc, string snippet)> docs, string? webContext)
     {
         var sb = new StringBuilder();
@@ -471,7 +482,7 @@ public sealed class ChunkIndex
         lock (_lock) return _list.FirstOrDefault(r => r.FileId == fileId && r.Seq == seq + 1)?.Text;
     }
 
-    public sealed class HybridHit { public Rec Rec = null!; public double Cos, Kw, Hybrid; }
+    public sealed class HybridHit { public Rec Rec = null!; public double Cos, Kw, Hybrid; public int Canonical; }
 
     /// <summary>ハイブリッド検索（ベクトル0.5＋キーワード0.5・min-max正規化）</summary>
     public List<HybridHit> Search(float[] queryEmb, IReadOnlySet<string> queryTokens, int topK)
@@ -483,6 +494,7 @@ public sealed class ChunkIndex
         {
             int matches = queryTokens.Count(t => h.Rec.Tokens.Contains(t));
             h.Kw = (double)matches / Math.Max(1, queryTokens.Count);
+            h.Canonical = queryTokens.Count(t => MfgTerms.IsCanonicalToken(t) && h.Rec.Tokens.Contains(t));
         }
         double maxCos = hits.Max(h => h.Cos), minCos = hits.Min(h => h.Cos);
         foreach (var h in hits)
@@ -491,6 +503,29 @@ public sealed class ChunkIndex
             h.Hybrid = 0.5 * ncos + 0.5 * h.Kw;
         }
         return hits.OrderByDescending(h => h.Hybrid).Take(topK).ToList();
+    }
+
+    /// <summary>キーワードのみの検索（複合・列挙質問の再現率補強用）。ベクトル上位に漏れた
+    /// 「7日」「22時」等の語を含むチャンクを拾う。全件走査だが社内文書規模では数ms。</summary>
+    public List<HybridHit> SearchKeyword(IReadOnlySet<string> queryTokens, int topK)
+    {
+        if (queryTokens.Count == 0) return new List<HybridHit>();
+        List<Rec> copy;
+        lock (_lock) copy = _list.ToList();
+        return copy.Select(r =>
+            {
+                int matches = queryTokens.Count(t => r.Tokens.Contains(t));
+                return new HybridHit
+                {
+                    Rec = r,
+                    Kw = (double)matches / Math.Max(1, queryTokens.Count),
+                    Canonical = queryTokens.Count(t => MfgTerms.IsCanonicalToken(t) && r.Tokens.Contains(t)),
+                };
+            })
+            .Where(h => h.Kw > 0)
+            .OrderByDescending(h => h.Kw)
+            .Take(topK)
+            .ToList();
     }
 
     public static byte[] FloatsToBytes(float[] f)

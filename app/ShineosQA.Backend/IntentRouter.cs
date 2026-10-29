@@ -57,7 +57,7 @@ public static partial class IntentRouter
 
     // 複合質問の目安。現時点ではルートを分けず、将来の分解パイプラインの判定に使う
     private static readonly Regex MultiPartRegex = new(
-        @"それぞれ|両方|および|ならびに|と比べ|比較(して|する)|すべて|一覧|いくつ|何日|何件|合計|平均",
+        @"それぞれ|両方|および|ならびに|と比べ|比較(して|する)|すべて|一覧|いくつ|何日|何件|合計|平均|項目|誰に|窓口|内線|禁止|入社|対象とならない|どんな|挙げて|関係する",
         RegexOptions.Compiled);
 
     [GeneratedRegex(@"材質|材料|ザイリョウ|マテリアル", RegexOptions.Compiled)]

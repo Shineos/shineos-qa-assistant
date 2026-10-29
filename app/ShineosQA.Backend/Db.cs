@@ -8,8 +8,9 @@ namespace ShineosQA.Backend;
 public sealed class Db : IDisposable
 {
     /// <summary>適用済みスキーマ版。1=初期スキーマ〜図面/実績拡張、2=content_hash＋原子性（Phase 0.2）、
-    /// 3=FAQ（現場の正解）＋別名（Phase B）。マイグレーションを追加したらこの値を上げ、下の適用ブロックも更新する</summary>
-    public const int SchemaVersion = 3;
+    /// 3=FAQ（現場の正解）＋別名（Phase B）、4=回答フィードバック（Phase F）。マイグレーションを追加したら
+    /// この値を上げ、下の適用ブロックも更新する</summary>
+    public const int SchemaVersion = 4;
 
     private readonly SqliteConnection _conn;
     private readonly object _lock = new();
@@ -111,6 +112,19 @@ public sealed class Db : IDisposable
               PRIMARY KEY(faq_id, variant_norm));
             CREATE INDEX IF NOT EXISTS idx_faq_variants_norm ON faq_variants(variant_norm);
             CREATE INDEX IF NOT EXISTS idx_faq_status ON faq(status);
+            """);
+        // 回答フィードバック（Phase F）: 👍/👎と修正回答をローカル保存し、FAQ候補の承認につなげる。
+        // 外部送信なし。message_idはassistantメッセージ（sources_json等）への参照
+        Exec("""
+            CREATE TABLE IF NOT EXISTS feedback(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              message_id INTEGER,
+              chat_id INTEGER,
+              rating INTEGER NOT NULL,
+              comment TEXT,
+              corrected_answer TEXT,
+              created_at TEXT NOT NULL DEFAULT (datetime('now')));
+            CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
             """);
         // スキーマ版管理（Phase 0.2）: 1行のみ保持し、コード側の現行版との差で将来のマイグレーションを判定できる。
         // 適用は「記録が古い場合のみ更新」する upsert（現行版を記録するだけ。DOWNは扱わない）

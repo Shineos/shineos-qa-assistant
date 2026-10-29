@@ -25,6 +25,7 @@ public sealed class AppConfig
     public string VisionModelFile { get; set; } = "Qwen3-VL-2B-Instruct-Q8_0.gguf";
     public string VisionMmprojFile { get; set; } = "mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf";
     public int CtxSize { get; set; } = 4096;
+    public int EngineUb { get; set; } = 2048; // llama-server -ub（物理バッチ）。小さいほどメモリ・初回確保は軽いがprefillは遅い
     public int Threads { get; set; } = 0; // 0=物理コア数
     public int IdleUnloadMinutes { get; set; } = 60;
     public bool BgFriendly { get; set; } = true; // 他アプリ優先: LLM生成をBelowNormal優先度で実行（既定ON）
@@ -66,6 +67,7 @@ public sealed class AppConfig
                     case "web_search": cfg.WebSearch = p.Value.GetBoolean(); break;
                     case "agent_mode": cfg.AgentMode = p.Value.GetBoolean(); break;
                     case "ctx_size": cfg.CtxSize = p.Value.GetInt32(); break;
+                    case "engine_ub": cfg.EngineUb = p.Value.GetInt32(); break;
                     case "threads": cfg.Threads = p.Value.GetInt32(); break;
                     case "idle_unload_minutes": cfg.IdleUnloadMinutes = p.Value.GetInt32(); break;
                     case "bg_friendly": cfg.BgFriendly = p.Value.GetBoolean(); break;

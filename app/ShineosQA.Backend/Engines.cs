@@ -101,6 +101,7 @@ public sealed class Supervisor
     private readonly ILogger _log;
     private int _llmStartFails;      // 連続起動失敗（サーキットブレーカー）
     private string _llmFailReason = "";
+    private int _llmRecycles;        // メモリ上限による再起動回数（診断用）
 
     public Supervisor(AppConfig cfg, LlmGateway gw, ILogger log) { _cfg = cfg; _gw = gw; _log = log; }
 
@@ -256,7 +257,7 @@ public sealed class Supervisor
         var fa = _cfg.EngineVariant == "vulkan" ? "off" : "on";
         var extra = _cfg.EngineVariant == "vulkan"
             ? new[] { "-ngl", "99", "-fa", fa }
-            : new[] { "-fa", fa, "-ub", "2048" }; // pp大きなバッチ=スループット優先（初トークン前に一括処理のため純増）
+            : new[] { "-fa", fa, "-ub", _cfg.EngineUb.ToString() }; // pp大きなバッチ=スループット優先（初トークン前に一括処理のため純増）
         // ※repeat-penaltyの追加は取り下げ（2026-10-23実測）: 1.1をかけると日本語出力が劣化
         // （「慶弔」→「忦弔」の文字化けトークン、列挙項目の欠落）。繰り返し事象は
         // ChatFlowの繰り返しガード（検出→1回再生成）で対処する
@@ -325,6 +326,40 @@ public sealed class Supervisor
                 }
             }
         }
+    }
+
+    /// <summary>LLMプロセスのメモリが閾値を超えたら再起動する（長時間運用のメモリ増加対策）。
+    /// llama-serverは異なるプロンプトを処理するたびにWS/Privateが数十MBずつ増える実測があり、
+    /// 8GB機では数十問で危険域に達する。回答完了後に呼び、閾値超過時だけ停止→バックグラウンド再起動する
+    /// （再起動は2〜5秒。次の質問までに間に合えば体感遅延はない）。閾値はRAMで変える。</summary>
+    public void RecycleLlmIfMemoryHigh()
+    {
+        long threshold = AppConfig.TotalRamGb() <= 9
+            ? 2200L * 1024 * 1024   // 8GB機: embed/rank/OSと合わせて余裕を残す
+            : 4500L * 1024 * 1024;  // 16GB機: 品質を優先しつつ上限を設ける
+        bool recycled = false;
+        long ws = 0;
+        lock (_lock)
+        {
+            if (_llm is null || _llm.Proc.HasExited) return;
+            try { _llm.Proc.Refresh(); ws = _llm.Proc.WorkingSet64; } catch { return; }
+            // 診断: 閾値の8割を超えたら記録（毎回答のログ肥大を避ける）
+            if (ws > threshold * 8 / 10) _log.Info($"llm memory: {ws / (1024 * 1024)}MB / threshold {threshold / (1024 * 1024)}MB");
+            if (ws < threshold) return;
+            _log.Warn($"llm memory high ({ws / (1024 * 1024)}MB ≥ {threshold / (1024 * 1024)}MB) — recycling engine");
+            try { DisposeEngine(_llm); } catch { }
+            _llm = null;
+            _llmStartFails = 0;
+            _llmRecycles++;
+            recycled = true;
+        }
+        if (!recycled) return;
+        // 次の質問が来る前に暖機しておく（メモリはモデルロード直後の水準に戻る）
+        _ = Task.Run(() =>
+        {
+            try { EnsureLlm(); _log.Info("llm recycled and prewarmed"); }
+            catch (Exception ex) { _log.Warn($"llm recycle prewarm failed: {ex.Message}"); }
+        });
     }
 
     /// <summary>他アプリ優先設定の変更を稼働中LLMへ即時反映するため、稼働中なら停止する
@@ -446,11 +481,18 @@ public sealed class Supervisor
         }
     }
 
+    private static long? SafeWs(EngineProc e)
+    {
+        try { e.Proc.Refresh(); return e.Proc.WorkingSet64 / (1024 * 1024); } catch { return null; }
+    }
+
     public object Status() => new
     {
         tier = _cfg.EffectiveTier,
         chat_model = _cfg.ChatModelFile,
         llm = _llm == null ? "unloaded" : (_llm.Proc.HasExited ? "crashed" : $"running(pid={_llm.Proc.Id})"),
+        llm_ws_mb = _llm is { } lp && !lp.Proc.HasExited ? (long?)SafeWs(lp) : null,
+        llm_recycles = _llmRecycles,
         embed = _emb is { } e1 && !e1.Proc.HasExited ? $"running(pid={e1.Proc.Id})" : "stopped",
         rank = _rank is { } e2 && !e2.Proc.HasExited ? $"running(pid={e2.Proc.Id})" : "stopped",
         vision = _vision is { } v && !v.Proc.HasExited ? $"running(pid={v.Proc.Id})" : (VisionInstalled ? "stopped" : "未導入"),

@@ -12,6 +12,25 @@ export interface StatusInfo {
 export interface Settings { web_search: boolean; tier: string; idle_unload_minutes: number; bg_friendly: boolean; extensions?: { drawing?: boolean } }
 export interface OcrResult { text: string; zubans: { raw: string; norm: string }[]; vision?: { zuban?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null; shape?: string | null } | null }
 
+/// 回答言語（多言語対応）。ja（既定）以外はLLMへの回答言語指示に使われる。
+export type AnswerLang = 'ja' | 'en' | 'vi' | 'zh' | 'id' | 'tl';
+
+/// 現場の正解（FAQ）: GET /api/faq。承認済みの質問はLLMを使わず即答される（DifyのAnnotation相当）
+export interface FaqEntry { id: number; question: string; answer: string; sources?: unknown[]; hits?: number }
+export interface FaqInput { question: string; answer: string; variants?: string[]; status?: string; tags?: string }
+
+/// 図面台帳（GET /api/drawings）: drawing_meta の一覧。承認日・尺度は未抽出の場合 null
+export interface DrawingRow {
+  file_id: number; file: string;
+  zuban?: string | null; hinmei?: string | null; zairyo?: string | null;
+  scale?: string | null; revision?: string | null; approved_at?: string | null;
+}
+
+/// 実績表の列マッピング（GET /api/jisseki/columns）。role は zuban/mitumori/genka/nouki/other
+export interface JissekiColumn { column_name: string; role: string; column_index: number }
+/// 実績の集計結果（GET /api/jisseki/summary）。count=集計対象件数、unit=金額単位（件数は空）
+export interface JissekiSummary { metric: string; aggregate: string; count: number; value: number; unit: string }
+
 /// 動作診断（GET /api/diagnostics）。バックエンドの実装進行に合わせて
 /// 追加フィールドを許容する（未知キーは無視して表示側で正規化する）。
 /// stages は実装により「stage名→{p50_ms,p95_ms}」「t_xxx_ms→数値」等の揺れがあり得るため
@@ -92,6 +111,37 @@ export const api = {
     fetch('/api/models/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }),
   diagnostics: () => fetch('/api/diagnostics').then(r => json<DiagnosticsInfo>(r)),
   warmup: () => warmup(),
+  /// ---- 現場の正解（FAQ）管理 ----
+  /// status を省略すると全ステータス。UIは公開済み（published）のみを一覧する。
+  faq: (status = 'published') =>
+    fetch(`/api/faq?status=${encodeURIComponent(status)}`).then(r => json<{ items: FaqEntry[] }>(r)),
+  /// POST /api/faq。入力エラー（400）は本文の error を返し、例外にしない（UIで表示するため）
+  addFaq: async (body: FaqInput): Promise<{ ok: boolean; id?: number; error?: string }> => {
+    const resp = await fetch('/api/faq', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    let parsed: { ok?: boolean; id?: number; error?: string } = {};
+    try { parsed = await resp.json() as typeof parsed; } catch { /* 本文なし */ }
+    if (!resp.ok) return { ok: false, error: parsed.error ?? `HTTP ${resp.status}` };
+    return { ok: parsed.ok !== false, id: parsed.id, error: parsed.error };
+  },
+  deleteFaq: (id: number) => fetch(`/api/faq/${id}`, { method: 'DELETE' }),
+  /// ---- 図面台帳 ----
+  drawings: (q?: string) =>
+    fetch(`/api/drawings${q ? `?q=${encodeURIComponent(q)}` : ''}`).then(r => json<{ items: DrawingRow[] }>(r)),
+  /// ---- 実績表（列の自動検出・見積/原価の集計） ----
+  jissekiColumns: (fileId: number) =>
+    fetch(`/api/jisseki/columns?file_id=${fileId}`).then(r => json<{ items: JissekiColumn[] }>(r)),
+  jissekiSummary: (p: { file_id: number; metric: 'mitumori' | 'genka'; aggregate: 'sum' | 'avg' | 'count'; zuban?: string }) => {
+    const ps = new URLSearchParams({ file_id: String(p.file_id), metric: p.metric, aggregate: p.aggregate });
+    if (p.zuban) ps.set('zuban', p.zuban);
+    return fetch(`/api/jisseki/summary?${ps.toString()}`).then(r => json<JissekiSummary>(r));
+  },
+  /// POST /api/feedback: 回答への👍/👎・修正回答をローカル保存する（外部送信なし）
+  feedback: (body: { message_id?: number; chat_id?: number; rating: 1 | -1; comment?: string; corrected_answer?: string }) =>
+    fetch('/api/feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }),
 };
 
 /// AIエンジンのウォームアップ（POST /api/warmup）。失敗しても例外にせず
@@ -119,7 +169,7 @@ export interface ModelEntry {
 /// POST /api/chat をSSE受信する。イベント: meta / model / web / delta / done / error
 /// （作成モード v2.5.0 追加: phase / outline / section_start / section_done）
 export async function streamChat(
-  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string; capture_image?: string; summary_file_id?: number; draft?: { refs?: number[]; template?: string; seed?: { question: string; answer: string } } },
+  body: { chat_uuid?: string; message: string; web_search?: boolean; model?: string; capture_image?: string; summary_file_id?: number; answer_lang?: AnswerLang; draft?: { refs?: number[]; template?: string; seed?: { question: string; answer: string } } },
   handlers: {
     meta?: (d: { chat_id: number; chat_uuid: string }) => void;
     model?: (d: { tier: string; model_file: string }) => void;
@@ -132,7 +182,7 @@ export async function streamChat(
     outline?: (d: { title: string; sections: { Title: string; Goal: string }[] }) => void;
     section_start?: (d: { index: number; title: string }) => void;
     section_done?: (d: { index: number }) => void;
-    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; suggest_web?: boolean; template?: string; auto_inferred?: boolean; title?: string; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number; route?: string; confidence?: number; instant?: boolean }) => void;
+    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; suggest_web?: boolean; template?: string; auto_inferred?: boolean; title?: string; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number; route?: string; confidence?: number; instant?: boolean; message_id?: number }) => void;
     clarify?: (d: { zuban: string; message: string; options: { file_id: number; file: string; zuban: string; revision: string | null; hinmei: string | null }[] }) => void;
     error?: (d: { code: string; message: string }) => void;
   },
