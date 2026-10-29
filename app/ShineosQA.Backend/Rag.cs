@@ -331,6 +331,8 @@ public static partial class Rag
                 if (norm.Length >= 2) tokens.Add(norm); // "st-1042a" → "st1042a"
             }
         }
+        foreach (var t in MfgTerms.CanonicalTokens(s))
+            if (!tokens.Contains(t)) tokens.Add(t);
         return tokens;
     }
 
