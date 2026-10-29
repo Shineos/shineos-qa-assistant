@@ -89,7 +89,6 @@
 | 基礎シナリオ | 16/18 → **17/18**（s07 回復、s12 は KB 欠け） | 同上 |
 
 ### 2.7 `bg_friendly`（他アプリ優先モード）の扱い
-
 | 項目 | 値 | 出典 |
 |---|---|---|
 | 既定値 | **ON**（LLM 生成を BelowNormal 優先度で実行） | `app/ShineosQA.Backend/Config.cs:30` |
@@ -105,6 +104,29 @@
 | 既定のアイドルアンロード | 60 分（設定で 30/60/120/無効に変更可） | `app/ShineosQA.Backend/Config.cs:29`、`CHANGELOG.md:444` |
 | 段階解放の効果 | 常駐メモリ 2.29GB → 約 0.08GB（バックエンドのみ） | `CHANGELOG.md:444` |
 | 復帰時間 | 次の質問で自動再起動（実測 18 秒で回答まで復帰） | `CHANGELOG.md:444` |
+
+### 2.9 Phase B 前の実測（2026-10-29・quick / KB 14チャンク）
+
+未コミットのPhase 0/1を`842f790`として確定した直後、Phase B（即答ルート）実装前の状態で
+`perf-suite.ps1`を実行した。条件は quick（Qwen3-1.7B IQ4_XS）・`bg_friendly=ON`・`web_search=OFF`・
+KB 14チャンク・同一マシン（Ryzen 7 5700U / 15GB / GPUなし）。**p50/p95はこの計測で初めて取得した値**。
+
+| 指標 | 値 | JSON |
+|---|---|---|
+| q1 国内出張の日当（回答あり） cold TTFT | 3.62 s（p50） / 5.11 s（p95） | `answers/perf-quick-allcold-20261029-171939.json` |
+| q2 交通費の精算方法（回答あり） cold TTFT | 0.20 s（p50） / 3.36 s（p95） | 同上 |
+| q3 年末調整の日数（回答あり） cold TTFT | 4.96 s（p50） / 6.82 s（p95） | 同上 |
+| q4 今日の天気（no-material拒否） | 3.41 s（p50） / 3.55 s（p95） | 同上 |
+| 全体 cold TTFT | 3.62 s（p50） / 6.82 s（p95） | 同上 |
+| 回答キャッシュ即答（10回計測時） | 0.04〜0.06 s | `answers/perf-quick-baseline-20261029-171454.json` |
+| q2 合計（初回） | 30.93 s（生成が長い。要因切り分け対象） | 同上 |
+
+注意:
+- `-AllCold`は**回答キャッシュのみ**を消す。llama-serverのprefixキャッシュは残るため、q2の2回目以降が
+  0.20 sになるのはprefixキャッシュの効果であり、コールドではない。
+- 上記は開発用バックエンド＋既存のインストール版embeddingサーバー（8310）が併走した状態。厳密比較の際は
+  併走プロセスを止めて再計測する。
+- Phase B実装後のFAQ即答は**サーバ実測42 ms / クライアント96 ms**（`docs/instant-answers.md`）。
 
 ## 3. Phase 1 後の再計測プレースホルダ
 

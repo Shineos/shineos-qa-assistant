@@ -22,6 +22,7 @@ public sealed class ChatFlow
     private readonly WebSearch _web;
     private readonly ILogger _log;
     private readonly Diagnostics _diag;
+    private readonly FaqStore _faq;
     private readonly object _cacheLock = new();
     private List<CacheEntry> _cache = new();
 
@@ -29,7 +30,9 @@ public sealed class ChatFlow
 
     public ChatFlow(AppConfig cfg, Db db, Supervisor sup, LlmGateway gw, ChunkIndex index, WebSearch web, ILogger log, Diagnostics diag)
     {
-        _cfg = cfg; _db = db; _sup = sup; _gw = gw; _index = index; _web = web; _log = log; _diag = diag; LoadCache();
+        _cfg = cfg; _db = db; _sup = sup; _gw = gw; _index = index; _web = web; _log = log; _diag = diag;
+        _faq = new FaqStore(db, log);
+        LoadCache();
         // プロンプト仕様変更時は旧プロンプトで生成した回答キャッシュを無効化（誤回答の恒久化防止）
         if (_db.GetSetting("prompt_version", "") != Rag.PromptVersion)
         {
@@ -55,6 +58,9 @@ public sealed class ChatFlow
 
     /// <summary>メモリ上の回答キャッシュ件数（GET /api/diagnostics の cache 表示用）</summary>
     public int CacheCount { get { lock (_cacheLock) return _cache.Count; } }
+
+    /// <summary>公開FAQ（現場の正解）の管理API用アクセサ</summary>
+    public FaqStore Faq => _faq;
 
     // ---- 計測ヘルパー（Phase 0.1） ----
 
@@ -304,6 +310,48 @@ public sealed class ChatFlow
     internal static string SourceTextFor(bool fullContext, ChunkIndex.Rec rec, string? nextText) =>
         fullContext || nextText is null ? rec.Text : rec.Text + "\n" + nextText;
 
+    /// <summary>FAQ即答。LLM・埋め込み・検索を一切通さない（目標 &lt;50ms）。
+    /// 保存済みの回答をそのまま返し、出典JSONもそのまま渡す。</summary>
+    private async Task AnswerInstantAsync(HttpContext ctx, long chatId, string answer, string sourcesJson,
+        string route, double confidence, System.Diagnostics.Stopwatch sw)
+    {
+        object sources;
+        try { sources = JsonSerializer.Deserialize<object>(sourcesJson) ?? Array.Empty<object>(); }
+        catch { sources = Array.Empty<object>(); }
+
+        _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,'answer')",
+            ("$c", chatId), ("$m", answer), ("$s", sourcesJson));
+        _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
+
+        var ms = sw.ElapsedMilliseconds;
+        await Sse(ctx, "delta", new { content = answer });
+        await Sse(ctx, "done", new
+        {
+            cached = true, instant = true, kind = "answer", route, confidence,
+            stages = Stages(-1, ms, 0, 0, 0, 0), sources, ms,
+        });
+        _diag.Record(new Diagnostics.Sample(route, "answer", true, -1, 0, 0, 0, 0, 0, ms));
+    }
+
+    /// <summary>決定論コネクタ即答（図面台帳・実績）。LLMの要約を挟まず、DBの値をそのまま返す。</summary>
+    private async Task AnswerDeterministicAsync(HttpContext ctx, long chatId, string answer,
+        List<SourceInfo> sources, string route, double confidence, System.Diagnostics.Stopwatch sw)
+    {
+        var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
+        _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,'answer')",
+            ("$c", chatId), ("$m", answer), ("$s", sourcesJson));
+        _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
+
+        var ms = sw.ElapsedMilliseconds;
+        await Sse(ctx, "delta", new { content = answer });
+        await Sse(ctx, "done", new
+        {
+            cached = false, instant = true, kind = "answer", route, confidence,
+            stages = Stages(-1, ms, 0, 0, 0, 0), sources, ms,
+        });
+        _diag.Record(new Diagnostics.Sample(route, "answer", false, -1, 0, 0, 0, 0, 0, ms));
+    }
+
     public async Task RunAsync(HttpContext ctx)
     {
         using var body = await JsonDocument.ParseAsync(ctx.Request.Body);
@@ -397,6 +445,40 @@ public sealed class ChatFlow
             return;
         }
 
+        // Phase B: 即答ルート（DifyのAnnotation Reply / 決定論コネクタ相当）。
+        // 埋め込み・検索・LLMの前に、正解が確定している質問を返す。日付感応質問は対象外。
+        bool timeSensitive = Rag.TimeSensitiveQuestion().IsMatch(message);
+        var intent = IntentRouter.Classify(message);
+
+        if (!timeSensitive)
+        {
+            var faq = _faq.TryMatch(message);
+            if (faq != null)
+            {
+                _log.Info($"faq hit: id={faq.Id} hits={faq.Hits} q={Truncate(message, 40)}");
+                await AnswerInstantAsync(ctx, chatId, faq.Answer, faq.SourcesJson, "faq", 1.0, sw);
+                return;
+            }
+        }
+        // 図面台帳: 図番＋表題欄の属性だけの質問は、モデルを介さずDBの値で答える
+        if (!timeSensitive && intent.Route == AnswerRoute.DrawingMeta
+            && intent.Zuban is { Length: > 0 } zuban
+            && DrawingQuery.TryAnswer(_db, message, zuban, out var drawingAnswer, out var drawingSources, out var drawingConf))
+        {
+            _log.Info($"drawing-meta answer: zuban={zuban} conf={drawingConf:F2}");
+            await AnswerDeterministicAsync(ctx, chatId, drawingAnswer, drawingSources, "drawing", drawingConf, sw);
+            return;
+        }
+        // 実績表: 図番＋見積/原価/納期の質問もDBの値で答える
+        if (!timeSensitive && intent.Route == AnswerRoute.Jisseki
+            && intent.Zuban is { Length: > 0 } jissekiZuban
+            && JissekiQuery.TryAnswer(_db, message, jissekiZuban, out var jissekiAnswer, out var jissekiSources, out var jissekiConf))
+        {
+            _log.Info($"jisseki answer: zuban={jissekiZuban} conf={jissekiConf:F2}");
+            await AnswerDeterministicAsync(ctx, chatId, jissekiAnswer, jissekiSources, "jisseki", jissekiConf, sw);
+            return;
+        }
+
         try
         {
             _sup.StartEmbedAndRank(); // 前回クラッシュ・tier変更後のStopAll等で止まっていたら自己修復
@@ -414,7 +496,6 @@ public sealed class ChatFlow
 
             // 2) 回答キャッシュ（cos>=0.97 → 即時）。LLM未ロードでも返せるのでEnsureLlmより前に置く
             // 日付感応質問（「今日は何日」等）は正解が日付で変わるためキャッシュから読まない
-            bool timeSensitive = Rag.TimeSensitiveQuestion().IsMatch(message);
             if (!timeSensitive)
             lock (_cacheLock)
             {
@@ -1079,7 +1160,12 @@ public sealed class ChatFlow
 
             var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
             var responseKind = clarifyConfirm ? "clarify" : "answer";
-            var route = clarifyConfirm ? "clarify" : "rag";
+            var route = clarifyConfirm ? "clarify" : intent.Route switch
+            {
+                AnswerRoute.MultiPart => "rag-multi",
+                AnswerRoute.DrawingQa => "rag-drawing",
+                _ => "rag",
+            };
             _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,$k)",
                 ("$c", chatId), ("$m", finalText), ("$s", sourcesJson), ("$k", responseKind));
             _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));

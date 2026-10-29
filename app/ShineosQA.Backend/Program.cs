@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http.Extensions;
 
 namespace ShineosQA.Backend;
@@ -262,6 +262,48 @@ public static class Api
 
         // 回答キャッシュ全消去（開発・運用用）
         app.MapPost("/api/cache-clear", () => { ctx.Flow.ClearCache(); return Results.Ok(new { ok = true }); });
+
+        // 現場の正解（FAQ）: 承認済みの質問はLLMを使わず即答する。DifyのAnnotation Reply相当。
+        // ローカルDBのみ・外部送信なし。sourcesは回答時の出典JSONをそのまま保持する。
+        app.MapGet("/api/faq", (string? status) => Results.Json(new
+        {
+            items = ctx.Flow.Faq.List(status).Select(e => new
+            {
+                id = e.Id, question = e.Question, answer = e.Answer,
+                sources = JsonSerializer.Deserialize<object>(e.SourcesJson) ?? Array.Empty<object>(),
+                hits = e.Hits,
+            }),
+        }));
+        app.MapPost("/api/faq", async (HttpRequest req) =>
+        {
+            using var doc = await JsonDocument.ParseAsync(req.Body);
+            var root = doc.RootElement;
+            var question = root.TryGetProperty("question", out var q) ? q.GetString() : null;
+            var answer = root.TryGetProperty("answer", out var a) ? a.GetString() : null;
+            if (string.IsNullOrWhiteSpace(question) || string.IsNullOrWhiteSpace(answer))
+                return Results.Json(new { ok = false, error = "question and answer are required" }, statusCode: 400);
+            var sources = root.TryGetProperty("sources", out var s) ? s.GetRawText() : "[]";
+            var status = root.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String
+                ? st.GetString()! : "published";
+            var variants = root.TryGetProperty("variants", out var vs) && vs.ValueKind == JsonValueKind.Array
+                ? vs.EnumerateArray().Select(v => v.GetString() ?? "").Where(v => v.Length > 0).ToArray()
+                : Array.Empty<string>();
+            var tags = root.TryGetProperty("tags", out var tg) && tg.ValueKind == JsonValueKind.String ? tg.GetString()! : "";
+            try
+            {
+                var id = ctx.Flow.Faq.Upsert(question, answer, sources, variants, status, tags);
+                return Results.Json(new { ok = true, id });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.Message }, statusCode: 400);
+            }
+        });
+        app.MapDelete("/api/faq/{id}", (long id) =>
+        {
+            ctx.Flow.Faq.Delete(id);
+            return Results.Json(new { ok = true });
+        });
 
         // SPAルーティング: /c/{uuid} などAPI以外のパスはindex.htmlへフォールバック
         app.MapFallback(async (HttpContext http) =>

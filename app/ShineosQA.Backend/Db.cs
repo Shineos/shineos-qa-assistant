@@ -7,9 +7,9 @@ namespace ShineosQA.Backend;
 /// files.content_hash（取り込み重複排除）・ExecTransaction（取り込みの原子的確定）を追加</summary>
 public sealed class Db : IDisposable
 {
-    /// <summary>適用済みスキーマ版。1=初期スキーマ〜図面/実績拡張、2=content_hash＋原子性（Phase 0.2）。
-    /// マイグレーションを追加したらこの値を上げ、下の適用ブロックも更新する</summary>
-    public const int SchemaVersion = 2;
+    /// <summary>適用済みスキーマ版。1=初期スキーマ〜図面/実績拡張、2=content_hash＋原子性（Phase 0.2）、
+    /// 3=FAQ（現場の正解）＋別名（Phase B）。マイグレーションを追加したらこの値を上げ、下の適用ブロックも更新する</summary>
+    public const int SchemaVersion = 3;
 
     private readonly SqliteConnection _conn;
     private readonly object _lock = new();
@@ -88,6 +88,29 @@ public sealed class Db : IDisposable
               mitumori TEXT, genka TEXT, nouki TEXT,
               PRIMARY KEY(file_id, row_no));
             CREATE INDEX IF NOT EXISTS idx_jisseki_meta_norm ON jisseki_meta(zuban_norm);
+            """);
+        // 現場の正解（FAQ）: DifyのAnnotation Replyに相当。LLMを使わない即答の供給源。
+        // question_norm は QuestionNorm.Normalize（NFKC・小文字・空白/句読点除去・カタカナ→ひらがな）。
+        // status: published=即答に使う / candidate=改善候補（承認待ち）
+        Exec("""
+            CREATE TABLE IF NOT EXISTS faq(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              question TEXT NOT NULL,
+              question_norm TEXT NOT NULL UNIQUE,
+              answer TEXT NOT NULL,
+              sources_json TEXT,
+              tags TEXT NOT NULL DEFAULT '',
+              status TEXT NOT NULL DEFAULT 'published',
+              source_hashes TEXT,
+              hits INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+            CREATE TABLE IF NOT EXISTS faq_variants(
+              faq_id INTEGER NOT NULL REFERENCES faq(id) ON DELETE CASCADE,
+              variant_norm TEXT NOT NULL,
+              PRIMARY KEY(faq_id, variant_norm));
+            CREATE INDEX IF NOT EXISTS idx_faq_variants_norm ON faq_variants(variant_norm);
+            CREATE INDEX IF NOT EXISTS idx_faq_status ON faq(status);
             """);
         // スキーマ版管理（Phase 0.2）: 1行のみ保持し、コード側の現行版との差で将来のマイグレーションを判定できる。
         // 適用は「記録が古い場合のみ更新」する upsert（現行版を記録するだけ。DOWNは扱わない）

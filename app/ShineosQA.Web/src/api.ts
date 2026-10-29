@@ -132,7 +132,7 @@ export async function streamChat(
     outline?: (d: { title: string; sections: { Title: string; Goal: string }[] }) => void;
     section_start?: (d: { index: number; title: string }) => void;
     section_done?: (d: { index: number }) => void;
-    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; suggest_web?: boolean; template?: string; auto_inferred?: boolean; title?: string; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number }) => void;
+    done?: (d: { cached: boolean; kind?: string | null; guard?: string | null; suggest_web?: boolean; template?: string; auto_inferred?: boolean; title?: string; sources?: SourceInfo[]; ttfb_ms?: number; ms?: number; route?: string; confidence?: number; instant?: boolean }) => void;
     clarify?: (d: { zuban: string; message: string; options: { file_id: number; file: string; zuban: string; revision: string | null; hinmei: string | null }[] }) => void;
     error?: (d: { code: string; message: string }) => void;
   },

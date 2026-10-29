@@ -1271,7 +1271,16 @@ export class ChatView {
               }
             }
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
-            this.setStatus(`⏱ ${secs}s${d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
+            // 即答ルート（FAQ・図面台帳・実績）はサーバ実測msを表示し、どの経路で答えたかを明示する。
+            // 通常RAGは従来どおりクライアント経過秒（体感）を表示する。
+            const routeLabel = d.route === 'faq' ? 'FAQ即答'
+              : d.route === 'drawing' ? '図面台帳'
+              : d.route === 'jisseki' ? '実績'
+              : d.route === 'rag-drawing' ? '図面検索'
+              : d.route === 'rag-multi' ? '複合質問'
+              : '';
+            const timeLabel = d.instant && typeof d.ms === 'number' ? `${d.ms}ms` : `${secs}s`;
+            this.setStatus(`⏱ ${timeLabel}${routeLabel ? '・' + routeLabel : ''}${!routeLabel && d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
             // Store評価導線: 通常回答（kind=answer）のみカウント。確認促進・拒否・clarifyは成功体験でない。
             // 旧バックエンド(kind無し)との互換: guard無し+出典ありをフォールバックで正常回答とみなす
             const isAnswer = d.kind ? d.kind === 'answer' : !d.guard && (d.sources ?? []).length > 0;
