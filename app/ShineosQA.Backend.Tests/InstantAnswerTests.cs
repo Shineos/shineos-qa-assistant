@@ -89,6 +89,24 @@ public sealed class InstantAnswerTests : IDisposable
     }
 
     [Fact]
+    public void DrawingCompare_ReportsFieldDiff()
+    {
+        var fidA = AddFile("ST-3000-A.pdf");
+        _db.Exec("INSERT INTO drawing_meta(file_id,zuban_raw,zuban_norm,hinmei,zairyo,scale,revision) " +
+                 "VALUES($f,'ST-3000','st3000','ブラケット','SUS304','1:2','A')", ("$f", fidA));
+        var fidB = AddFile("ST-3000-B.pdf");
+        _db.Exec("INSERT INTO drawing_meta(file_id,zuban_raw,zuban_norm,hinmei,zairyo,scale,revision) " +
+                 "VALUES($f,'ST-3000','st3000','ブラケット','S45C','1:2','B')", ("$f", fidB));
+
+        Assert.True(DrawingCompareQuery.TryAnswer(_db, "ST-3000の改訂AとBの違いは？", "st3000",
+            out var answer, out var sources, out var conf));
+        Assert.Contains("SUS304 → S45C", answer);
+        Assert.Contains("変更なし: 品名、尺度", answer);
+        Assert.Equal(2, sources.Count);
+        Assert.Equal(1.0, conf);
+    }
+
+    [Fact]
     public void JissekiQuery_AnswersEstimateAndCost()
     {
         var fid = AddFile("jisseki.xlsx");

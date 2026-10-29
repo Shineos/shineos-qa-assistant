@@ -26,6 +26,8 @@ public class IntentRouterTests
     [InlineData("図面 ST-1042A の尺度は？", AnswerRoute.DrawingMeta, "scale")]
     [InlineData("ST-1042Aの寸法は？", AnswerRoute.DrawingQa, null)]
     [InlineData("ST-1042Aの見積は？", AnswerRoute.Jisseki, null)]
+    [InlineData("ST-1042Aの改訂AとBの違いは？", AnswerRoute.DrawingCompare, null)]
+    [InlineData("ST-1042Aの変更点を教えて", AnswerRoute.DrawingCompare, null)]
     [InlineData("経費精算の手順は？", AnswerRoute.DocQa, null)]
     [InlineData("図面の見方は？", AnswerRoute.DrawingQa, null)]
     [InlineData("テスト", AnswerRoute.Clarify, null)]

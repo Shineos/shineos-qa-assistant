@@ -9,6 +9,7 @@ public enum AnswerRoute
 {
     DocQa,        // 通常のRAG
     DrawingMeta,  // 図面台帳（drawing_meta）からの決定論回答
+    DrawingCompare, // 同一図番の改訂差分（drawing_meta）
     Jisseki,      // 実績表（jisseki_meta）からの決定論回答
     MultiPart,    // 複合質問（現時点ではDocQaと同じRAG。分解はPhase C）
     DrawingQa,    // 図面意図のRAG（注記・公差など）
@@ -50,6 +51,10 @@ public static partial class IntentRouter
         @"見積|原価|仕入|納期|納入|実績|コスト",
         RegexOptions.Compiled);
 
+    private static readonly Regex CompareRegex = new(
+        @"比較|違い|差分|変更点|何が変わ|どこが変わ|旧版|新版",
+        RegexOptions.Compiled);
+
     // 複合質問の目安。現時点ではルートを分けず、将来の分解パイプラインの判定に使う
     private static readonly Regex MultiPartRegex = new(
         @"それぞれ|両方|および|ならびに|と比べ|比較(して|する)|すべて|一覧|いくつ|何日|何件|合計|平均",
@@ -84,6 +89,10 @@ public static partial class IntentRouter
         var zubans = DrawingIngest.ZubansIn(text);
         var attrs = FindDrawingAttributes(text);
         bool complex = ComplexRegex.IsMatch(text);
+
+        // 同一図番の改訂比較（「改訂AとBの違いは？」「改訂Bの変更点は？」）
+        if (zubans.Count > 0 && CompareRegex.IsMatch(text))
+            return new(AnswerRoute.DrawingCompare, 0.9, "drawing-compare", zubans[0]);
 
         // 図番＋属性のみ（公差・寸法・見積など、表題欄の外側を聞いていない）
         if (zubans.Count > 0 && attrs.Count > 0 && !complex)

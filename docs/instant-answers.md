@@ -10,6 +10,7 @@
 |---|---|---|---|
 | `faq` | 正規化質問が公開FAQ（または別名）に完全一致。日付感応質問は除外 | DB検索のみ | 42 ms（サーバ） / 96 ms（クライアント） |
 | `drawing` | 図番＋表題欄の属性（材質/品名/改訂/尺度/承認日/図番）のみ。公差・寸法・注記・見積などが混ざる質問は対象外 | `drawing_meta`を直接返す | 数十ms |
+| `drawing-compare` | 図番＋比較語（比較/違い/差分/変更点/旧版/新版） | 2改訂の表題欄差分を返す | 数十ms |
 | `jisseki` | 図番＋見積/原価/納期/実績。属性質問が混ざる場合は対象外 | `jisseki_meta`を直接返す | 数十ms |
 | `rag` / `rag-drawing` / `rag-multi` | 上記以外 | 従来のRAG | 従来どおり |
 | `clarify` | 3文字以下など | 従来の確認促進 | — |
@@ -40,6 +41,8 @@
   - `図番 ST-1042A（改訂 B）の材質は SUS304 です。`
   - 複数: `図番 ST-2000 は複数の改訂が登録されています。- 改訂 A: 材質 SUS304 ...`
 - 出典: `SourceInfo`に`is_drawing=true`・図番・品名・改訂を設定。既存の図面出典UI・プレビューがそのまま使える。
+- 改訂比較: 「改訂AとBの違いは？」「改訂Bの変更点は？」は、同一図番の2改訂の表題欄（品名/材質/尺度/承認日）を比較し、
+  差分と変更なし項目を返す。2改訂の指定が無い場合は最新2件を比較する。注記・寸法の差分はPhase Dで本文差分を追加する。
 
 ## 4. 実績
 
@@ -49,7 +52,7 @@
 
 ## 5. 変更ファイル
 
-- 追加: `IntentRouter.cs`, `QuestionNorm.cs`, `FaqStore.cs`, `DrawingQuery.cs`, `JissekiQuery.cs`
+- 追加: `IntentRouter.cs`, `QuestionNorm.cs`, `FaqStore.cs`, `DrawingQuery.cs`, `DrawingCompareQuery.cs`, `JissekiQuery.cs`
 - 変更: `ChatFlow.cs`（即答分岐・SSE `route`/`confidence`/`instant`）、`Db.cs`（schema v3）、`Program.cs`（`/api/faq`）
 - 追加テスト: `IntentRouterTests.cs`, `InstantAnswerTests.cs`（FAQ・図面・実績）
 - UI: `chat.ts`（即答時のサーバ実測msとルート表示）、`api.ts`（done型）

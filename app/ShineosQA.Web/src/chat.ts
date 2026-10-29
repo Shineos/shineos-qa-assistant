@@ -1275,6 +1275,7 @@ export class ChatView {
             // 通常RAGは従来どおりクライアント経過秒（体感）を表示する。
             const routeLabel = d.route === 'faq' ? 'FAQ即答'
               : d.route === 'drawing' ? '図面台帳'
+              : d.route === 'drawing-compare' ? '改訂比較'
               : d.route === 'jisseki' ? '実績'
               : d.route === 'rag-drawing' ? '図面検索'
               : d.route === 'rag-multi' ? '複合質問'

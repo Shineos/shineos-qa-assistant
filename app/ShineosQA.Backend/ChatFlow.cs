@@ -469,6 +469,15 @@ public sealed class ChatFlow
             await AnswerDeterministicAsync(ctx, chatId, drawingAnswer, drawingSources, "drawing", drawingConf, sw);
             return;
         }
+        // 改訂比較: 同一図番の2改訂の表題欄差分を決定論的に返す
+        if (!timeSensitive && intent.Route == AnswerRoute.DrawingCompare
+            && intent.Zuban is { Length: > 0 } compareZuban
+            && DrawingCompareQuery.TryAnswer(_db, message, compareZuban, out var compareAnswer, out var compareSources, out var compareConf))
+        {
+            _log.Info($"drawing-compare answer: zuban={compareZuban} conf={compareConf:F2}");
+            await AnswerDeterministicAsync(ctx, chatId, compareAnswer, compareSources, "drawing-compare", compareConf, sw);
+            return;
+        }
         // 実績表: 図番＋見積/原価/納期の質問もDBの値で答える
         if (!timeSensitive && intent.Route == AnswerRoute.Jisseki
             && intent.Zuban is { Length: > 0 } jissekiZuban
