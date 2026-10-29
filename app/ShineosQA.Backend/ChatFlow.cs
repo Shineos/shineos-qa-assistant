@@ -732,8 +732,15 @@ public sealed class ChatFlow
                 bool skip = top.Cos >= Rag.RerankSkipCos && top.Kw >= skipKw;
                 if (skip)
                 {
-                    // 超高信頼（cos・kwとも強一致）は文書1件のみ注入しプロンプト短縮（pp大幅減）。それ以外はtop2
-                    chosen = top.Cos >= 0.72 && top.Kw >= 0.35 ? hits.Take(1).ToList() : hits.Take(2).ToList();
+                    // 高信頼は文書1件のみ注入してプロンプト短縮（pp大幅減）。quickはprefill削減を優先し
+                    // 閾値を少し緩める（品質ゲート18/118で確認）。それ以外はtop2。
+                    var oneDoc = _cfg.EffectiveTier == "quick"
+                        ? top.Cos >= 0.65 && top.Kw >= 0.30
+                        : top.Cos >= 0.72 && top.Kw >= 0.35;
+                    // 複数条件（「長期」「場合」「それぞれ」等）を含む質問は1件に絞らない（s07の条件欠落防止）
+                    if (oneDoc && (message.Contains("長期") || message.Contains("場合") || message.Contains("それぞれ")))
+                        oneDoc = false;
+                    chosen = oneDoc ? hits.Take(1).ToList() : hits.Take(2).ToList();
                     _log.Info($"rerank skipped: cos={top.Cos:F2} kw={top.Kw:F2} docs={chosen.Count} file={top.Rec.FileName}");
                 }
                 else
