@@ -2,9 +2,15 @@ using Microsoft.Data.Sqlite;
 
 namespace ShineosQA.Backend;
 
-/// <summary>SQLite永続化（knowledge.db）。設計: architecture-v2.md §5.4</summary>
+/// <summary>SQLite永続化（knowledge.db）。設計: architecture-v2.md §5.4。
+/// Phase 0.2: foreign_keys=ON（DELETE CASCADEの実効化）・起動時孤児行クリーンアップ・schema_version・
+/// files.content_hash（取り込み重複排除）・ExecTransaction（取り込みの原子的確定）を追加</summary>
 public sealed class Db : IDisposable
 {
+    /// <summary>適用済みスキーマ版。1=初期スキーマ〜図面/実績拡張、2=content_hash＋原子性（Phase 0.2）。
+    /// マイグレーションを追加したらこの値を上げ、下の適用ブロックも更新する</summary>
+    public const int SchemaVersion = 2;
+
     private readonly SqliteConnection _conn;
     private readonly object _lock = new();
 
@@ -13,8 +19,12 @@ public sealed class Db : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         _conn = new SqliteConnection($"Data Source={path};Cache=Shared");
         _conn.Open();
+        // WALと併用。foreign_keysは接続単位の設定のため、接続を開くたび（＝起動ごと）に有効化する。
+        // これにより chunks/drawing_meta/jisseki_meta の ON DELETE CASCADE が実際に効く
         Exec("PRAGMA journal_mode=WAL");
+        Exec("PRAGMA foreign_keys=ON");
         InitSchema();
+        CleanupOrphans();
     }
 
     private void InitSchema()
@@ -58,6 +68,9 @@ public sealed class Db : IDisposable
         try { Exec("ALTER TABLE chats ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"); } catch { }
         // チャットブックマーク: 0=通常 / 1=ブックマーク済み（⭐表示）
         try { Exec("ALTER TABLE chats ADD COLUMN bookmarked INTEGER NOT NULL DEFAULT 0"); } catch { }
+        // 取り込み重複排除（Phase 0.2）: 元ファイル内容のSHA-256 hex。既存DBはNULLのまま
+        // （重複判定は status='ready' かつ同一hashの行のみを対象にするため、NULL行は従来どおり取り込める）
+        try { Exec("ALTER TABLE files ADD COLUMN content_hash TEXT"); } catch { }
         Exec("""
             CREATE TABLE IF NOT EXISTS drawing_meta(
               file_id INTEGER PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,
@@ -76,7 +89,45 @@ public sealed class Db : IDisposable
               PRIMARY KEY(file_id, row_no));
             CREATE INDEX IF NOT EXISTS idx_jisseki_meta_norm ON jisseki_meta(zuban_norm);
             """);
+        // スキーマ版管理（Phase 0.2）: 1行のみ保持し、コード側の現行版との差で将来のマイグレーションを判定できる。
+        // 適用は「記録が古い場合のみ更新」する upsert（現行版を記録するだけ。DOWNは扱わない）
+        Exec("""
+            CREATE TABLE IF NOT EXISTS schema_version(
+              id INTEGER PRIMARY KEY CHECK(id = 1),
+              version INTEGER NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+            """);
+        Exec("INSERT INTO schema_version(id, version, updated_at) VALUES(1, $v, datetime('now')) "
+            + "ON CONFLICT(id) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at "
+            + "WHERE schema_version.version < excluded.version", ("$v", SchemaVersion));
+        // content_hash の検索用インデックス（重複判定は files(content_hash) の等値検索のみ）
+        Exec("CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash)");
         MigrateChatsUuid();
+    }
+
+    /// <summary>起動時に1回だけ実行する孤児行クリーンアップ（Phase 0.2）。
+    /// foreign_keys=ON以前のDBや、当時のFK未実効により files から消えた file_id を持つ
+    /// chunks/drawing_meta/jisseki_meta を削除する。通常は孤児が無いため EXISTS の短絡探索のみで終わり、
+    /// 大量データでもコストはほぼゼロ（1行でも見つかった時だけトランザクションで削除する）。
+    /// 失敗しても起動は止めない（整合性の問題はFK/今後の削除で再発しないため）</summary>
+    private void CleanupOrphans()
+    {
+        try
+        {
+            var orphan = Convert.ToInt64(Scalar("""
+                SELECT EXISTS(SELECT 1 FROM chunks c WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.file_id=c.file_id))
+                    OR EXISTS(SELECT 1 FROM drawing_meta d WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.file_id=d.file_id))
+                    OR EXISTS(SELECT 1 FROM jisseki_meta j WHERE NOT EXISTS(SELECT 1 FROM files f WHERE f.file_id=j.file_id))
+                """));
+            if (orphan == 0) return;
+            ExecTransaction(new[]
+            {
+                ("DELETE FROM chunks WHERE file_id NOT IN (SELECT file_id FROM files)", Array.Empty<(string, object?)>()),
+                ("DELETE FROM drawing_meta WHERE file_id NOT IN (SELECT file_id FROM files)", Array.Empty<(string, object?)>()),
+                ("DELETE FROM jisseki_meta WHERE file_id NOT IN (SELECT file_id FROM files)", Array.Empty<(string, object?)>()),
+            });
+        }
+        catch { /* クリーンアップ失敗で起動を妨げない（次回起動で再試行される） */ }
     }
 
     /// <summary>chats.uuid カラムの追加と既存行へのバックフィル（URLルーティング /c/{uuid} 用）</summary>
@@ -130,6 +181,38 @@ public sealed class Db : IDisposable
         }
     }
 
+    /// <summary>複数コマンドを単一接続・単一トランザクションで実行する（Phase 0.2）。
+    /// 取り込みの最終確定（files.status/chunk_count/kind ＋ chunks全件 ＋ drawing_meta/jisseki_meta）を
+    /// 原子的に行うための汎用API。1つでも失敗したらROLLBACKして例外を再送出し、部分確定を残さない。
+    /// 既存のExec/Queryと同じ _lock 内で実行するため他の読み書きとは直列化される（Monitorは再入可能）</summary>
+    public void ExecTransaction(IReadOnlyList<(string Sql, (string Name, object? Value)[] Params)> commands)
+    {
+        lock (_lock)
+        {
+            Exec("BEGIN");
+            try
+            {
+                foreach (var (sql, ps) in commands)
+                {
+                    using var cmd = _conn.CreateCommand();
+                    cmd.CommandText = sql;
+                    foreach (var (name, value) in ps) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+                    cmd.ExecuteNonQuery();
+                }
+                Exec("COMMIT");
+            }
+            catch
+            {
+                try { Exec("ROLLBACK"); } catch { /* BEGIN前に失敗した等。原例外を優先 */ }
+                throw;
+            }
+        }
+    }
+
+    /// <summary>適用済みスキーマ版（未記録=0）。テスト・将来のマイグレーション判定用</summary>
+    public int GetSchemaVersion() =>
+        Convert.ToInt32(Scalar("SELECT version FROM schema_version WHERE id=1") ?? 0);
+
     public object? Scalar(string sql, params (string, object?)[] p)
     {
         lock (_lock)
@@ -177,6 +260,17 @@ public sealed class Db : IDisposable
     public void InsertChunk(long fileId, int seq, string text, byte[] emb) =>
         Exec("INSERT INTO chunks(file_id, seq, text, emb) VALUES($f,$s,$t,$e)",
             ("$f", fileId), ("$s", seq), ("$t", text), ("$e", emb));
+
+    /// <summary>同一内容（SHA-256 hex）で status='ready' の既存ファイルIDを返す（無ければnull）。
+    /// 取り込み重複排除の判定用。status='error'/'parsing'/'embedding' の行は対象外
+    /// （失敗した取り込みを「重複」として握りつぶさず、再取り込みを許可する）</summary>
+    public long? FindReadyFileByHash(string contentHash)
+    {
+        if (string.IsNullOrWhiteSpace(contentHash)) return null;
+        var v = Scalar("SELECT file_id FROM files WHERE content_hash=$h AND status='ready' ORDER BY file_id LIMIT 1",
+            ("$h", contentHash));
+        return v is null ? null : Convert.ToInt64(v);
+    }
 
     public string GetSetting(string key, string def)
     {

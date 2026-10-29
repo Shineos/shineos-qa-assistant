@@ -8,6 +8,7 @@ namespace ShineosQA.Backend.Tests;
 /// <summary>T8スパイク: Windows内蔵OCR（Windows.Media.Ocr）が自己完結publish環境で動くことの実証。
 /// ja-JP言語パック未導入環境では IsAvailable=false のため検証をスキップする（機能無効化経路の設計どおり）。
 /// 回転対応・画像のみPDF救済は実図面検証（90°回転の組立図が文字化け／スキャン図面が取り込み不可）の根本対策</summary>
+[Collection("Windows OCR")]
 public class OcrTests
 {
     private static string TestDataPath(string name) =>

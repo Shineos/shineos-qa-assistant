@@ -5,6 +5,7 @@ namespace ShineosQA.Backend.Tests;
 /// <summary>スキャン図面パイプライン（v2.4.0）の回帰テスト: 低コントラスト・スキャン固定資産
 /// (lowcontrast-drawing.pdf=画像のみPDF)がOCR救済され、デュアルパス・表題欄切り出し再OCRが
 /// 破綻しないこと。OCR結果は環境差が出るため固いアサートは構造のみ（読取内容は出力で確認）</summary>
+[Collection("Windows OCR")]
 public class ScanDrawingPipelineTests
 {
     [Fact]

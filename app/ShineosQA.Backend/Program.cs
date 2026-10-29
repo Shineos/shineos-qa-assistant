@@ -55,6 +55,55 @@ public static class Api
             ram_gb = AppConfig.TotalRamGb(),
         }));
 
+        // レイテンシ計測（Phase 0.1）: 直近200件のp50/p95。**ローカル完結**（外部送信なし）。
+        // stages のキーは POST /api/chat の done イベントと同一。
+        app.MapGet("/api/diagnostics", () =>
+        {
+            var snap = ctx.Diag.Snapshot();
+            return Results.Json(new
+            {
+                version = appVersion,
+                tier = cfg.EffectiveTier,
+                chunks = index.Count,
+                engines = sup.Status(),
+                cache = flow.CacheCount,
+                requests = snap.Samples,
+                cached_requests = snap.CachedSamples,
+                ttft_p50_ms = snap.TtfbP50Ms,
+                ttft_p95_ms = snap.TtfbP95Ms,
+                stages = snap.Stages,
+            });
+        });
+
+        // エンジン事前ウォーム（Phase 1.1の補助）: UI起動時や階級切替後に呼ぶと、初回質問の
+        // モデルロード待ち（2〜5秒）を先に済ませられる。失敗は503＋エラーコード（JSON）。
+        app.MapPost("/api/warmup", async () =>
+        {
+            try
+            {
+                sup.StartEmbedAndRank();
+                await Task.Run(() => sup.EnsureLlm());
+                await gw.EmbedAsync(cfg.EnginePortEmb, new[] { "ウォームアップ" }, CancellationToken.None);
+                // リランカは任意モデル: 未導入・失敗でもQ&Aは継続できるため、ウォーム全体は成功扱い
+                // （rerankだけの失敗で503を返すとUIが「エンジン障害」と誤認する）
+                if (sup.IsRankAlive)
+                {
+                    try { await gw.RerankAsync(cfg.EnginePortRank, "ウォームアップ", new[] { "ウォームアップ" }, 1, CancellationToken.None); }
+                    catch (Exception ex) { log.Warn($"warmup: rerank warm failed: {ex.Message}"); }
+                }
+                return Results.Json(new { ok = true, engines = sup.Status() });
+            }
+            catch (Exception ex)
+            {
+                var code = ex is FileNotFoundException ? "SHINE_E_MODEL_NOT_FOUND"
+                    : ex.Message.Contains("SHINE_E_MODEL_HASH") ? "SHINE_E_MODEL_HASH"
+                    : ex.Message.Contains("SHINE_E_ENGINE_DOWN") ? "SHINE_E_ENGINE_DOWN"
+                    : "SHINE_E_INTERNAL";
+                log.Warn($"warmup failed: {ex.Message}");
+                return Results.Json(new { ok = false, code, message = ex.Message }, statusCode: 503);
+            }
+        });
+
         app.MapGet("/api/settings", () => Results.Json(new
         {
             web_search = bool.TryParse(db.GetSetting("web_search", cfg.WebSearch.ToString()), out var w) && w,
@@ -541,6 +590,7 @@ public sealed class AppCtx
     public required ChatFlow Flow;
     public required ModelManager Models;
     public required LlmGateway Gateway; // /api/ocrの視覚モデルAI読取から共用
+    public required Diagnostics Diag;   // レイテンシ計測（/api/diagnostics の供給元）
 }
 
 public sealed class Program
@@ -726,8 +776,9 @@ public sealed class Program
         var index = new ChunkIndex();
         index.LoadFrom(db);
         var ingest = new Ingest(db, gw, sup, index, cfg, log);
-        var flow = new ChatFlow(cfg, db, sup, gw, index, new WebSearch(), log);
-        var ctx = new AppCtx { Cfg = cfg, Db = db, Sup = sup, Index = index, Ingest = ingest, Flow = flow, Models = new ModelManager(cfg, log), Log = log, Gateway = gw };
+        var diag = new Diagnostics(); // レイテンシ計測（直近200件・ローカルのみ）
+        var flow = new ChatFlow(cfg, db, sup, gw, index, new WebSearch(), log, diag);
+        var ctx = new AppCtx { Cfg = cfg, Db = db, Sup = sup, Index = index, Ingest = ingest, Flow = flow, Models = new ModelManager(cfg, log), Log = log, Gateway = gw, Diag = diag };
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>(), ContentRootPath = AppContext.BaseDirectory, WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot") });
         builder.WebHost.ConfigureKestrel(o => o.Listen(System.Net.IPAddress.Loopback, cfg.Port));

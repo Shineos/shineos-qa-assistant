@@ -21,14 +21,15 @@ public sealed class ChatFlow
     private readonly ChunkIndex _index;
     private readonly WebSearch _web;
     private readonly ILogger _log;
+    private readonly Diagnostics _diag;
     private readonly object _cacheLock = new();
     private List<CacheEntry> _cache = new();
 
     private sealed record CacheEntry(string Question, string Answer, string SourcesJson, float[] Emb, string Model, long Id);
 
-    public ChatFlow(AppConfig cfg, Db db, Supervisor sup, LlmGateway gw, ChunkIndex index, WebSearch web, ILogger log)
+    public ChatFlow(AppConfig cfg, Db db, Supervisor sup, LlmGateway gw, ChunkIndex index, WebSearch web, ILogger log, Diagnostics diag)
     {
-        _cfg = cfg; _db = db; _sup = sup; _gw = gw; _index = index; _web = web; _log = log; LoadCache();
+        _cfg = cfg; _db = db; _sup = sup; _gw = gw; _index = index; _web = web; _log = log; _diag = diag; LoadCache();
         // プロンプト仕様変更時は旧プロンプトで生成した回答キャッシュを無効化（誤回答の恒久化防止）
         if (_db.GetSetting("prompt_version", "") != Rag.PromptVersion)
         {
@@ -51,6 +52,26 @@ public sealed class ChatFlow
         _db.Exec("DELETE FROM answer_cache");
         lock (_cacheLock) _cache.Clear();
     }
+
+    /// <summary>メモリ上の回答キャッシュ件数（GET /api/diagnostics の cache 表示用）</summary>
+    public int CacheCount { get { lock (_cacheLock) return _cache.Count; } }
+
+    // ---- 計測ヘルパー（Phase 0.1） ----
+
+    /// <summary>ステージ経過msの差分。マーク未設定(0)や未計測(-1)は0に落とす（負値・巨大値を出さない）</summary>
+    private static long Diff(long mark, long baseMark) =>
+        mark > 0 && baseMark > 0 ? Math.Max(0, mark - baseMark) : 0;
+
+    /// <summary>done の stages フィールド。キーは /api/diagnostics の stages と同一。</summary>
+    private static object Stages(long firstTokenMs, long totalMs, long tEmbed, long tSearch, long tRetrieve, long tPrompt) => new
+    {
+        t_embed_ms = tEmbed,
+        t_search_ms = Diff(tSearch, tEmbed),
+        t_retrieve_ms = Diff(tRetrieve, tEmbed),
+        t_prompt_ms = Diff(tPrompt, tRetrieve),
+        t_first_token_ms = firstTokenMs,
+        t_total_ms = totalMs,
+    };
 
     public sealed class SourceInfo
     {
@@ -254,6 +275,35 @@ public sealed class ChatFlow
     /// 全文をプロンプトへ注入する（2026-10-23・Dify FAQボット式の全量コンテキスト設計）</summary>
     private const int FullContextMaxChars = 3000;
 
+    /// <summary>全量コンテキストのチャンク読み込み（Phase 1.2修正・テスト可能なよう切り出し）。
+    /// 旧実装は c.seq を取らず Seq=0 固定で合成していたため、隣接chunk連結が全チャンクに
+    /// 同じ seq1 を付加し、出典本文の重複を生んでいた。status='ready' のみを対象にする
+    /// （索引 ChunkIndex.LoadFrom と母集団を揃える）。</summary>
+    internal static List<ChunkIndex.HybridHit> LoadFullContextChunks(Db db)
+    {
+        var list = new List<ChunkIndex.HybridHit>();
+        foreach (var row in db.Query(
+            "SELECT c.file_id AS fid, f.name AS name, c.seq AS seq, c.text AS text " +
+            "FROM chunks c JOIN files f ON f.file_id = c.file_id WHERE f.status='ready' ORDER BY c.file_id, c.seq"))
+        {
+            var fid = Convert.ToInt64(row["fid"] ?? 0L);
+            var seq = Convert.ToInt32(row["seq"] ?? 0);
+            var text = Convert.ToString(row["text"]) ?? "";
+            list.Add(new ChunkIndex.HybridHit
+            {
+                Rec = new ChunkIndex.Rec(fid, fid, Convert.ToString(row["name"]) ?? "?", seq, text,
+                    Array.Empty<float>(), new HashSet<string>()),
+            });
+        }
+        return list;
+    }
+
+    /// <summary>出典本文の組み立て（Phase 1.2修正・テスト可能なよう切り出し）。
+    /// 通常RAGでは隣接チャンク(seq+1)を連結してチャンク境界の分断を防ぐが、
+    /// 全量モードは全文注入（全チャンクが chosen に入る）ため連結すると同じ文が二重に入る。</summary>
+    internal static string SourceTextFor(bool fullContext, ChunkIndex.Rec rec, string? nextText) =>
+        fullContext || nextText is null ? rec.Text : rec.Text + "\n" + nextText;
+
     public async Task RunAsync(HttpContext ctx)
     {
         using var body = await JsonDocument.ParseAsync(ctx.Request.Body);
@@ -306,15 +356,24 @@ public sealed class ChatFlow
         _db.Exec("INSERT INTO messages(chat_id, role, content) VALUES($c,'user',$m)", ("$c", chatId), ("$m", message));
         if (captureImage != null) SaveCaptureImage(chatId, captureImage);
 
+        // 分岐判定はLLM確保より先に行う（Phase 1.1）: 要約/下書きは生成直前にLLMが必要なので
+        // 従来どおりここで同期的にEnsureLlmする。通常Q&Aは検索・リランクと並行して起動するため
+        // ここでは確保しない（idle unload後の初回でもモデルロードを検索待ち時間に隠せる）。
+        bool summaryRequested = root.TryGetProperty("summary_file_id", out var sfid) && sfid.ValueKind == JsonValueKind.Number;
+        JsonElement? draftRequest = root.TryGetProperty("draft", out var draftEl) && draftEl.ValueKind == JsonValueKind.Object ? draftEl : null;
+        bool autoDraftRequested = draftRequest is null && !summaryRequested && Draft.LooksLikeCreationRequest(message);
         // 要約・作成モード（v2.5.10修正）: 通常Q&A経路のStartEmbedAndRank/EnsureLlmより前に分岐するため、
         // ここでLLM自己修復を行う。idle unload（既定60分）後に作成/要約すると
         // 「接続できませんでした」network errorになる実測への対策
-        try { _sup.EnsureLlm(); }
-        catch (Exception ex) { _log.Warn($"draft/summary: llm ensure failed: {ex.Message}"); }
+        if (summaryRequested || draftRequest is not null || autoDraftRequested)
+        {
+            try { _sup.EnsureLlm(); }
+            catch (Exception ex) { _log.Warn($"draft/summary: llm ensure failed: {ex.Message}"); }
+        }
 
         // 文書要約（v2.4.1）: ナレッジ一覧の「要約」ボタンからの確定経路。検索top-kを経ず
         // 指定ファイルの全チャンクを注入する（出典=ファイル全体・検索ミスによる幻覚源が存在しない）
-        if (root.TryGetProperty("summary_file_id", out var sfid) && sfid.ValueKind == JsonValueKind.Number)
+        if (summaryRequested)
         {
             await SummarizeFileAsync(ctx, chatId, sfid.GetInt64(), sw);
             return;
@@ -322,15 +381,15 @@ public sealed class ChatFlow
 
         // 下書き作成モード（v2.5.0）: draft {refs, template, seed} がある場合のみ作成パイプラインへ。
         // 通常Q&A（出典・拒否・チップ）の契約は無改変
-        if (root.TryGetProperty("draft", out var draftEl) && draftEl.ValueKind == JsonValueKind.Object)
+        if (draftRequest is { } draftElement)
         {
-            await DraftAsync(ctx, chatId, message, draftEl, sw);
+            await DraftAsync(ctx, chatId, message, draftElement, sw);
             return;
         }
         // 意図自動判定（2026-10-23・DifyのQuestion Classifier相当）: 作成トグルを押さなくても
         // 「〜を作成してください」等の文書生成指示を検出したら作成パイプラインへ振り分ける。
         // ユーザーはモードを意識せず1つの入力箱だけで使える。方法質問（「〜作成方法を教えて」）はQ&Aのまま
-        if (Draft.LooksLikeCreationRequest(message))
+        if (autoDraftRequested)
         {
             using var autoDraft = JsonDocument.Parse("{\"template\":\"auto\"}");
             _log.Info($"draft auto-detected from message intent: {Truncate(message, 40)}");
@@ -341,6 +400,8 @@ public sealed class ChatFlow
         try
         {
             _sup.StartEmbedAndRank(); // 前回クラッシュ・tier変更後のStopAll等で止まっていたら自己修復
+            // ステージ計測（Phase 0.1）: リクエスト開始からの経過msでマークする。0=未計測（早期return経路）
+            long tEmbed = 0, tSearch = 0, tRetrieve = 0, tPrompt = 0;
 
             // 検索クエリ補強: 指示語・短い質問は直前の質問で補完（「料金はいくら？」等のfollow-up対応）
             var queryForRetrieval = message;
@@ -349,6 +410,7 @@ public sealed class ChatFlow
 
             // 1) 質問埋め込み
             var qEmb = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { queryForRetrieval }, ctx.RequestAborted))[0];
+            tEmbed = sw.ElapsedMilliseconds;
 
             // 2) 回答キャッシュ（cos>=0.97 → 即時）。LLM未ロードでも返せるのでEnsureLlmより前に置く
             // 日付感応質問（「今日は何日」等）は正解が日付で変わるためキャッシュから読まない
@@ -364,8 +426,15 @@ public sealed class ChatFlow
                     _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
                     _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json) VALUES($c,'assistant',$m,$s)",
                         ("$c", chatId), ("$m", hit.Answer), ("$s", hit.SourcesJson));
+                    var cacheTotal = sw.ElapsedMilliseconds;
                     Sse(ctx, "delta", new { content = hit.Answer }).GetAwaiter().GetResult();
-                    Sse(ctx, "done", new { cached = true, kind = "answer", sources = JsonSerializer.Deserialize<object>(hit.SourcesJson), ms = sw.ElapsedMilliseconds }).GetAwaiter().GetResult();
+                    Sse(ctx, "done", new
+                    {
+                        cached = true, kind = "answer", route = "cache",
+                        stages = Stages(cacheTotal, cacheTotal, tEmbed, tSearch, tRetrieve, tPrompt),
+                        sources = JsonSerializer.Deserialize<object>(hit.SourcesJson), ms = cacheTotal,
+                    }).GetAwaiter().GetResult();
+                    _diag.Record(new Diagnostics.Sample("cache", "answer", true, cacheTotal, tEmbed, 0, 0, 0, 0, cacheTotal));
                     return;
                 }
             }
@@ -389,7 +458,22 @@ public sealed class ChatFlow
                     _log.Info("web search: auto-switched to standard tier (quick misreads web references)");
                 }
             }
-            _sup.EnsureLlm(); // idle unload後の再確保（キャッシュヒット時は不要のためここで確保）
+            // LLM確保の並列化（Phase 1.1）: 従来はここで同期的に待っていたため、idle unload後の
+            // 初回質問ではモデルロード（2〜5秒）がWeb検索・検索・リランクと直列になっていた。
+            // Task.Runで開始し、生成直前（またはエージェント経路のLLM呼び出し直前）にawaitする。
+            // 失敗はExceptionDispatchInfoで元例外を再throwし、外側のcatchによるSHINE_E_*分類を保つ。
+            var llmStart = Task.Run(() =>
+            {
+                try { _sup.EnsureLlm(); return (Exception?)null; }
+                catch (Exception ex) { return ex; }
+            });
+            // ローカル関数: 並列起動したEnsureLlmの完了待ち（多重呼び出し可・完了後は即時）
+            async Task EnsureLlmReadyAsync()
+            {
+                var llmError = await llmStart.ConfigureAwait(false);
+                if (llmError is not null)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(llmError).Throw();
+            }
 
             // 3) Web検索（任意）— 失敗・0件はSSEで可視化し、回答にも反映
             // フォローアップ質問（指示語含む・短文）では、生のメッセージではなく
@@ -439,21 +523,32 @@ public sealed class ChatFlow
             bool rerankValidated = true;  // 全量モード=全文注入のため弱一致バックストップの対象外
             var rerankTop1 = double.NegativeInfinity; // リランク実行時のtop1スコア（低信頼×低Kw判定用・未実行時は∞で不発）
             long totalChars = -1;
-            try { totalChars = Convert.ToInt64(_db.Scalar("SELECT COALESCE(SUM(LENGTH(text)),0) FROM chunks")); } catch { }
+            // 全量判定も status='ready' のみを対象にする（旧実装は embedding/error 行の文字数も数えていた）
+            try
+            {
+                totalChars = Convert.ToInt64(_db.Scalar(
+                    "SELECT COALESCE(SUM(LENGTH(c.text)),0) FROM chunks c JOIN files f ON f.file_id = c.file_id WHERE f.status='ready'"));
+            }
+            catch { }
             bool fullContext = totalChars > 0 && totalChars <= FullContextMaxChars;
+            // 隣接チャンク連結の有無を1か所に集約（全量モードは全文注入のため連結しない・Phase 1.2修正）
+            string SourceText(ChunkIndex.Rec r) => SourceTextFor(fullContext, r, fullContext ? null : _index.NextChunkText(r.FileId, r.Seq));
             string fullKb = ""; // 全量モードの社内文書全文（systemブロックへ入れる）
             List<ChunkIndex.HybridHit> hits = new(); // 全量モードでは未使用（図番あいまい性スキャンはchosenで代替）
             if (fullContext)
             {
-                foreach (var row in _db.Query("SELECT f.name AS name, c.text AS text, c.file_id AS fid FROM chunks c JOIN files f ON f.file_id = c.file_id ORDER BY f.file_id, c.seq"))
-                {
-                    var fid = Convert.ToInt64(row["fid"] ?? 0L);
-                    var text = Convert.ToString(row["text"]) ?? "";
-                    chosen.Add(new ChunkIndex.HybridHit { Rec = new ChunkIndex.Rec(fid, fid, Convert.ToString(row["name"]) ?? "?", 0, text, Array.Empty<float>(), new HashSet<string>()) });
-                    docs.Add(text);
-                }
+                chosen = LoadFullContextChunks(_db);
+                docs.AddRange(chosen.Select(h => h.Rec.Text));
                 fullKb = string.Join("\n\n", docs);
+                tSearch = sw.ElapsedMilliseconds; // 全量モードの「検索」= DBからの全チャンク読み込み
                 _log.Info($"full-context mode: {chosen.Count} chunks / {totalChars} chars injected (search+rerank skipped)");
+                // 先行refs（Phase 1.2）: 全量モードは検索が無いので、全文のdistinctファイル名から最大3件を先に通知
+                await Sse(ctx, "refs", new
+                {
+                    files = chosen.Select(h => h.Rec.FileName).Distinct().Take(3).ToArray(),
+                    web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList(),
+                    partial = true,
+                });
             }
             else
             {
@@ -469,6 +564,7 @@ public sealed class ChatFlow
                     if (drawingIds.Contains(h.Rec.FileId)) h.Hybrid *= 1.4;
                 hits = pool.OrderByDescending(h => h.Hybrid).Take(Rag.RerankPool).ToList();
             }
+            tSearch = sw.ElapsedMilliseconds; // ハイブリッド検索完了
             // 日付感応質問（「今日は何日」「今何時」等）は参照情報がなくてもシステム日時から
             // 直接回答する（PCのシステム時計が根拠。ガードで「該当なし」にしない）
             if (hits.Count == 0 && string.IsNullOrEmpty(webContext) && !timeSensitive)
@@ -476,9 +572,23 @@ public sealed class ChatFlow
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "empty", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new
+                {
+                    cached = false, kind = "refusal", route = "refusal", guard = "empty",
+                    stages = Stages(-1, sw.ElapsedMilliseconds, tEmbed, tSearch, tRetrieve, tPrompt),
+                    sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds,
+                });
                 return;
             }
+            // 先行refs（Phase 1.2）: リランク前（ハイブリッド検索直後）に候補を先にUIへ通知し、
+            // リランク待ち（実測~2秒）の間も「どの資料を見ているか」を表示できるようにする。
+            // リランク後に partial=false の確定refsで上書きする。
+            await Sse(ctx, "refs", new
+            {
+                files = hits.Select(h => h.Rec.FileName).Distinct().Take(3).ToArray(),
+                web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList(),
+                partial = true,
+            });
 
             // 5) リランク → ガード（入力はスニペット化して高速化: 約-30%、精度は関連文中心で維持）
             // 注意: 160字への圧縮は実測で品質を落とした（Golden QA 108→101/118。タクシー22時・会議室等の
@@ -520,7 +630,12 @@ public sealed class ChatFlow
                                 var refusal = "該当する記載がありません。" + webNote;
                                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                                 await Sse(ctx, "delta", new { content = refusal });
-                                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "rerank", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
+                                await Sse(ctx, "done", new
+                                {
+                                    cached = false, kind = "refusal", route = "refusal", guard = "rerank",
+                                    stages = Stages(-1, sw.ElapsedMilliseconds, tEmbed, tSearch, tRetrieve, tPrompt),
+                                    sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds,
+                                });
                                 return;
                             }
                             chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
@@ -543,6 +658,7 @@ public sealed class ChatFlow
                 }
             }
             } // end else (従来RAG経路)
+            tRetrieve = sw.ElapsedMilliseconds; // 検索+リランク+ガード完了（ここからプロンプト構築）
             // 回答材料が全く無い場合（Web検索0件＋タイムセンシティブ等）: 空回答の代わりに再試行を案内。
             // Web検索OFF（未試行）なのに「検索に失敗」と案内するのは誤解を招くため、文言を分岐する
             if (chosen.Count == 0 && (webResults == null || webResults.Count == 0) && string.IsNullOrEmpty(webContext))
@@ -553,7 +669,12 @@ public sealed class ChatFlow
                 var guard = webOn ? "web-failed" : "no-material";
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", msg));
                 await Sse(ctx, "delta", new { content = msg });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = guard, sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new
+                {
+                    cached = false, kind = "refusal", route = "refusal", guard = guard,
+                    stages = Stages(-1, sw.ElapsedMilliseconds, tEmbed, tSearch, tRetrieve, tPrompt),
+                    sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds,
+                });
                 return;
             }
             // 弱一致ガード（バックストップ・生成前）: kw≈0の採択を拒否する。識別の主役はリランクスコア
@@ -575,7 +696,12 @@ public sealed class ChatFlow
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "weak-match", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new
+                {
+                    cached = false, kind = "refusal", route = "refusal", guard = "weak-match",
+                    stages = Stages(-1, sw.ElapsedMilliseconds, tEmbed, tSearch, tRetrieve, tPrompt),
+                    sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds,
+                });
                 return;
             }
             // 低信頼×低Kwの組み合わせ拒否: リランクはno-hit帯を逃れたものの確信できないグレー帯
@@ -590,21 +716,26 @@ public sealed class ChatFlow
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "low-conf", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new
+                {
+                    cached = false, kind = "refusal", route = "refusal", guard = "low-conf",
+                    stages = Stages(-1, sw.ElapsedMilliseconds, tEmbed, tSearch, tRetrieve, tPrompt),
+                    sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds,
+                });
                 return;
             }
             // 対象語リルート: リランクの意味的選択が、質問の対象語（会議室等）を字面通り含まないチャンクを
             // 採択することがある（s11実測: top1スコア3.40でも対象語欠落 → 既存の対象ガードが拒否へ倒していた）。
             // 拒否ではなく、プール内の対象語含有チャンクへ根拠を差し替える。プール全体にも無い場合は
             // 従来どおり対象ガードが拒否する（t74型: 別対象の手続きを転用する回答の防止は維持）
-            var missingTargets = Rag.MissingProcedureTargets(message, chosen.Select(h => MergedChunkText(h.Rec)));
+            var missingTargets = Rag.MissingProcedureTargets(message, chosen.Select(h => SourceText(h.Rec)));
             if (missingTargets.Count > 0 && string.IsNullOrEmpty(webContext) && !timeSensitive)
             {
                 // 対象語をいくつ含むかでプールチャンクを ranking し、上位3件へ根拠を差し替える
                 // （対象語すべてが1チャンクに揃うことは稀 — s11実測: 会議室/大会議室/収容人数/申請期限は
                 //   3チャンクに分散。2件では事実欠落(30日)が出たため3件）
                 var rerouted = hits
-                    .Select(h => (Hit: h, N: Rag.ContainedProcedureTargets(message, new[] { MergedChunkText(h.Rec) }).Count))
+                    .Select(h => (Hit: h, N: Rag.ContainedProcedureTargets(message, new[] { SourceText(h.Rec) }).Count))
                     .Where(x => x.N > 0)
                     .OrderByDescending(x => x.N)
                     .Take(3).Select(x => x.Hit).ToList();
@@ -633,6 +764,8 @@ public sealed class ChatFlow
                     try
                     {
                         _log.Info($"agent route: plan call starting (zuban={zn})");
+                        // エージェント経路は生成前にLLM（ツール計画）を呼ぶため、並列起動したEnsureLlmをここで待つ
+                        await EnsureLlmReadyAsync();
                         var planMessages = JsonSerializer.Serialize(new object[]
                         {
                             new { role = "system", content = "あなたは製造業の社内Q&Aアシスタント。質問に答えるために必要な情報をツールで収集する。収集済みの情報で答えられる場合はツールを呼ばない。" },
@@ -673,9 +806,25 @@ public sealed class ChatFlow
                 }
             }
             foreach (var h in chosen)
-                    sources.Add(EnrichDrawing(new SourceInfo { File = h.Rec.FileName, Snippet = await SnippetForSourceAsync(MergedChunkText(h.Rec), qTokens, message, ctx.RequestAborted), Text = MergedChunkText(h.Rec) }, h.Rec.FileId));
-            // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）
-            await Sse(ctx, "refs", new { files = chosen.Select(h => h.Rec.FileName).ToArray(), web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList() });
+            {
+                // 全量モードでは隣接chunk連結を行わない（Phase 1.2修正: SourceTextForに集約）
+                var sourceText = SourceText(h.Rec);
+                sources.Add(EnrichDrawing(new SourceInfo
+                {
+                    File = h.Rec.FileName,
+                    Snippet = await SnippetForSourceAsync(sourceText, qTokens, message, ctx.RequestAborted),
+                    Text = sourceText,
+                }, h.Rec.FileId));
+            }
+            // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）。
+            // 先行refs(partial=true)を確定値で上書きする。全量モードでは chosen が全チャンクのため
+            // Distinct でファイル名を一意化する（通常RAGでは従来どおり全ファイル表示）
+            await Sse(ctx, "refs", new
+            {
+                files = chosen.Select(h => h.Rec.FileName).Distinct().ToArray(),
+                web = (webResults ?? new List<WebSearch.WebResult>()).Select(wr => wr.Url).ToList(),
+                partial = false,
+            });
 
             // 同一図番（改訂違い・別ファイル）が絡む質問: 単断定・混在回答を避け、ユーザーに図面を選んでもらう
             // （UI選択式。選択後は（図番: X・改訂Y）付きで再質問され、該当図面に絞った回答になる）
@@ -713,7 +862,12 @@ public sealed class ChatFlow
                             hinmei = DrawingMetaOfFile(x.Hit.Rec.FileId)?.Hinmei,
                         }).ToList();
                     await Sse(ctx, "clarify", new { zuban = zubRaw, message, options });
-                    await Sse(ctx, "done", new { cached = false, kind = "clarify", guard = "clarify", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+                    await Sse(ctx, "done", new
+                    {
+                        cached = false, kind = "clarify", route = "clarify", guard = "clarify",
+                        stages = Stages(-1, sw.ElapsedMilliseconds, tEmbed, tSearch, tRetrieve, tPrompt),
+                        sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds,
+                    });
                     _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'clarify')", ("$c", chatId), ("$m", $"CLARIFY:{zubRaw}"));
                     return;
                 }
@@ -723,13 +877,18 @@ public sealed class ChatFlow
             // 取得文書のどれにも現れない場合、QA文書の類似手続きを別対象へ転用した回答（t74型）になる前に
             // 拒否へ倒す。Web検索時は規則①〜④が効くため適用しない。時間感応質問も対象外
             if (sources.Count > 0 && string.IsNullOrEmpty(webContext) && !timeSensitive &&
-                Rag.ProcedureTargetMissing(message, chosen.Select(h => MergedChunkText(h.Rec))))
+                Rag.ProcedureTargetMissing(message, chosen.Select(h => SourceText(h.Rec))))
             {
                 _log.Info($"target guard: subject of procedure question not found in sources: {Truncate(message, 40)}");
                 var refusal = "該当する記載がありません。" + webNote;
                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
                 await Sse(ctx, "delta", new { content = refusal });
-                await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "target", sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds });
+                await Sse(ctx, "done", new
+                {
+                    cached = false, kind = "refusal", route = "refusal", guard = "target",
+                    stages = Stages(-1, sw.ElapsedMilliseconds, tEmbed, tSearch, tRetrieve, tPrompt),
+                    sources = Array.Empty<object>(), suggest_web = !webOn, ms = sw.ElapsedMilliseconds,
+                });
                 return;
             }
 
@@ -742,11 +901,6 @@ public sealed class ChatFlow
             //    全体に効き、2往復目以降のpp（履歴分〜700トークン）を丸ごと削減する。
             //    文脈は隣接チャンク(seq+1)と連結してからスニペット化: 手順・条項が
             //    チャンク境界で分断されて後半ステップが答えられなくなるのを防ぐ（s04実証済み）。
-            string MergedChunkText(ChunkIndex.Rec r)
-            {
-                var next = _index.NextChunkText(r.FileId, r.Seq);
-                return next is null ? r.Text : r.Text + "\n" + next;
-            }
             var covered = new HashSet<(long, int)>();
             var ctxDocs = new List<(string, string)>();
             // 全量常駐モード: 社内文書全文はsystemブロックへ置く（質問間で不変＝プリフィックス
@@ -758,7 +912,7 @@ public sealed class ChatFlow
                 if (covered.Contains((h.Rec.FileId, h.Rec.Seq))) continue;
                 covered.Add((h.Rec.FileId, h.Rec.Seq));
                 if (_index.NextChunkText(h.Rec.FileId, h.Rec.Seq) is not null) covered.Add((h.Rec.FileId, h.Rec.Seq + 1));
-                var merged = MergedChunkText(h.Rec);
+                var merged = SourceText(h.Rec);
                 // 図面チャンク（1枚=1チャンク・テキスト量は取り込み時に DrawingIngest.MaxTextChars で上限）は
                 // スニペット化せず全文注入する: 240字の窓は寸法ノイズの間に散らばる表題欄・注記を切断し、
                 // 「チャンク内に記載があるのに模型に渡らない」実図面検証cr02（JIS B 0405-m）の原因だった
@@ -818,8 +972,11 @@ public sealed class ChatFlow
                 ctxPart = "\n\n※質問が短すぎて意図を確認できません。知りたいことを具体的に教えてくださいとだけ返してください。";
             }
             messages.Add(("user", message + sysInfo + ctxPart));
+            tPrompt = sw.ElapsedMilliseconds; // プロンプト構築完了
             // 7) ストリーム生成。Web参照ありの回答は日付・項目の列挙が長くなるため上限を緩める
-            //    （14日分の予報列挙で400トークンでは途切れる実測。prompt込みでもctx=2048内に収まる）
+            //    （14日分の予報列挙で400トークンでは途切れる実測。prompt込みでもctx内に収まる）
+            //    並列起動したLLMロードはここで待つ（失敗は元例外を再throwし外側のcatchで分類）
+            await EnsureLlmReadyAsync();
             var answer = new StringBuilder();
             var ttfb = -1L;
             await _gw.ChatStreamAsync(_cfg.EnginePortLlm, messages, 0.0, webContributed ? 500 : 300, async delta =>
@@ -834,7 +991,7 @@ public sealed class ChatFlow
             //    成功時はSSE patchで回答を差し替える。quick 1.7B等の小型モデルの数値取り違え対策。
             //    再生成はサイレント収集（deltaを流すとクライアント側で回答が倍加するため）。
             //    timeSensitive（日付応答）は検証対象外
-            var validationCorpus = string.Concat(chosen.Select(h => MergedChunkText(h.Rec))) + "\n" + message
+            var validationCorpus = string.Concat(chosen.Select(h => SourceText(h.Rec))) + "\n" + message
                 + (string.IsNullOrEmpty(webContext) ? "" : "\n" + webContext)
                 + (jissekiText.Length > 0 ? "\n" + jissekiText : "");
             if (!timeSensitive && !clarifyConfirm && (sources.Count > 0 || !string.IsNullOrEmpty(webContext)))
@@ -922,6 +1079,7 @@ public sealed class ChatFlow
 
             var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
             var responseKind = clarifyConfirm ? "clarify" : "answer";
+            var route = clarifyConfirm ? "clarify" : "rag";
             _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,$k)",
                 ("$c", chatId), ("$m", finalText), ("$s", sourcesJson), ("$k", responseKind));
             _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
@@ -930,11 +1088,25 @@ public sealed class ChatFlow
             // 確認促進(clarify)は回答ではないためキャッシュ対象外
             if (!clarifyConfirm && !timeSensitive && !webContributed && sources.Count > 0 && answer.Length > 0 && !answer.ToString().Contains("該当する記載がありません"))
             {
+                // 保存本文は finalText（出典行削除後）に統一（Phase 1.2修正）: 旧実装は出典行を含む
+                // collapsedText を保存していたため、キャッシュヒット時だけ本文に出典行が復活していた。
                 _db.Exec("INSERT INTO answer_cache(question, answer, sources_json, emb, model) VALUES($q,$a,$s,$e,$m)",
-                    ("$q", message), ("$a", collapsedText), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));
-                lock (_cacheLock) _cache.Insert(0, new CacheEntry(message, collapsedText, sourcesJson, qEmb, _cfg.ChatModelFile, 0));
+                    ("$q", message), ("$a", finalText), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));
+                // メモリ側のIdをDBの実IDに合わせる（Phase 1.2修正）: 0固定ではヒット時の
+                // UPDATE answer_cache SET hits=hits+1 が不発になっていた
+                var cacheId = _db.LastInsertId();
+                lock (_cacheLock) _cache.Insert(0, new CacheEntry(message, finalText, sourcesJson, qEmb, _cfg.ChatModelFile, cacheId));
             }
-            await Sse(ctx, "done", new { cached = false, kind = responseKind, guard = (string?)null, sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
+            var totalMs = sw.ElapsedMilliseconds;
+            await Sse(ctx, "done", new
+            {
+                cached = false, kind = responseKind, route,
+                stages = Stages(ttfb, totalMs, tEmbed, tSearch, tRetrieve, tPrompt),
+                guard = (string?)null, sources, ttfb_ms = ttfb, ms = totalMs,
+            });
+            // 計測サンプル（通常回答）。p50/p95 は GET /api/diagnostics で参照（外部送信なし）
+            _diag.Record(new Diagnostics.Sample(route, responseKind, false, ttfb, tEmbed,
+                Diff(tSearch, tEmbed), Diff(tRetrieve, tEmbed), Diff(tPrompt, tRetrieve), Diff(ttfb, tPrompt), totalMs));
         }
         catch (OperationCanceledException) { /* クライアント切断 */ }
         catch (FileNotFoundException ex)
@@ -971,7 +1143,7 @@ public sealed class ChatFlow
             var miss = "指定された文書が見つかりません（取り込み中か、削除された可能性があります）。";
             _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", miss));
             await Sse(ctx, "delta", new { content = miss });
-            await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "summary-missing", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+            await Sse(ctx, "done", new { cached = false, kind = "refusal", route = "summary", guard = "summary-missing", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
             return;
         }
         var fileName = (string)fileRow[0]["name"]!;
@@ -983,7 +1155,7 @@ public sealed class ChatFlow
             var empty = "このファイルには要約できるテキストがありません。";
             _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", empty));
             await Sse(ctx, "delta", new { content = empty });
-            await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "summary-empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+            await Sse(ctx, "done", new { cached = false, kind = "refusal", route = "summary", guard = "summary-empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
             return;
         }
         // 出典は対象ファイル1件（図面はメタも添えてUIの【図面】表示に対応）
@@ -1022,7 +1194,7 @@ public sealed class ChatFlow
         _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,'answer')",
             ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
         _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
-        await Sse(ctx, "done", new { cached = false, kind = "answer", sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
+        await Sse(ctx, "done", new { cached = false, kind = "answer", route = "summary", sources, ttfb_ms = ttfb, ms = sw.ElapsedMilliseconds });
     }
 
     /// <summary>下書き作成（v2.5.0）: 指示を章立て（タスク）に分解し、参照チャンクを注入して章ごとに
@@ -1110,7 +1282,7 @@ public sealed class ChatFlow
             var emptyKb = "ナレッジに文書が登録されていません。参照する文書を先にナレッジへ登録してください（作成をOFFにして通常の質問もできます）。";
             _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", emptyKb));
             await Sse(ctx, "delta", new { content = emptyKb });
-            await Sse(ctx, "done", new { cached = false, kind = "refusal", guard = "draft-empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
+            await Sse(ctx, "done", new { cached = false, kind = "refusal", route = "draft", guard = "draft-empty", sources = Array.Empty<object>(), ms = sw.ElapsedMilliseconds });
             return;
         }
 
@@ -1142,7 +1314,7 @@ public sealed class ChatFlow
             ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
         _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
         await Sse(ctx, "patch", new { content = finalText });
-        await Sse(ctx, "done", new { cached = false, kind = "draft", template = tpl.Label, auto_inferred = auto, title = outlineTitleFrom(message, answer.ToString()), sources, ms = sw.ElapsedMilliseconds });
+        await Sse(ctx, "done", new { cached = false, kind = "draft", route = "draft", template = tpl.Label, auto_inferred = auto, title = outlineTitleFrom(message, answer.ToString()), sources, ms = sw.ElapsedMilliseconds });
     }
 
     /// <summary>下書きのタイトル決定: 生成文の先頭が「# 」見出しならそれを使い、無ければ指示文から作る</summary>

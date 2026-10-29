@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
 using Docnet.Core;
@@ -229,9 +230,19 @@ public sealed class Ingest
             content.CopyTo(ms);
             var bytes = ms.ToArray();
             var ext = Path.GetExtension(fileName).ToLowerInvariant();
+            // 重複排除（Phase 0.2）: 同一内容（SHA-256）が既に status='ready' で取り込まれていれば、
+            // 新規files行・chunks・メタを作らず既存file_idを返す。エラー行・取り込み途中の行は対象外
+            // （失敗した取り込みを「重複」として握りつぶさず、再取り込みを許可する）
+            var contentHash = ComputeSha256Hex(bytes);
+            if (_db.FindReadyFileByHash(contentHash) is long duplicateId)
+            {
+                _log.Info($"ingest skipped (duplicate content): {fileName} sha256={contentHash[..12]}… → existing file_id={duplicateId}");
+                return duplicateId;
+            }
             bool packOn = Extensions.IsEnabled(_db, Extensions.DrawingId);
 
-            _db.Exec("INSERT INTO files(name, status) VALUES($n,'parsing')", ("$n", fileName));
+            _db.Exec("INSERT INTO files(name, status, content_hash) VALUES($n,'parsing',$h)",
+                ("$n", fileName), ("$h", contentHash));
             long fileId = _db.LastInsertId();
             try
             {
@@ -244,6 +255,7 @@ public sealed class Ingest
                 List<byte[]>? ocrPagePngs = null; // 表題欄の高解像度再OCR（v2.4.0）に使うページ画像
                 List<DxfText.DxfRun>? dxfRuns = null;
                 bool isJissekiSheet = false; // 図番列を含む実績表（jisseki_meta 辞書化済み。シート抽出時に判定）
+                List<SheetJisseki.JissekiRow>? jissekiRows = null; // 確定トランザクションまで保持（埋め込み失敗時に残さない）
                 if (ext == ".pdf")
                 {
                     try { pdf = PdfText.ExtractAll(bytes); text = pdf.Text; }
@@ -310,13 +322,13 @@ public sealed class Ingest
                     // 実績接続（v2.3.0・C1）: 図番列を含む表を jisseki_meta へ辞書化（図面QAの回答文脈に
                     // 過去見積・原価・納期を接続するため）。抽出は packOn 時のみ（図面QAと一体の機能）。
                     // 失敗しても表チャンクとしての取り込みは続行。図番列が検出できた表は kind=実績表
+                    // 書き込みは確定トランザクションまで遅延する（Phase 0.2: 埋め込み失敗時の部分残存防止）
                     if (packOn)
                     {
                         try
                         {
                             var jRows = SheetJisseki.ExtractRows(SheetExtract.ParseToRows(fileName, bytes));
-                            InsertJissekiRows(fileId, jRows);
-                            if (jRows.Count > 0) isJissekiSheet = true;
+                            if (jRows.Count > 0) { jissekiRows = jRows; isJissekiSheet = true; }
                         }
                         catch (Exception ex) { _log.Warn($"jisseki extraction skipped: {ex.Message}"); }
                     }
@@ -443,29 +455,51 @@ public sealed class Ingest
                 }
                 if (chunks.Count == 0 && !isDrawing) throw new InvalidDataException("no text content");
 
+                var kind = isDrawing ? "drawing" : isJissekiSheet ? "sheet_jisseki" : "doc";
                 _db.Exec("UPDATE files SET status='embedding', kind=$k WHERE file_id=$i",
-                    ("$k", isDrawing ? "drawing" : isJissekiSheet ? "sheet_jisseki" : "doc"), ("$i", fileId));
-                if (isDrawing) InsertDrawingMeta(fileId, meta);
+                    ("$k", kind), ("$i", fileId));
 
+                // 埋め込みを先に完了させる（Phase 0.2）: ここまではfiles行（parsing）以外に何も書いていないため、
+                // 埋め込み中の失敗でチャンク・メタが部分残存しない。索引更新もトランザクション成功後に行う
+                var embeddings = new List<float[]>();
                 if (chunks.Count > 0)
                 {
-                    var embeddings = new List<float[]>();
                     _sup.StartEmbedAndRank(); // 前回クラッシュ・tier変更後のStopAll等で止まっていたら自己修復
                     foreach (var batch in chunks.Chunk(16))
                         embeddings.AddRange(await _gw.EmbedAsync(_cfg.EnginePortEmb, batch, ct));
-
-                    for (int seq = 0; seq < chunks.Count; seq++)
-                        _db.InsertChunk(fileId, seq, chunks[seq], ChunkIndex.FloatsToBytes(embeddings[seq]));
-                    _index.AddRange(fileName, fileId, chunks.Select((t, seq) => (seq, t, embeddings[seq])));
                 }
-                _db.Exec("UPDATE files SET status='ready', chunk_count=$c WHERE file_id=$i", ("$c", chunks.Count), ("$i", fileId));
+
+                // 最終確定は1トランザクション: filesのstatus/chunk_count/kind＋chunks全件＋drawing_meta/jisseki_meta。
+                // 1つでも失敗すればROLLBACKされ、filesは catch で status='error' になる（部分chunkは残らない）
+                var commands = new List<(string Sql, (string Name, object? Value)[] Params)>
+                {
+                    ("UPDATE files SET status='ready', chunk_count=$c, kind=$k, error=NULL WHERE file_id=$i",
+                        new[] { ("$c", (object?)chunks.Count), ("$k", (object?)kind), ("$i", (object?)fileId) }),
+                };
+                for (int seq = 0; seq < chunks.Count; seq++)
+                    commands.Add(("INSERT INTO chunks(file_id, seq, text, emb) VALUES($f,$s,$t,$e)",
+                        new[]
+                        {
+                            ("$f", (object?)fileId), ("$s", (object?)seq),
+                            ("$t", (object?)chunks[seq]), ("$e", (object?)ChunkIndex.FloatsToBytes(embeddings[seq])),
+                        }));
+                if (isDrawing) commands.Add(DrawingMetaCommand(fileId, meta));
+                if (jissekiRows is { Count: > 0 }) commands.AddRange(JissekiCommands(fileId, jissekiRows));
+                _db.ExecTransaction(commands);
+
+                // メモリ索引はトランザクション成功後にのみ更新する（DBと索引の先行不整合を作らない）
+                if (chunks.Count > 0)
+                    _index.AddRange(fileName, fileId, chunks.Select((t, seq) => (seq, t, embeddings[seq])));
+                if (jissekiRows is { Count: > 0 })
+                    _log.Info($"jisseki meta saved: {jissekiRows.Count} rows (file_id={fileId})");
                 if (packOn && ext == ".pdf") await TryMakeThumbnailAsync(fileId, bytes, ct); // 失敗しても取り込みを妨げない
-                _log.Info($"ingested {fileName}: {chunks.Count} chunks{(isDrawing ? " (drawing)" : "")}");
+                _log.Info($"ingested {fileName}: {chunks.Count} chunks{(isDrawing ? " (drawing)" : "")} sha256={contentHash[..12]}…");
                 LastIngestScannedOcr = scannedOcr;
                 return fileId;
             }
             catch (Exception ex)
             {
+                // トランザクションはROLLBACK済み。files行は進捗表示用に先に作ったものをerrorとして残す（既存挙動）
                 _db.Exec("UPDATE files SET status='error', error=$e WHERE file_id=$i", ("$e", ex.Message), ("$i", fileId));
                 throw;
             }
@@ -529,19 +563,35 @@ public sealed class Ingest
         catch (Exception ex) { _log.Warn($"thumbnail failed: {ex.Message}"); }
     }
 
-    private void InsertDrawingMeta(long fileId, DrawingIngest.DrawingMeta m) =>
-        _db.Exec("INSERT OR REPLACE INTO drawing_meta(file_id, zuban_raw, zuban_norm, hinmei, zairyo, scale, revision, approved_at) VALUES($f,$zr,$zn,$h,$za,$s,$r,$a)",
-            ("$f", fileId), ("$zr", m.ZubanRaw), ("$zn", m.ZubanNorm), ("$h", m.Hinmei), ("$za", m.Zairyo),
-            ("$s", m.Scale), ("$r", m.Revision), ("$a", m.ApprovedAt));
+    /// <summary>元ファイル内容のSHA-256（小文字hex）。取り込み重複排除（Phase 0.2）のキー。
+    /// テストから直接検証できるよう公開static</summary>
+    public static string ComputeSha256Hex(byte[] bytes) =>
+        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
-    /// <summary>実績表から抽出した図番キー実績の保存（1ファイル複数行・再取り込み時は置換）</summary>
-    private void InsertJissekiRows(long fileId, List<SheetJisseki.JissekiRow> rows)
+    /// <summary>確定トランザクション用の drawing_meta 書き込みコマンド（既存行は置換）</summary>
+    private static (string Sql, (string Name, object? Value)[] Params) DrawingMetaCommand(long fileId, DrawingIngest.DrawingMeta m) => (
+        "INSERT OR REPLACE INTO drawing_meta(file_id, zuban_raw, zuban_norm, hinmei, zairyo, scale, revision, approved_at) VALUES($f,$zr,$zn,$h,$za,$s,$r,$a)",
+        new[]
+        {
+            ("$f", (object?)fileId), ("$zr", (object?)m.ZubanRaw), ("$zn", (object?)m.ZubanNorm),
+            ("$h", (object?)m.Hinmei), ("$za", (object?)m.Zairyo), ("$s", (object?)m.Scale),
+            ("$r", (object?)m.Revision), ("$a", (object?)m.ApprovedAt),
+        });
+
+    /// <summary>確定トランザクション用の実績行コマンド（1ファイル複数行・再取り込み時は置換）</summary>
+    private static List<(string Sql, (string Name, object? Value)[] Params)> JissekiCommands(long fileId, List<SheetJisseki.JissekiRow> rows)
     {
+        var commands = new List<(string, (string, object?)[])>(rows.Count);
         foreach (var r in rows)
-            _db.Exec("INSERT OR REPLACE INTO jisseki_meta(file_id, row_no, zuban_raw, zuban_norm, mitumori, genka, nouki) VALUES($f,$r,$z,$zn,$mi,$g,$n)",
-                ("$f", fileId), ("$r", r.RowNo), ("$z", r.ZubanRaw), ("$zn", r.ZubanNorm),
-                ("$mi", r.Mitumori), ("$g", r.Genka), ("$n", r.Nouki));
-        if (rows.Count > 0) _log.Info($"jisseki meta saved: {rows.Count} rows (file_id={fileId})");
+            commands.Add((
+                "INSERT OR REPLACE INTO jisseki_meta(file_id, row_no, zuban_raw, zuban_norm, mitumori, genka, nouki) VALUES($f,$r,$z,$zn,$mi,$g,$n)",
+                new[]
+                {
+                    ("$f", (object?)fileId), ("$r", (object?)r.RowNo), ("$z", (object?)r.ZubanRaw),
+                    ("$zn", (object?)r.ZubanNorm), ("$mi", (object?)r.Mitumori), ("$g", (object?)r.Genka),
+                    ("$n", (object?)r.Nouki),
+                }));
+        return commands;
     }
 
     /// <summary>表題欄のLLM構造化（T6）。ルール抽出で図番が取れなかった図面のみ。失敗時はルール結果を維持。

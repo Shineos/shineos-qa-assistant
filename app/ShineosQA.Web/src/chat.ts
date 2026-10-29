@@ -223,6 +223,73 @@ export function shouldShowWebSuggestion(kind: string | null | undefined, suggest
   return kind === 'refusal' && suggestWeb === true && !webOn;
 }
 
+/** 先行refs（v2.7）: partial=true はリランク前の「参照候補」なのでphase文言を分ける。
+ *  partial=false は確定refs＝従来どおり「回答を生成中…」。 */
+export function refsPhaseLabel(partial: boolean | undefined): string {
+  return partial ? '参照候補を確認中…' : '回答を生成中…';
+}
+
+/** done 受信時にアシスタント吹き出しを新規追加すべきか。
+ *  clarify は clarify イベント側がカードを描画済みなので足さない（空バブルの原因だった）。
+ *  本文が空の回答もカードを作らない。 */
+export function shouldAppendAssistantBubble(kind: string | null | undefined, acc: string): boolean {
+  if (kind === 'clarify') return false;
+  return acc.trim().length > 0;
+}
+
+/** ストリーミング描画の間引き間隔(ms)。全Markdown再生成と再レイアウトの頻度を下げる */
+const STREAM_RENDER_INTERVAL_MS = 50;
+
+/** delta の描画を「初回は即時 → 以後 rAF + 最小50ms」に間引くペインター。
+ *  patch / section_start / done では flush() で即時反映する（最終文面の取りこぼし防止）。 */
+class StreamPainter {
+  private hasPainted = false;
+  private lastPaintAt = 0;
+  private rafId: number | null = null;
+  private timerId: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
+
+  constructor(private readonly paint: () => void) {}
+
+  /** 次フレーム以降かつ前回描画から50ms以上あけて描画（初回は即時） */
+  schedule(): void {
+    if (this.disposed) return;
+    const since = Date.now() - this.lastPaintAt;
+    if (!this.hasPainted || since >= STREAM_RENDER_INTERVAL_MS) { this.run(); return; }
+    if (this.rafId !== null || this.timerId !== null) return; // 既に予約済み
+    this.timerId = setTimeout(() => {
+      this.timerId = null;
+      // 非表示タブでは rAF が来ないため、その場合は直接描画する
+      if (document.visibilityState === 'hidden') { this.run(); return; }
+      this.rafId = requestAnimationFrame(() => { this.rafId = null; this.run(); });
+    }, STREAM_RENDER_INTERVAL_MS - since);
+  }
+
+  /** 保留中の予約を捨てて即時描画（patch/section_start/done） */
+  flush(): void {
+    if (this.disposed) return;
+    this.cancel();
+    this.run();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.cancel();
+  }
+
+  private cancel(): void {
+    if (this.timerId !== null) { clearTimeout(this.timerId); this.timerId = null; }
+    if (this.rafId !== null) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+  }
+
+  private run(): void {
+    if (this.disposed) return;
+    this.hasPainted = true;
+    this.lastPaintAt = Date.now();
+    this.paint();
+  }
+}
+
 export class ChatView {
   private chatUuid = '';
   private chatTitle = '';                    // chat-mainヘッダーに表示中のチャット名
@@ -1025,6 +1092,13 @@ export class ChatView {
     let liveBody: HTMLElement | null = null;
     let gotMeta = false;
     const t0 = performance.now();
+    // delta の描画間引き（初回即時・以後50ms）。スクロールも描画と同じタイミングで行う
+    const painter = new StreamPainter(() => {
+      if (!liveBody) return;
+      liveBody.innerHTML = renderMarkdown(acc);
+      const m = document.getElementById('messages');
+      if (m) m.scrollTop = m.scrollHeight;
+    });
 
     try {
       // キャプチャ画像をローカル保存用に送る（data URL。サーバ側で data/files/captures/ に保存し過去チャットでも表示）
@@ -1069,7 +1143,8 @@ export class ChatView {
             }
           },
           refs: (d) => {
-            thinking.setPhase('回答を生成中…');
+            // 先行refs（partial=true）はリランク前の候補。確定refsで「回答を生成中…」に切り替える
+            thinking.setPhase(refsPhaseLabel(d.partial));
             const domains = [...new Set((d.web ?? []).map(u => domainOf(u)))].slice(0, 3);
             thinking.setRefs(d.files ?? [], domains);
           },
@@ -1095,13 +1170,13 @@ export class ChatView {
               document.getElementById('messages')!.appendChild(wrap);
             }
             acc += (acc ? '\n\n' : '') + `### ${d.title}\n\n`;
-            liveBody!.innerHTML = renderMarkdown(acc);
+            painter.flush(); // 章見出しは即時表示
           },
           section_done: () => { /* 章の区切り（本文はdeltaで到達済み） */ },
           patch: (content) => {
-            // 出典行正規化などの最終版本文で差し替え
+            // 出典行正規化などの最終版本文で差し替え（間引かずに即時反映）
             acc = content;
-            if (liveBody) liveBody.innerHTML = renderMarkdown(acc);
+            painter.flush();
           },
           delta: (c) => {
             if (!liveCard) {
@@ -1117,12 +1192,11 @@ export class ChatView {
               document.getElementById('messages')!.appendChild(wrap);
             }
             acc += c;
-            liveBody!.innerHTML = renderMarkdown(acc);
-            const m = document.getElementById('messages')!;
-            m.scrollTop = m.scrollHeight;
+            painter.schedule(); // rAF + 最小50msでまとめて描画（初回は即時）
             this.setStatus('', false);
           },
           done: (d) => {
+            painter.flush(); // 最終deltaが間引き中でも確定本文を即時反映
             if (liveCard && liveBody) {
               const sources = d.sources ?? [];
               if (sources.length > 0) {
@@ -1190,7 +1264,11 @@ export class ChatView {
               }
             } else {
               thinking.remove();
-              this.appendMessage('assistant', acc || '', d.sources ?? [], new Date());
+              // clarify は clarify イベント側がカードを描画済み＝ここで足すと空バブルになる。
+              // 本文が空の回答（旧バックエンドのエラー等）も空カードを作らない。
+              if (shouldAppendAssistantBubble(d.kind, acc)) {
+                this.appendMessage('assistant', acc, d.sources ?? [], new Date());
+              }
             }
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setStatus(`⏱ ${secs}s${d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
@@ -1232,6 +1310,7 @@ export class ChatView {
             document.getElementById('messages')!.scrollTop = document.getElementById('messages')!.scrollHeight;
           },
           error: (e) => {
+            painter.flush(); // 途中まで出た本文を取りこぼさない（無ければno-op）
             thinking.remove();
             this.appendMessage('assistant', `⚠️ ${e.message}`, [], new Date());
           },
@@ -1268,6 +1347,7 @@ export class ChatView {
       this.appendMessage('user', message, [], new Date(), captureUrl);
       this.setStatus('⚠️ 接続が切れたため自動再送します…', false);
     } finally {
+      painter.dispose(); // 保留中の間引き描画を破棄（done/patchはflush済み）
       thinking.remove();
       if (leaving) {
         this.sending = false;

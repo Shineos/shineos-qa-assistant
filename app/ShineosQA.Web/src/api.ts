@@ -12,6 +12,26 @@ export interface StatusInfo {
 export interface Settings { web_search: boolean; tier: string; idle_unload_minutes: number; bg_friendly: boolean; extensions?: { drawing?: boolean } }
 export interface OcrResult { text: string; zubans: { raw: string; norm: string }[]; vision?: { zuban?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null; shape?: string | null } | null }
 
+/// 動作診断（GET /api/diagnostics）。バックエンドの実装進行に合わせて
+/// 追加フィールドを許容する（未知キーは無視して表示側で正規化する）。
+/// stages は実装により「stage名→{p50_ms,p95_ms}」「t_xxx_ms→数値」等の揺れがあり得るため
+/// 型は緩く持ち、src/diagnostics-format.ts で正規化する。
+export interface DiagnosticsInfo {
+  version?: string;
+  tier?: string;
+  chunks?: number;
+  engines?: { tier?: string; chat_model?: string; llm?: string; embed?: string; rank?: string } | null;
+  cache?: number | null;
+  requests?: number | null;
+  ttft_p50_ms?: number | null;
+  ttft_p95_ms?: number | null;
+  stages?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
+/// POST /api/warmup の結果。失敗時はバックエンドが 503 + { code, message } を返す。
+export interface WarmupResult { ok: boolean; message?: string; ms?: number }
+
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json() as Promise<T>;
@@ -70,7 +90,25 @@ export const api = {
     fetch('/api/models/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
   importModel: (path: string) =>
     fetch('/api/models/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }),
+  diagnostics: () => fetch('/api/diagnostics').then(r => json<DiagnosticsInfo>(r)),
+  warmup: () => warmup(),
 };
+
+/// AIエンジンのウォームアップ（POST /api/warmup）。失敗しても例外にせず
+/// { ok:false, message } を返し、設定画面が壊れないようにする。
+export async function warmup(): Promise<WarmupResult> {
+  try {
+    const resp = await fetch('/api/warmup', { method: 'POST' });
+    let body: { ok?: boolean; message?: string; code?: string; ms?: number } | null = null;
+    try { body = await resp.json() as { ok?: boolean; message?: string; code?: string; ms?: number }; } catch { /* 本文なし */ }
+    if (!resp.ok) {
+      return { ok: false, message: body?.message ?? body?.code ?? `HTTP ${resp.status}` };
+    }
+    return { ok: body?.ok !== false, message: body?.message, ms: typeof body?.ms === 'number' ? body.ms : undefined };
+  } catch (ex) {
+    return { ok: false, message: (ex as Error).message };
+  }
+}
 
 export interface ModelEntry {
   id: string; name: string; file: string; kind: string; sizeBytes: number; license: string;
@@ -86,7 +124,8 @@ export async function streamChat(
     meta?: (d: { chat_id: number; chat_uuid: string }) => void;
     model?: (d: { tier: string; model_file: string }) => void;
     web?: (d: { results: { title: string; url: string; snippet: string }[]; error?: string | null }) => void;
-    refs?: (d: { files: string[]; web: string[] }) => void;
+    /// partial=true は「検索直後・リランク前の先行refs」、false は確定refs（v2.7）
+    refs?: (d: { files: string[]; web: string[]; partial?: boolean }) => void;
     patch?: (content: string) => void;
     delta?: (content: string) => void;
     phase?: (d: { text: string }) => void;

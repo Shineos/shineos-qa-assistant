@@ -1,6 +1,7 @@
-import { api, type StatusInfo } from './api';
+import { api, type StatusInfo, type DiagnosticsInfo } from './api';
 import { Models } from './wizard';
 import { REPORT_CONTACT_URL } from './report';
+import { formatDiagnostics, formatWarmupResult } from './diagnostics-format';
 
 export class SettingsView {
   private busy = false; // 初期ロードとタブ切替の二重refreshによるDOM競合（detachされた方に描く）を防ぐ
@@ -76,6 +77,20 @@ export class SettingsView {
         <div id="status-rows" class="status-rows"></div>
       </div>
       <div class="settings-card">
+        <h3>動作診断</h3>
+        <div id="diag-rows" class="status-rows">
+          <div class="status-row"><span>状態</span><b>読み込み中…</b></div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <b>ウォームアップ</b>
+            <span>AIモデルを今すぐメモリへ読み込みます。しばらく使っていない後の初回回答が速くなります（数十秒かかることがあります）。</span>
+          </div>
+          <button type="button" class="primary small" id="diag-warmup">ウォームアップ</button>
+        </div>
+        <div id="diag-note" class="muted" hidden></div>
+      </div>
+      <div class="settings-card">
         <h3>サポート</h3>
         <div class="setting-row">
           <div class="setting-text">
@@ -109,12 +124,58 @@ export class SettingsView {
     document.getElementById('set-report')!.addEventListener('click', () => {
       window.open(REPORT_CONTACT_URL, '_blank', 'noopener,noreferrer');
     });
+    // 動作診断（v2.7）: 取得は非同期・失敗してもカード内だけに留める（設定画面全体を壊さない）
+    document.getElementById('diag-warmup')!.addEventListener('click', () => { void this.warmup(); });
+    void this.loadDiagnostics();
     // AIモデル管理セクション（初回DL・追加・削除）をカード内へ描画
     const modelsHost = document.getElementById('models-host')!;
     modelsHost.innerHTML = '';
     const rendered = await Models.renderSettings();
     while (rendered.firstChild) modelsHost.appendChild(rendered.firstChild);
     await this.refreshStatus(status);
+  }
+
+  /** 動作診断カード: GET /api/diagnostics を非同期取得。失敗してもカード内に留める */
+  private async loadDiagnostics(): Promise<void> {
+    const host = document.getElementById('diag-rows');
+    if (!host) return; // 設定画面が再描画済み（別タブ遷移等）なら何もしない
+    try {
+      const d = await api.diagnostics();
+      this.renderDiagnostics(d);
+    } catch {
+      host.innerHTML = '<div class="status-row"><span>状態</span><b>診断情報を取得できません</b></div>';
+    }
+  }
+
+  private renderDiagnostics(d: DiagnosticsInfo | null): void {
+    const host = document.getElementById('diag-rows');
+    if (!host) return;
+    const rows = formatDiagnostics(d);
+    host.innerHTML = rows
+      .map(r => `<div class="status-row"><span>${esc(r.key)}</span><b>${esc(r.value)}</b></div>`)
+      .join('');
+  }
+
+  /** ウォームアップ: POST /api/warmup → 結果をカード下に1行表示し、診断値も再取得 */
+  private async warmup(): Promise<void> {
+    const btn = document.getElementById('diag-warmup') as HTMLButtonElement | null;
+    const note = document.getElementById('diag-note');
+    if (btn) { btn.disabled = true; btn.textContent = '準備中…'; }
+    if (note) {
+      note.hidden = false;
+      note.textContent = 'ウォームアップ中…（モデルの読み込みには数十秒かかることがあります）';
+    }
+    try {
+      const r = await api.warmup();
+      if (note) note.textContent = formatWarmupResult(r);
+      // 読み込み後のエンジン状態を「システム状態」と「動作診断」の両方へ反映
+      if (r.ok) void this.refreshStatus(null);
+      await this.loadDiagnostics();
+    } catch (ex) {
+      if (note) note.textContent = `ウォームアップ失敗: ${(ex as Error).message}`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'ウォームアップ'; }
+    }
   }
 
   private async refreshStatus(_prev: StatusInfo | null) {
