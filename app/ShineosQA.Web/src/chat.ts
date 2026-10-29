@@ -315,6 +315,7 @@ export class ChatView {
   private showArchived = false;              // サイドバー一覧のアーカイブビュー切替
   private showBookmarked = false;            // サイドバー一覧のブックマークビュー切替
   private chatSearchText = '';               // チャット履歴検索キーワード
+  private lastPrewarmAt = 0;                 // 入力フォーカス時のアイドル復帰プリウォーム（10分間隔）
 
   constructor() {
     const form = document.getElementById('chat-form') as HTMLFormElement;
@@ -337,6 +338,14 @@ export class ChatView {
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+    });
+    // アイドルアンロード後の初回質問でモデルロード（2〜5秒）を待たないよう、
+    // 入力フォーカス時にバックグラウンドでウォームアップする。10分間隔・失敗は無視。
+    input.addEventListener('focus', () => {
+      const now = Date.now();
+      if (now - this.lastPrewarmAt < 10 * 60 * 1000) return;
+      this.lastPrewarmAt = now;
+      void api.warmup();
     });
     document.getElementById('new-chat')!.addEventListener('click', () => this.newChat());
     // チャット履歴検索: 入力するたびにリストを絞り込む
