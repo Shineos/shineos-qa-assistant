@@ -52,6 +52,28 @@ public static partial class MfgTerms
         new("kousuu", new[] { "工数", "人工", "man-hour" }),
         new("shiyou", new[] { "仕様", "spec", "specification" }),
         new("torai", new[] { "トライ", "試作", "試作部品" }),
+        // 英語資料・外国人材向けの基本語（オフィス/HR系）。日本語質問×英語文書の語彙一致を作る。
+        // 汎用動詞（apply/approve等）は誤マッチが増えるため入れない（名詞・複合名詞のみ）。
+        new("office", new[] { "オフィス", "office" }),
+        new("chushajo", new[] { "駐車場", "parking" }),
+        new("ryokin", new[] { "料金", "fee", "price", "charge" }),
+        new("kaigishitsu", new[] { "会議室", "meeting room", "conference room" }),
+        new("kucho", new[] { "空調", "air conditioning", "air conditioner" }),
+        new("telework", new[] { "テレワーク", "telework", "remote work" }),
+        new("teate", new[] { "手当", "allowance" }),
+        new("password", new[] { "パスワード", "password" }),
+        new("kyuka", new[] { "休暇", "leave", "vacation" }),
+        new("shutchou", new[] { "出張", "business trip" }),
+        new("shukuhaku", new[] { "宿泊費", "宿泊", "accommodation", "hotel" }),
+        new("kotsuhi", new[] { "交通費", "transportation" }),
+        new("keihi", new[] { "経費", "expenses" }),
+        new("kigen", new[] { "期限", "deadline" }),
+        new("joushi", new[] { "上司", "supervisor" }),
+        new("buchou", new[] { "部長", "department manager" }),
+        new("setsubi", new[] { "設備", "equipment" }),
+        new("hozen", new[] { "保全", "maintenance" }),
+        new("zaiko", new[] { "在庫", "inventory" }),
+        new("shukka", new[] { "出荷", "shipping" }),
     };
 
     [GeneratedRegex(@"(?<![A-Za-z0-9])ra\s*([0-9]+(?:\.[0-9]+)?)", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
@@ -65,6 +87,24 @@ public static partial class MfgTerms
 
     [GeneratedRegex(@"(?<![A-Za-z0-9])jis\s*([a-z])\s*([0-9]{3,5})", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex JisRegex();
+
+    /// <summary>埋め込み・リランク用のクエリ拡張。質問に含まれる用語の英語別名を末尾に足す。
+    /// 日本語質問×英語図面/規格のベクトル一致を改善する（例: 「駐車場の料金」→「… parking fee」）。
+    /// 日本語別名は元質問に含まれているため追加しない。LLMコストなし。</summary>
+    public static string ExpandQuery(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        var extras = new List<string>();
+        foreach (var g in Groups)
+        {
+            if (!g.Aliases.Any(a => ContainsAlias(s, a))) continue;
+            foreach (var a in g.Aliases)
+                if (a.All(c => c < 128) && !s.Contains(a, StringComparison.OrdinalIgnoreCase))
+                    extras.Add(a);
+        }
+        if (extras.Count == 0) return s;
+        return s + " " + string.Join(" ", extras.Distinct(StringComparer.OrdinalIgnoreCase));
+    }
 
     /// <summary>文字列に含まれる製造業別名から、検索用の正規トークンを返す（重複なし）。</summary>
     public static IEnumerable<string> CanonicalTokens(string s)

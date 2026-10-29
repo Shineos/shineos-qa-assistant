@@ -500,7 +500,9 @@ public sealed class ChatFlow
                 queryForRetrieval = prevUser + " " + message;
 
             // 1) 質問埋め込み
-            var qEmb = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { queryForRetrieval }, ctx.RequestAborted))[0];
+            // 日本語質問×英語図面/規格に備え、用語の英語別名をクエリへ足す（意味は変えない。
+            // 例: 「駐車場の料金」→「… parking fee」）。キーワード・プロンプトは元質問のまま。
+            var qEmb = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { MfgTerms.ExpandQuery(queryForRetrieval) }, ctx.RequestAborted))[0];
             tEmbed = sw.ElapsedMilliseconds;
 
             // 2) 回答キャッシュ（cos>=0.97 → 即時）。LLM未ロードでも返せるのでEnsureLlmより前に置く
@@ -710,7 +712,7 @@ public sealed class ChatFlow
                     }
                     else
                     {
-                        var ranked = await _gw.RerankAsync(_cfg.EnginePortRank, queryForRetrieval, docs, 2, ctx.RequestAborted);
+                        var ranked = await _gw.RerankAsync(_cfg.EnginePortRank, MfgTerms.ExpandQuery(queryForRetrieval), docs, 2, ctx.RequestAborted);
                         var top1 = ranked.Count > 0 ? ranked[0].Score.ToString("F2") : "none";
                         _log.Info($"rerank: top1={top1} cos={top.Cos:F2} kw={top.Kw:F2} file={top.Rec.FileName}");
                         if (ranked.Count == 0 || ranked[0].Score < Rag.GuardThreshold)

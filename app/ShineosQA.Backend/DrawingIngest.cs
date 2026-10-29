@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace ShineosQA.Backend;
@@ -14,9 +15,23 @@ public static partial class DrawingIngest
     [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Z]{1,4}[-_/]?[0-9]{2,6}(?:[-_/][0-9]{1,4})?[A-Z]?(?![A-Za-z0-9])")]
     public static partial Regex ZubanRegex();
 
-    /// <summary>テキスト（質問文）に含まれる図番を正規形で抽出する（同一図番混在ガードで使用）</summary>
-    public static List<string> ZubansIn(string text) =>
-        ZubanRegex().Matches(text).Select(m => Rag.NormalizeZuban(m.Value)).Where(z => z.Length > 0).Distinct().ToList();
+    /// <summary>質問文用の図番パターン（大小文字・全角を許容）。文書側の判定は
+    /// 誤検出を避けるため大文字始まりの ZubanRegex のままにする。</summary>
+    [GeneratedRegex(@"(?<![A-Za-z0-9])[A-Z]{1,4}[-_/]?[0-9]{2,6}(?:[-_/][0-9]{1,4})?[A-Z]?(?![A-Za-z0-9])", RegexOptions.IgnoreCase)]
+    private static partial Regex ZubanRegexQuestion();
+
+    /// <summary>テキスト（質問文）に含まれる図番を正規形で抽出する（同一図番混在ガードで使用）。
+    /// 質問は「st1042a」「ＳＴ－１０４２Ａ」のような表記ゆれを許容する（NFKC＋大小文字無視）。
+    /// 文書判定用の ZubanRegex は大文字始まりのまま（"abc123" 等の誤検出を避ける）。</summary>
+    public static List<string> ZubansIn(string text)
+    {
+        var normalized = text.Normalize(NormalizationForm.FormKC);
+        return ZubanRegexQuestion().Matches(normalized)
+            .Select(m => Rag.NormalizeZuban(m.Value))
+            .Where(z => z.Length > 0)
+            .Distinct()
+            .ToList();
+    }
 
     /// <summary>ヒット集合に「同一図番（正規形）が2ファイル以上」の組があるか検出する。
     /// 同一図番の別ファイル（改訂違い等）が採択外にいると、片方だけを根拠に断定する混在回答になるため。

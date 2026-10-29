@@ -26,6 +26,21 @@ public class ZubanTests
         Assert.Contains("st1042a", Rag.Tokenize(input));
     }
 
+    [Theory]
+    [InlineData("ST-1042A")]
+    [InlineData("st1042a")]
+    [InlineData("ＳＴ－１０４２Ａ")]
+    public void ZubansIn_QuestionVariants_AllResolve(string input)
+    {
+        Assert.Contains("st1042a", DrawingIngest.ZubansIn($"{input}の材質は？"));
+    }
+
+    [Fact]
+    public void ZubansIn_QuestionVariantsOnJapaneseText()
+    {
+        Assert.Equal(new[] { "st1042a" }, DrawingIngest.ZubansIn("ｓｔ－１０４２ａの改訂は？"));
+    }
+
     [Fact]
     public void Tokenize_ZubanWithSeparator_KeepsLegacyTokensToo()
     {

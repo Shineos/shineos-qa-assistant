@@ -19,6 +19,11 @@ public class MfgTermsTests
     [InlineData("熱処理の条件", "netsushori")]
     [InlineData("ヒヤリハット", "anzen")]
     [InlineData("μm単位", "um")]
+    [InlineData("駐車場の料金", "chushajo")]
+    [InlineData("駐車場の料金", "ryokin")]
+    [InlineData("Parking fee", "chushajo")]
+    [InlineData("meeting room", "kaigishitsu")]
+    [InlineData("telework allowance", "telework")]
     public void Tokenize_AddsManufacturingCanonicalTokens(string text, string expected) =>
         Assert.Contains(expected, Rag.Tokenize(text));
 
@@ -34,5 +39,15 @@ public class MfgTermsTests
     {
         var tokens = Rag.Tokenize("SUS304 ステンレス stainless").Where(t => t == "sus304").ToList();
         Assert.Single(tokens);
+    }
+
+    [Fact]
+    public void ExpandQuery_AddsEnglishAliases()
+    {
+        var q = MfgTerms.ExpandQuery("駐車場の料金");
+        Assert.Contains("parking", q);
+        Assert.Contains("fee", q);
+        Assert.StartsWith("駐車場の料金", q);
+        Assert.Equal("こんにちは", MfgTerms.ExpandQuery("こんにちは"));
     }
 }
