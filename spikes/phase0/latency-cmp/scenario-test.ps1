@@ -15,8 +15,9 @@ if (-not (Test-Path $ansDir)) { [IO.Directory]::CreateDirectory($ansDir) | Out-N
 $utf8 = New-Object Text.UTF8Encoding($false)
 $script:createdUuids = @()
 
-function Ask([string]$q, [string]$uuid) {
+function Ask([string]$q, [string]$uuid, [string]$lang = "") {
   $body = @{ chat_uuid = $uuid; message = $q }
+  if ($lang) { $body.answer_lang = $lang }
   if ($WebSearch) { $body.web_search = $true }
   $body = $body | ConvertTo-Json -Compress
   $tmp = [IO.Path]::GetTempFileName()
@@ -30,12 +31,14 @@ function Ask([string]$q, [string]$uuid) {
     elseif ($ln.StartsWith("data: ")) {
       $json = $ln.Substring(6)
       if ($ev -eq "delta") { $o = $json | ConvertFrom-Json; [void]$answer.Append($o.content) }
+      elseif ($ev -eq "patch") { $o = $json | ConvertFrom-Json; [void]$answer.Clear(); [void]$answer.Append($o.content) }
       elseif ($ev -eq "meta") { $o = $json | ConvertFrom-Json; $script:createdUuids += $o.chat_uuid }
       elseif ($ev -eq "done") { $done = $json | ConvertFrom-Json }
     }
   }
   Remove-Item $tmp,$out -Force
-  return @{ text = $answer.ToString(); ms = if ($done) { $done.ms } else { -1 } }
+  $ttft = if ($done -and $done.stages -and $done.stages.t_first_token_ms) { [long]$done.stages.t_first_token_ms } else { -1 }
+  return @{ text = $answer.ToString(); ms = if ($done) { $done.ms } else { -1 }; ttft = $ttft }
 }
 
 Write-Output "=== $Label ==="
@@ -43,7 +46,8 @@ $passCount = 0
 foreach ($c in $cases) {
   $uuid = "scn-" + $c.tag + "-" + [Guid]::NewGuid().ToString('N').Substring(0,8)
   if ($c.PSObject.Properties["pre"] -and $c.pre) { $null = Ask $c.pre $uuid }
-  $r = Ask $c.q $uuid
+  $lang = if ($c.PSObject.Properties["lang"] -and $c.lang) { [string]$c.lang } else { "" }
+  $r = Ask $c.q $uuid $lang
   $ans = $r.text
   [IO.File]::WriteAllText((Join-Path $ansDir "$Label-$($c.tag).txt"), $ans, $utf8)
   $ok = $true
@@ -59,7 +63,8 @@ foreach ($c in $cases) {
     }
   }
   if ($ok) { $passCount++ }
-  Write-Output ("{0}`t{1}`t{2}`t{3}" -f $c.tag, $(if ($ok) { "PASS" } else { "FAIL" }), $ans.Length, $r.ms)
+  # 出力: TSV（tag, pass, answer_chars, total_ms, ttft_ms）
+  Write-Output ("{0}`t{1}`t{2}`t{3}`t{4}" -f $c.tag, $(if ($ok) { "PASS" } else { "FAIL" }), $ans.Length, $r.ms, $r.ttft)
 }
 Write-Output ("SCORE`t{0}/{1}" -f $passCount, $cases.Count)
 

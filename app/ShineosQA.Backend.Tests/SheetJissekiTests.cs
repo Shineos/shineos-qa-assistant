@@ -85,3 +85,46 @@ public class SheetJissekiTests
         Assert.DoesNotContain("原価", s);
     }
 }
+
+/// <summary>列マッピング手動上書き（v2.7.0）: 管理者が訂正した列設定で抽出する</summary>
+public class SheetJissekiManualMapTests
+{
+    private static List<(string, string[][])> Sheets(string[][] rows) => new() { ("Sheet1", rows) };
+
+    [Fact]
+    public void ManualMap_OverridesHeaderDetection()
+    {
+        // ヘッダは「品番/見積額/原価」だが、管理者が「備考=納期」と訂正したケースを再現:
+        // 自動検出では納期は検出されない。明示マッピング (zuban=0, mitumori=1, genka=2, nouki=3) で
+        // 4列目の値が納期に入ることを保証する
+        var rows = new[] { new[] { "品番", "見積額", "原価", "備考" } }
+            .Concat(Enumerable.Range(1, 3).Select(i => new[] { $"ST-{1000 + i}", $"{i * 1000}円", $"{i * 500}円", $"{i}日" }))
+            .ToArray();
+        var rowsList = Sheets(rows);
+        var rowsResult = SheetJisseki.ExtractRowsWithMap(rowsList, (0, 1, 2, 3));
+        Assert.Equal(3, rowsResult.Count);
+        Assert.Equal("1日", rowsResult[0].Nouki);
+        Assert.Equal("3日", rowsResult[2].Nouki);
+    }
+
+    [Fact]
+    public void ManualMap_WithoutZuban_ReturnsEmpty()
+    {
+        var rows = new[] { new[] { "品名", "金額" }, new[] { "ブラケット", "1,000円" } };
+        var result = SheetJisseki.ExtractRowsWithMap(Sheets(rows), (-1, 1, -1, -1));
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ManualMap_AppliesToAllSheets()
+    {
+        var sheets = new List<(string, string[][])>
+        {
+            ("A", new[] { new[] { "図番", "見積" }, new[] { "ST-1", "100円" } }),
+            ("B", new[] { new[] { "図番", "見積" }, new[] { "ST-2", "200円" } }),
+        };
+        var result = SheetJisseki.ExtractRowsWithMap(sheets, (0, 1, -1, -1));
+        Assert.Equal(2, result.Count);
+        Assert.Equal("200円", result[1].Mitumori);
+    }
+}

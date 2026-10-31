@@ -54,21 +54,33 @@ public static partial class MfgTerms
         new("torai", new[] { "トライ", "試作", "試作部品" }),
         // 英語資料・外国人材向けの基本語（オフィス/HR系）。日本語質問×英語文書の語彙一致を作る。
         // 汎用動詞（apply/approve等）は誤マッチが増えるため入れない（名詞・複合名詞のみ）。
+        // v2.7.0: 回答言語に対応するvi/zh/id/tlの別名を追加（多言語質問×日本語KBのクロスリンガル検索。
+        // 実測: 外国語クエリはkw=0.00でlow-confガードが全拒否 → 正規トークンで語彙一致を作り
+        // canonicalEvidenceで拒否を免除する）。動詞・疑問詞は入れず名詞句単位
         new("office", new[] { "オフィス", "office" }),
-        new("mycar", new[] { "マイカー", "自分の車", "自家用車", "私用車", "my car", "own car" }),
-        new("chushajo", new[] { "駐車場", "パーキング", "parking" }),
-        new("ryokin", new[] { "料金", "fee", "price", "charge" }),
-        new("kaigishitsu", new[] { "会議室", "ミーティングルーム", "meeting room", "conference room" }),
+        new("mycar", new[] { "マイカー", "自分の車", "自家用車", "私用車", "my car", "own car",
+            "私家车", "xe cá nhân", "mobil pribadi", "sariling kotse" }),
+        new("chushajo", new[] { "駐車場", "パーキング", "parking",
+            "停车场", "bãi đỗ xe", "gửi xe", "parkir", "paradahan" }),
+        new("ryokin", new[] { "料金", "fee", "price", "charge",
+            "费用", "phí", "biaya" }),
+        new("kaigishitsu", new[] { "会議室", "ミーティングルーム", "meeting room", "conference room",
+            "会议室", "phòng họp", "ruang rapat", "kuwarto ng pagpupulong" }),
         new("kucho", new[] { "空調", "air conditioning", "air conditioner" }),
         new("telework", new[] { "テレワーク", "在宅勤務", "リモートワーク", "telework", "remote work", "work from home" }),
         new("teate", new[] { "手当", "手当て", "allowance" }),
-        new("password", new[] { "パスワード", "password" }),
-        new("kyuka", new[] { "休暇", "有給", "有給休暇", "年次有給休暇", "leave", "vacation", "paid leave", "annual leave" }),
-        new("helpdesk", new[] { "ヘルプデスク", "窓口", "内線", "ITサポート", "help desk" }),
+        new("password", new[] { "パスワード", "password",
+            "密码", "mật khẩu", "kata sandi" }),
+        new("kyuka", new[] { "休暇", "有給", "有給休暇", "年次有給休暇", "leave", "vacation", "paid leave", "annual leave",
+            "丧假", "nghỉ tang", "cuti duka", "bereavement leave" }),
+        new("helpdesk", new[] { "ヘルプデスク", "窓口", "内線", "ITサポート", "help desk",
+            "服务台", "quầy hỗ trợ" }),
         new("nyusha", new[] { "入社", "入社時", "hire", "onboarding" }),
         new("kinsen", new[] { "お金が出る", "金銭", "補助", "助成", "給付", "subsidy" }),
-        new("shutchou", new[] { "出張", "business trip" }),
-        new("shukuhaku", new[] { "宿泊費", "宿泊", "accommodation", "hotel" }),
+        new("shutchou", new[] { "出張", "business trip",
+            "出差", "công tác", "perjalanan dinas", "pagbiyahe" }),
+        new("shukuhaku", new[] { "宿泊費", "宿泊", "ホテル", "ホテル代", "accommodation", "hotel",
+            "住宿", "酒店", "宾馆", "khách sạn", "penginapan", "otel" }),
         new("kotsuhi", new[] { "交通費", "transportation" }),
         new("keihi", new[] { "経費", "expenses" }),
         new("kigen", new[] { "期限", "deadline" }),
@@ -167,6 +179,8 @@ public static partial class MfgTerms
             var pattern = $@"(?<![a-z0-9]){Regex.Escape(alias)}(?![a-z0-9])";
             return Regex.IsMatch(s, pattern, RegexOptions.IgnoreCase);
         }
-        return s.Contains(alias, StringComparison.Ordinal);
+        // 多言語別名（vi等）は文頭の大文字と一致させるため大文字小文字を無視する
+        // （実測: 「Mật khẩu」が別名「mật khẩu」に不一致になり正規トークンが付かなかった）
+        return s.Contains(alias, StringComparison.OrdinalIgnoreCase);
     }
 }

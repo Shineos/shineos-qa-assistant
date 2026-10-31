@@ -319,7 +319,58 @@ public static class Api
             var corrected = root.TryGetProperty("corrected_answer", out var ca) && ca.ValueKind == JsonValueKind.String ? ca.GetString() : null;
             db.Exec("INSERT INTO feedback(message_id, chat_id, rating, comment, corrected_answer) VALUES($m,$c,$r,$cm,$ca)",
                 ("$m", messageId), ("$c", chatId), ("$r", rating), ("$cm", comment), ("$ca", corrected));
-            return Results.Json(new { ok = true, id = db.LastInsertId() });
+            var feedbackId = db.LastInsertId();
+            // FAQ候補の自動生成（v2.7.0）: 👍/👎のどちらの評価も「現場の質問 × 回答」を候補として保存し、
+            // ナレッジのFAQ管理から編集採用できるようにする（👍=役に立った回答の即答候補、👎=改善候補）。
+            // 既に公開FAQがある質問・拒否回答は候補の意味がないため除外。候補生成の失敗が
+            // フィードバック応答を壊さないよう握りつぶす。保存可否と理由はUIのトースト文言の
+            // ために返す（2026-10-31実測: 既存FAQありの質問に👍しても「候補として保存」と表示され、
+            // 実態（保存されない）と合わなかった）
+            var candidateSaved = false;
+            var candidateReason = "";
+            if (messageId is long msgId)
+            {
+                try
+                {
+                    var msg = db.Query("SELECT chat_id, content FROM messages WHERE id=$m", ("$m", msgId));
+                    if (msg.Count > 0)
+                    {
+                        var mChat = Convert.ToInt64(msg[0]["chat_id"] ?? 0L);
+                        var mAnswer = Convert.ToString(msg[0]["content"]) ?? "";
+                        var q = db.Scalar(
+                            "SELECT content FROM messages WHERE chat_id=$c AND role='user' AND id < $m ORDER BY id DESC LIMIT 1",
+                            ("$c", mChat), ("$m", msgId)) as string;
+                        var dupFaq = string.IsNullOrWhiteSpace(q) ? null
+                            : db.Scalar("SELECT id FROM faq WHERE question_norm=$n", ("$n", QuestionNorm.Normalize(q!.Trim())));
+                        if (string.IsNullOrWhiteSpace(q) || mAnswer.Trim().Length == 0)
+                            candidateReason = "no_question";
+                        else if (mAnswer.Contains("該当する記載がありません"))
+                            candidateReason = "refusal";
+                        else if (dupFaq is not null)
+                            candidateReason = "existing_faq";
+                        else
+                        {
+                            var dup = db.Scalar(
+                                "SELECT id FROM faq_candidates WHERE question=$q AND status='pending'",
+                                ("$q", q!.Trim()));
+                            if (dup is null)
+                            {
+                                db.Exec("INSERT INTO faq_candidates(question, answer, comment, corrected_answer, source_message_id, chat_id, rating) VALUES($q,$a,$cm,$ca,$m,$c,$r)",
+                                    ("$q", q.Trim()), ("$a", mAnswer), ("$cm", comment), ("$ca", corrected), ("$m", msgId), ("$c", mChat), ("$r", rating));
+                                candidateSaved = true;
+                            }
+                            else candidateReason = "duplicate";
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 候補生成はフィードバック本体の副産物。失敗してもフィードバックは反映済みだが、
+                    // 無言で欠落すると運用者に伝わらないため警告だけ残す
+                    Console.WriteLine($"[WARN] faq candidate generation failed: {ex.Message}");
+                }
+            }
+            return Results.Json(new { ok = true, id = feedbackId, candidate_saved = candidateSaved, candidate_reason = candidateReason });
         });
         app.MapGet("/api/feedback", (int? limit) => Results.Json(new
         {
@@ -337,6 +388,64 @@ public static class Api
                     created_at = r["created_at"],
                 }),
         }));
+
+        // FAQ候補（v2.7.0）: 👎フィードバックから自動生成された「現場の質問 × 回答」の一覧。
+        // 管理者が回答を編集してFAQへ採用（即答に反映）するか、候補を削除する
+        app.MapGet("/api/faq/candidates", (string? status) =>
+        {
+            var st = string.IsNullOrWhiteSpace(status) ? "pending" : status.Trim();
+            return Results.Json(new
+            {
+                items = db.Query(
+                    "SELECT id, question, answer, comment, corrected_answer, source_message_id, rating, status, created_at " +
+                    "FROM faq_candidates WHERE status=$s ORDER BY id DESC LIMIT 200", ("$s", st))
+                    .Select(r => new
+                    {
+                        id = Convert.ToInt64(r["id"] ?? 0L),
+                        question = Convert.ToString(r["question"]) ?? "",
+                        answer = Convert.ToString(r["answer"]) ?? "",
+                        comment = r["comment"],
+                        corrected_answer = r["corrected_answer"],
+                        source_message_id = r["source_message_id"],
+                        rating = Convert.ToInt32(r["rating"] ?? 0),
+                        status = Convert.ToString(r["status"]) ?? "",
+                        created_at = r["created_at"],
+                    }),
+            });
+        });
+        app.MapPost("/api/faq/candidates/{id}/adopt", async (long id, HttpRequest req) =>
+        {
+            using var doc = await JsonDocument.ParseAsync(req.Body);
+            var root = doc.RootElement;
+            var rows = db.Query("SELECT question, answer, source_message_id FROM faq_candidates WHERE id=$i AND status='pending'", ("$i", id));
+            if (rows.Count == 0) return Results.NotFound(new { ok = false, error = "candidate not found or already processed" });
+            var question = root.TryGetProperty("question", out var q) && q.ValueKind == JsonValueKind.String ? q.GetString() : null
+                ?? Convert.ToString(rows[0]["question"]) ?? "";
+            var answer = root.TryGetProperty("answer", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null
+                ?? Convert.ToString(rows[0]["answer"]) ?? "";
+            if (string.IsNullOrWhiteSpace(question) || string.IsNullOrWhiteSpace(answer))
+                return Results.Json(new { ok = false, error = "question and answer are required" }, statusCode: 400);
+            // 出典の引き継ぎ（v2.7.0）: 候補の元になった回答（source_message_id）の出典JSONをそのまま
+            // 採用する。ナレッジ由来の回答には出典を必ず表示するため（空のままだとFAQ即答に出典が出ない）
+            var sourcesJson = "[]";
+            var srcMsgId = rows[0]["source_message_id"];
+            if (srcMsgId is not null && srcMsgId != DBNull.Value)
+            {
+                var srcRow = db.Query("SELECT sources_json FROM messages WHERE id=$m AND sources_json IS NOT NULL",
+                    ("$m", Convert.ToInt64(srcMsgId)));
+                var sj = srcRow.Count > 0 ? Convert.ToString(srcRow[0]["sources_json"]) : null;
+                if (!string.IsNullOrWhiteSpace(sj) && sj != "[]") sourcesJson = sj!;
+            }
+            var faqId = ctx.Flow.Faq.Upsert(question.Trim(), answer.Trim(), sourcesJson, Array.Empty<string>(), "published", "");
+            db.Exec("UPDATE faq_candidates SET status='adopted', faq_id=$f, question=$q, answer=$a WHERE id=$i",
+                ("$f", faqId), ("$q", question.Trim()), ("$a", answer.Trim()), ("$i", id));
+            return Results.Json(new { ok = true, faq_id = faqId });
+        });
+        app.MapDelete("/api/faq/candidates/{id}", (long id) =>
+        {
+            db.Exec("DELETE FROM faq_candidates WHERE id=$i", ("$i", id));
+            return Results.Json(new { ok = true });
+        });
 
         // 図面台帳（Phase D）: drawing_meta を一覧・検索する。図番/品名/材質/改訂をUIで絞り込む。
         app.MapGet("/api/drawings", (string? q) =>
@@ -365,7 +474,8 @@ public static class Api
             });
         });
 
-        // 実績表の列マッピング（自動検出）。元ファイルを再パースしてヘッダ→役割を返す。
+        // 実績表の列マッピング。手動上書き（jisseki_colmap）があればそれを優先し、無ければ自動検出。
+        // 元ファイルを再パースしてヘッダ→役割を返す（manual=true は管理者の訂正済みマッピング）
         app.MapGet("/api/jisseki/columns", (long file_id) =>
         {
             var name = db.Scalar("SELECT name FROM files WHERE file_id=$i", ("$i", file_id)) as string;
@@ -378,14 +488,73 @@ public static class Api
             var sheets = SheetExtract.ParseToRows(name, File.ReadAllBytes(stored));
             if (sheets.Count == 0) return Results.Json(new { items = Array.Empty<object>() });
             var header = sheets[0].Rows.Length > 0 ? sheets[0].Rows[0] : Array.Empty<string>();
-            var (zuban, mitumori, genka, nouki) = SheetJisseki.MapColumns(header);
+            int zuban, mitumori, genka, nouki;
+            bool manual = false;
+            var saved = db.Query("SELECT zuban, mitumori, genka, nouki FROM jisseki_colmap WHERE file_id=$i", ("$i", file_id));
+            if (saved.Count > 0)
+            {
+                // 手動上書き済み: 保存された列設定をそのまま返す（次のPUTまで変わらない）
+                zuban = Convert.ToInt32(saved[0]["zuban"] ?? -1);
+                mitumori = Convert.ToInt32(saved[0]["mitumori"] ?? -1);
+                genka = Convert.ToInt32(saved[0]["genka"] ?? -1);
+                nouki = Convert.ToInt32(saved[0]["nouki"] ?? -1);
+                manual = true;
+            }
+            else (zuban, mitumori, genka, nouki) = SheetJisseki.MapColumns(header);
             string Role(int i) => i == zuban ? "zuban" : i == mitumori ? "mitumori" : i == genka ? "genka" : i == nouki ? "nouki" : "other";
             return Results.Json(new
             {
                 file_id,
                 file = name,
+                manual,
                 items = header.Select((h, i) => new { column_name = (h ?? "").TrimStart('\uFEFF'), column_index = i, role = Role(i) }),
             });
+        });
+
+        // 実績列マッピングの手動上書き（v2.7.0）: 管理者が列役割を訂正し、元ファイルを再パースして
+        // jisseki_metaを作り直す（集計・図面QAへの実績注入はjisseki_metaを読むため自動で反映される）。
+        // 再抽出が0件になる場合（図番列未指定・ヘッダ行のみ等）は現在のデータを壊さないよう拒否する
+        app.MapPut("/api/jisseki/{file_id}/columns", async (long file_id, HttpRequest req) =>
+        {
+            using var doc = await JsonDocument.ParseAsync(req.Body);
+            var root = doc.RootElement;
+            int Get(string key)
+            {
+                if (!root.TryGetProperty(key, out var v) || v.ValueKind != JsonValueKind.Number || !v.TryGetInt32(out var i))
+                    return -1;
+                return i;
+            }
+            var map = (Zuban: Get("zuban"), Mitumori: Get("mitumori"), Genka: Get("genka"), Nouki: Get("nouki"));
+            if (map.Zuban < 0)
+                return Results.Json(new { ok = false, error = "図番列の指定は必須です（実績辞書は図番をキーにします）" }, statusCode: 400);
+            var used = new[] { map.Zuban, map.Mitumori, map.Genka, map.Nouki }.Where(i => i >= 0).ToList();
+            if (used.Count != used.Distinct().Count())
+                return Results.Json(new { ok = false, error = "同じ列に複数の役割は割り当てられません" }, statusCode: 400);
+            var name = db.Scalar("SELECT name FROM files WHERE file_id=$i", ("$i", file_id)) as string;
+            if (string.IsNullOrWhiteSpace(name)) return Results.NotFound();
+            var stored = Directory.EnumerateFiles(ingest.FilesDir, $"{file_id}.*")
+                .FirstOrDefault(p => !p.EndsWith(".thumb.png", StringComparison.OrdinalIgnoreCase));
+            if (stored is null) return Results.NotFound();
+            var ext = Path.GetExtension(stored).ToLowerInvariant();
+            if (ext is not (".xlsx" or ".csv" or ".tsv")) return Results.BadRequest(new { error = "not a sheet" });
+            var sheets = SheetExtract.ParseToRows(name, File.ReadAllBytes(stored));
+            var rows = SheetJisseki.ExtractRowsWithMap(sheets, map);
+            if (rows.Count == 0)
+                return Results.Json(new { ok = false, error = "この列設定では実績行が1件も抽出できませんでした（図番の値が空またはヘッダー行のみです）" }, statusCode: 400);
+            var commands = new List<(string Sql, (string Name, object? Value)[])>
+            {
+                ("DELETE FROM jisseki_meta WHERE file_id=$f", new[] { ("$f", (object?)file_id) }),
+                ("INSERT OR REPLACE INTO jisseki_colmap(file_id, zuban, mitumori, genka, nouki) VALUES($f,$z,$m,$g,$n)",
+                    new[] { ("$f", (object?)file_id), ("$z", (object?)map.Zuban), ("$m", (object?)map.Mitumori),
+                            ("$g", (object?)map.Genka), ("$n", (object?)map.Nouki) }),
+            };
+            foreach (var r in rows)
+                commands.Add((
+                    "INSERT OR REPLACE INTO jisseki_meta(file_id, row_no, zuban_raw, zuban_norm, mitumori, genka, nouki) VALUES($f,$r,$zr,$zn,$mi,$ge,$no)",
+                    new[] { ("$f", (object?)file_id), ("$r", (object?)r.RowNo), ("$zr", (object?)r.ZubanRaw), ("$zn", (object?)r.ZubanNorm),
+                            ("$mi", (object?)r.Mitumori), ("$ge", (object?)r.Genka), ("$no", (object?)r.Nouki) }));
+            db.ExecTransaction(commands);
+            return Results.Json(new { ok = true, rows = rows.Count, map });
         });
 
         // 実績の集計（Phase D）: 見積/原価の合計・平均・件数。図番での絞り込みに対応。
@@ -538,13 +707,27 @@ public static class Api
             var like = $"%{q}%";
             var norm = q.Length > 0 ? $"%{Rag.NormalizeZuban(q)}%" : "";
             // added_at はUTC保存のため表示時にローカル時刻へ変換する（UTCのままだと日本時間で9時間前表示になる・2026-10-23実機E2Eで発見）
+            // hit_count/enabled は Dify風一覧用（v2.7.0）。字数（単語数相当）はチャンク文字数の合計
+            var cols = "f.file_id, f.name, f.status, f.error, f.chunk_count, datetime(f.added_at, 'localtime') AS added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision, f.hit_count, f.enabled, " +
+                "(SELECT COALESCE(SUM(LENGTH(c.text)),0) FROM chunks c WHERE c.file_id=f.file_id) AS total_chars";
             var sql = q.Length == 0
-                ? "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, datetime(f.added_at, 'localtime') AS added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
-                  "FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id ORDER BY f.file_id DESC"
-                : "SELECT f.file_id, f.name, f.status, f.error, f.chunk_count, datetime(f.added_at, 'localtime') AS added_at, f.kind, d.zuban_raw, d.hinmei, d.zairyo, d.revision " +
-                  "FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id " +
+                ? "SELECT " + cols + " FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id ORDER BY f.file_id DESC"
+                : "SELECT " + cols + " FROM files f LEFT JOIN drawing_meta d ON d.file_id=f.file_id " +
                   "WHERE f.name LIKE $q OR d.zuban_norm LIKE $qn OR d.hinmei LIKE $q OR d.zairyo LIKE $q ORDER BY f.file_id DESC";
             return Results.Json(db.Query(sql, ("$q", like), ("$qn", norm)));
+        });
+
+        // 文書の有効/無効トグル（v2.7.0・Dify風一覧）: enabled=0 にした文書はRAG索引ロード・
+        // 全文注入モードの両方から除外され、ナレッジ一覧のトグルスイッチで切替できる
+        app.MapPost("/api/knowledge/{id}/toggle", (long id) =>
+        {
+            var row = db.Query("SELECT enabled FROM files WHERE file_id=$i", ("$i", id));
+            if (row.Count == 0) return Results.NotFound();
+            var cur = Convert.ToInt64(row[0]["enabled"] ?? 1);
+            var next = cur == 0 ? 1 : 0;
+            db.Exec("UPDATE files SET enabled=$n WHERE file_id=$i", ("$n", next), ("$i", id));
+            index?.LoadFrom(db); // 索引を再ロードして無効化を即時反映
+            return Results.Json(new { enabled = next });
         });
 
         // 拡張パック（図面）: サムネイルと元ファイル。パック有効時に取り込んだファイルのみ存在する

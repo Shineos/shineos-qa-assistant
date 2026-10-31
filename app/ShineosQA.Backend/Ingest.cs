@@ -279,7 +279,15 @@ public sealed class Ingest
                             InvalidDataException? ocrErr = null;
                             try { ocr = await OcrPdfFallbackAsync(bytes, ct); }
                             catch (InvalidDataException ex) { ocrErr = ex; } // OCR不可（言語パック無し等）→ VL救済へ
-                            catch (Exception ex) { ocrErr = new InvalidDataException("OCR救済でエラー: " + (string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message)); } // 破損PDF等のレンダリング例外。空メッセージのままUIに出るのを防ぐ（2026-10-23実機E2Eで発見）
+                            // 破損PDF等のレンダリング例外。空メッセージのままUIに出るのを防ぐ（2026-10-23実機E2Eで発見）。
+                            // WinRTのPDFロード/描画はxref欠落・ストリーム破損でCOMException（空メッセージ）になる実測
+                            catch (Exception ex)
+                            {
+                                var label = ex is System.Runtime.InteropServices.COMException
+                                    ? "PDFが破損しているか、対応外の形式の可能性があります（描画に失敗しました）"
+                                    : (string.IsNullOrWhiteSpace(ex.Message) ? ex.GetType().Name : ex.Message);
+                                ocrErr = new InvalidDataException("OCR救済でエラー: " + label);
+                            }
                             if (ocr != null)
                             {
                                 var firstDim = ocr.PageDims.Count > 0 ? ocr.PageDims[0] : (0f, 0f);

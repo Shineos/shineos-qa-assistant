@@ -50,18 +50,44 @@ public static partial class SheetJisseki
         foreach (var (_, rows) in sheets)
         {
             if (rows.Length < 2) continue; // ヘッダのみ
-            var (zuban, mitumori, genka, nouki) = MapColumns(rows[0]);
-            if (zuban < 0) continue; // 図番キー列が無いシートは実績辞書の対象外
-            for (int r = 1; r < rows.Length && rowNo < SheetExtract.MaxRows; r++)
-            {
-                var cells = rows[r];
-                var raw = Cell(cells, zuban);
-                if (string.IsNullOrWhiteSpace(raw)) continue;
-                var norm = Rag.NormalizeZuban(raw);
-                if (norm.Length == 0) continue;
-                result.Add(new JissekiRow(rowNo++, raw, norm,
-                    Cell(cells, mitumori), Cell(cells, genka), Cell(cells, nouki)));
-            }
+            var map = MapColumns(rows[0]);
+            result.AddRange(ExtractRowsFromSheet(rows, map, ref rowNo));
+        }
+        return result;
+    }
+
+    /// <summary>手動マッピング（列マッピング上書き・v2.7.0）で抽出する。全シートに同じ列設定を適用する
+    /// （UIは1枚目のヘッダで列役割を編集するため）。戻り値0件（図番列未指定含む）は何も書き換えないよう
+    /// 呼び出し側で判定する。列はヘッダ行だけでなくデータ行からも字数超過なく直接読む</summary>
+    public static List<JissekiRow> ExtractRowsWithMap(List<(string SheetName, string[][] Rows)> sheets,
+        (int Zuban, int Mitumori, int Genka, int Nouki) map)
+    {
+        var result = new List<JissekiRow>();
+        if (map.Zuban < 0) return result; // 図番列なし=実績辞書の前提を満たさない
+        int rowNo = 0;
+        foreach (var (_, rows) in sheets)
+        {
+            if (rows.Length < 2) continue;
+            result.AddRange(ExtractRowsFromSheet(rows, map, ref rowNo));
+        }
+        return result;
+    }
+
+    private static List<JissekiRow> ExtractRowsFromSheet(string[][] rows,
+        (int Zuban, int Mitumori, int Genka, int Nouki) map, ref int rowNo)
+    {
+        var result = new List<JissekiRow>();
+        var (zuban, mitumori, genka, nouki) = map;
+        if (zuban < 0) return result;
+        for (int r = 1; r < rows.Length && rowNo < SheetExtract.MaxRows; r++)
+        {
+            var cells = rows[r];
+            var raw = Cell(cells, zuban);
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var norm = Rag.NormalizeZuban(raw);
+            if (norm.Length == 0) continue;
+            result.Add(new JissekiRow(rowNo++, raw, norm,
+                Cell(cells, mitumori), Cell(cells, genka), Cell(cells, nouki)));
         }
         return result;
     }

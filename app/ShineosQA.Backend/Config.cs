@@ -29,6 +29,9 @@ public sealed class AppConfig
     public int Threads { get; set; } = 0; // 0=物理コア数
     public int IdleUnloadMinutes { get; set; } = 60;
     public bool BgFriendly { get; set; } = true; // 他アプリ優先: LLM生成をBelowNormal優先度で実行（既定ON）
+    public int RecycleThresholdMb { get; set; } = 0; // LLMメモリリサイクル閾値（MB）の手動上書き。0=RAMから自動
+                                                     // （8GB機2,200MB / 16GB機4,500MB）。16GB機で8GB機のポリシーを
+                                                     // 再現する検証や、搭載RAMと実態が乖離する環境の調整に使う
 
     public static AppConfig Load(string[] args)
     {
@@ -71,6 +74,7 @@ public sealed class AppConfig
                     case "threads": cfg.Threads = p.Value.GetInt32(); break;
                     case "idle_unload_minutes": cfg.IdleUnloadMinutes = p.Value.GetInt32(); break;
                     case "bg_friendly": cfg.BgFriendly = p.Value.GetBoolean(); break;
+                    case "recycle_threshold_mb": cfg.RecycleThresholdMb = p.Value.GetInt32(); break;
                 }
             }
         }

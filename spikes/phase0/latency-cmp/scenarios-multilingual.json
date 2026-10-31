@@ -1,0 +1,330 @@
+[
+ {
+  "tag": "vi-pw-len",
+  "q": "Mật khẩu công ty cần tối thiểu bao nhiêu ký tự?",
+  "expect": [
+   [
+    "12"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "vi-pw-rot",
+  "q": "Mật khẩu nên được thay đổi sau bao lâu một lần?",
+  "expect": [
+   [
+    "90"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "vi-pw-help",
+  "q": "Khi quên mật khẩu thì liên hệ với ai?",
+  "expect": [
+   [
+    "1234"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "vi-leave",
+  "q": "Nghỉ tang cha mẹ được bao nhiêu ngày?",
+  "expect": [
+   [
+    "7"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "vi-car",
+  "q": "Đi công tác bằng xe cá nhân được hưởng bao nhiêu tiền mỗi km?",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "vi-parking",
+  "q": "Phí gửi xe mỗi giờ là bao nhiêu?",
+  "expect": [
+   [
+    "200"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "vi-room",
+  "q": "Phòng họp lớn chứa được tối đa bao nhiêu người?",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "vi-hotel",
+  "q": "Trần tiền phí khách sạn khi công tác là bao nhiêu?",
+  "expect": [
+   [
+    "15,000",
+    "15.000",
+    "15000"
+   ]
+  ],
+  "lang": "vi"
+ },
+ {
+  "tag": "zh-pw-len",
+  "q": "公司密码至少需要多少位？",
+  "expect": [
+   [
+    "12"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "zh-pw-rot",
+  "q": "密码多久更换一次？",
+  "expect": [
+   [
+    "90"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "zh-pw-help",
+  "q": "忘记密码时应该联系谁？",
+  "expect": [
+   [
+    "1234"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "zh-leave",
+  "q": "父母去世的丧假有几天？",
+  "expect": [
+   [
+    "7"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "zh-car",
+  "q": "开私家车出差每公里补贴多少钱？",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "zh-parking",
+  "q": "停车场每小时的费用是多少？",
+  "expect": [
+   [
+    "200"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "zh-room",
+  "q": "大会议室最多能容纳多少人？",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "zh-hotel",
+  "q": "出差住宿费的上限是多少？",
+  "expect": [
+   [
+    "15,000",
+    "15.000",
+    "15000"
+   ]
+  ],
+  "lang": "zh"
+ },
+ {
+  "tag": "id-pw-len",
+  "q": "Berapa karakter minimum untuk kata sandi perusahaan?",
+  "expect": [
+   [
+    "12"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "id-pw-rot",
+  "q": "Seberapa sering kata sandi harus diganti?",
+  "expect": [
+   [
+    "90"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "id-pw-help",
+  "q": "Ke mana harus menghubungi jika lupa kata sandi?",
+  "expect": [
+   [
+    "1234"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "id-leave",
+  "q": "Berapa hari cuti duka untuk orang tua?",
+  "expect": [
+   [
+    "7"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "id-car",
+  "q": "Berapa ganti rugi per km jika dinas dengan mobil pribadi?",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "id-parking",
+  "q": "Berapa biaya parkir per jam?",
+  "expect": [
+   [
+    "200"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "id-room",
+  "q": "Kapasitas maksimal ruang rapat besar adalah berapa orang?",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "id-hotel",
+  "q": "Berapa batas atas biaya penginapan saat perjalanan dinas?",
+  "expect": [
+   [
+    "15,000",
+    "15.000",
+    "15000"
+   ]
+  ],
+  "lang": "id"
+ },
+ {
+  "tag": "tl-pw-len",
+  "q": "Ilang karakter ang minimum na haba ng password ng kompanya?",
+  "expect": [
+   [
+    "12"
+   ]
+  ],
+  "lang": "tl"
+ },
+ {
+  "tag": "tl-pw-rot",
+  "q": "Gaano kadalas dapat palitan ang password?",
+  "expect": [
+   [
+    "90"
+   ]
+  ],
+  "lang": "tl"
+ },
+ {
+  "tag": "tl-pw-help",
+  "q": "Sino ang tatawagan kapag nakalimutan ang password?",
+  "expect": [
+   [
+    "1234"
+   ]
+  ],
+  "lang": "tl"
+ },
+ {
+  "tag": "tl-leave",
+  "q": "Ilang araw ang bereavement leave para sa magulang?",
+  "expect": [
+   [
+    "7"
+   ]
+  ],
+  "lang": "tl"
+ },
+ {
+  "tag": "tl-car",
+  "q": "Magkano ang benepisyo bawat kilometro kapag sariling kotse ang gamit sa pagbiyahe?",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "tl"
+ },
+ {
+  "tag": "tl-parking",
+  "q": "Magkano ang bayad sa paradahan kada oras?",
+  "expect": [
+   [
+    "200"
+   ]
+  ],
+  "lang": "tl"
+ },
+ {
+  "tag": "tl-room",
+  "q": "Ilang tao ang kasya sa malaking kuwarto ng pagpupulong?",
+  "expect": [
+   [
+    "20"
+   ]
+  ],
+  "lang": "tl"
+ },
+ {
+  "tag": "tl-hotel",
+  "q": "Magkano ang pinakamataas na bayad sa otel sa pagbiyahe?",
+  "expect": [
+   [
+    "15,000",
+    "15.000",
+    "15000"
+   ]
+  ],
+  "lang": "tl"
+ }
+]

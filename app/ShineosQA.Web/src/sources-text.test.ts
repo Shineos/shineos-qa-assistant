@@ -8,7 +8,7 @@ describe('buildSourcesText', () => {
     const out = buildSourcesText([
       { file: '経費規程.pdf', snippet: '出張旅費 は\n交通費を　含む', kind: 'kb' },
     ]);
-    expect(out).toBe('──── 出典（該当箇所） ────\n1. **経費規程.pdf**\n   出張旅費 は 交通費を 含む');
+    expect(out).toBe('──── 出典（該当箇所） ────\n1. 経費規程.pdf\n   出張旅費 は 交通費を 含む');
   });
 
   it('スニペットは110字で切り詰める', () => {
@@ -22,18 +22,18 @@ describe('buildSourcesText', () => {
     const out = buildSourcesText([
       { file: 'd.pdf', snippet: '表題欄', is_drawing: true, zuban: 'ST-1042A', hinmei: 'サポートブラケット', revision: 'B' },
     ]);
-    expect(out).toContain('1. **【図】ST-1042A（サポートブラケット・改訂B）**');
+    expect(out).toContain('1. 【図】ST-1042A（サポートブラケット・改訂B）');
   });
 
   it('図番が無い図面は【図面】ファイル名になる', () => {
     const out = buildSourcesText([{ file: 'scan.pdf', snippet: '', is_drawing: true }]);
-    expect(out).toContain('1. **【図面】scan.pdf**');
+    expect(out).toContain('1. 【図面】scan.pdf');
   });
 
   it('Web出典はタイトル+URL併記', () => {
     const out = buildSourcesText([
       { file: 'ニュース', snippet: '概要', kind: 'web', url: 'https://example.com/a' },
     ]);
-    expect(out).toContain('1. **ニュース**  https://example.com/a');
+    expect(out).toContain('1. ニュース  https://example.com/a');
   });
 });

@@ -79,7 +79,8 @@ describe('KnowledgeExtras（DOM）', () => {
     fileSelect.dispatchEvent(new Event('change'));
 
     await vi.waitFor(() => {
-      expect(host.querySelector('#jis-columns')?.textContent).toContain('検出した列');
+      expect(host.querySelector('#jis-columns')?.textContent).toContain('列の役割');
+    expect(host.querySelector('.jis-role[data-idx="1"]')?.textContent).toContain('見積');
     });
     await vi.waitFor(() => {
       expect(host.querySelector('#jis-result')?.textContent).toContain('150,000円');

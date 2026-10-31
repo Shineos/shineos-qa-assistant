@@ -82,9 +82,11 @@ public static class Draft
         if (System.Text.RegularExpressions.Regex.IsMatch(t, "(作成|作り|書き|やり)方|(作成|作る|書く)ことができますか"))
             return false;
         var action = System.Text.RegularExpressions.Regex.IsMatch(
-            t, "作成し(て|ます)|作って(くれ|ください|ほしい)?|書いて(くれ|ください|ほしい)?|起草し(て|ます)|作成お願い");
+            t, "作成し(て|ます)|作って(くれ|ください|ほしい)?|書いて(くれ|ください|ほしい)?|起草し(て|ます)|作成お願い"
+             + "|まとめ(て|ます)|資料にし(て|ます)|文書にし(て|ます)|作成依頼");
         var docType = System.Text.RegularExpressions.Regex.IsMatch(
-            t, "手順書|報告書|提案書|FAQ|よくある質問|議事録|お詫び状|お礼状|案内状|メール文面|マニュアル|仕様書|取扱説明書");
+            t, "手順書|報告書|提案書|FAQ|よくある質問|議事録|お詫び状|お礼状|案内状|メール文面|マニュアル|仕様書|取扱説明書"
+             + "|資料|文書|レポート|稟議書");
         if (System.Text.RegularExpressions.Regex.IsMatch(t, "とは|とは何|って何\\s*[？?]*$")) return false; // 「報告書とは？」等は用語QA
         return (action && !docType) || (docType && (action || t.EndsWith("して") || t.EndsWith("してください") || t.EndsWith("ください")));
     }

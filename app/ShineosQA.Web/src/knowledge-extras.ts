@@ -1,6 +1,6 @@
 // ナレッジ画面の追加セクション（FAQ管理・図面台帳・実績集計）。
 // 既存のナレッジ一覧（knowledge.ts）は変更せず、その下に折りたたみセクションとして置く。
-import { api, type DrawingRow, type FaqEntry, type JissekiColumn, type JissekiSummary, type KnowledgeFile } from './api';
+import { api, type DrawingRow, type FaqCandidate, type FaqEntry, type JissekiColumnsResult, type JissekiRoleMap, type JissekiSummary, type KnowledgeFile } from './api';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -34,10 +34,38 @@ export function formatJissekiValue(s: Pick<JissekiSummary, 'aggregate' | 'value'
   return `${n}${s.unit || '円'}`;
 }
 
+/** 列役割の編集ドロップダウンの選択肢（値=APIのrole、other=役割なし） */
+export const JISSEKI_ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'other', label: 'その他' },
+  { value: 'zuban', label: '図番' },
+  { value: 'mitumori', label: '見積' },
+  { value: 'genka', label: '原価' },
+  { value: 'nouki', label: '納期' },
+];
+
+/** 編集済みの列役割からAPIの上書きマッピングを作る。図番列は必須（実績辞書のキー）。
+ * 同じ列に複数役割・図番未指定の場合はエラー文を返す */
+export function buildJissekiRoleMap(roles: { column_index: number; role: string }[]): { map?: JissekiRoleMap; error?: string } {
+  const pick = (role: string): number => {
+    const hit = roles.find(r => r.role === role);
+    return hit ? hit.column_index : -1;
+  };
+  const map: JissekiRoleMap = { zuban: pick('zuban'), mitumori: pick('mitumori'), genka: pick('genka'), nouki: pick('nouki') };
+  if (map.zuban < 0) return { error: '図番列を指定してください（実績辞書は図番をキーにします）' };
+  const used = [map.zuban, map.mitumori, map.genka, map.nouki].filter(i => i >= 0);
+  if (used.length !== new Set(used).size) return { error: '同じ列に複数の役割は割り当てられません' };
+  return { map };
+}
+
 /** 回答（最大max文字）を1行に丸めて表示用にする。全文はtitle属性で見せる */
 function truncate(s: string, max: number): string {
   const t = s.replace(/\s+/g, ' ').trim();
   return t.length > max ? t.slice(0, max) + '…' : t;
+}
+
+/** 保存操作の間、ブロック内のボタンをまとめて無効化/復帰する */
+function btnToggle(scope: HTMLElement | null, disabled: boolean): void {
+  scope?.querySelectorAll<HTMLButtonElement>('button').forEach(b => { b.disabled = disabled; });
 }
 
 export class KnowledgeExtras {
@@ -63,6 +91,10 @@ export class KnowledgeExtras {
             </div>
           </div>
           <div id="faq-list"></div>
+          <div class="faq-cand-head">👎フィードバックからの候補<span class="k-count" id="faq-cand-count"></span></div>
+          <div class="muted">👍「役に立った」/👎「改善してほしい」の評価から、質問×回答の候補が自動で表示されます。回答を修正して採用すると、次からその質問にはLLMを使わず即答します。</div>
+          <div id="faq-cand-list"></div>
+          <div id="faq-cand-status" class="muted"></div>
         </div>
       </details>
       <details class="k-section" id="drawings-section">
@@ -83,6 +115,10 @@ export class KnowledgeExtras {
             <button type="button" id="jis-run" class="primary small">集計</button>
           </div>
           <div id="jis-columns" class="jis-columns muted">実績表を選ぶと列を自動検出します</div>
+          <div id="jis-save-row" hidden>
+            <button type="button" id="jis-save" class="primary small">この列設定で実績辞書を作り直す</button>
+            <span id="jis-save-status" class="muted"></span>
+          </div>
           <div id="jis-result" class="jis-result" hidden></div>
           <div id="jis-note" class="muted"></div>
         </div>
@@ -124,15 +160,16 @@ export class KnowledgeExtras {
       if (e.key === 'Enter') { e.preventDefault(); void this.runSummary(); }
     });
     this.q<HTMLButtonElement>('#jis-run').addEventListener('click', () => void this.runSummary());
+    this.q<HTMLButtonElement>('#jis-save').addEventListener('click', () => void this.saveJissekiColumns());
     // セクションを開いた時点で列検出＋既定集計を実行（選択済みファイルがある場合）
     this.q<HTMLDetailsElement>('#jisseki-section').addEventListener('toggle', (e) => {
       if ((e.target as HTMLDetailsElement).open && this.selectedJissekiId !== null) void this.refreshJisseki();
     });
   }
 
-  /** ナレッジタブ表示時にFAQ・図面台帳を再取得する（ローカルDBのみ） */
+  /** ナレッジタブ表示時にFAQ・図面台帳・候補を再取得する（ローカルDBのみ） */
   async refresh(): Promise<void> {
-    await Promise.all([this.loadFaq(), this.loadDrawings()]);
+    await Promise.all([this.loadFaq(), this.loadDrawings(), this.loadFaqCandidates()]);
   }
 
   /** ナレッジ一覧の更新を実績集計の選択肢へ反映する（実績表のみ） */
@@ -247,6 +284,73 @@ export class KnowledgeExtras {
     }
   }
 
+  // ---- FAQ候補（👎フィードバック → 編集採用） ----
+
+  private async loadFaqCandidates(): Promise<void> {
+    const host = this.q<HTMLElement>('#faq-cand-list');
+    try {
+      const { items } = await api.faqCandidates('pending');
+      this.renderFaqCandidates(items ?? []);
+    } catch {
+      this.q<HTMLElement>('#faq-cand-count').textContent = '';
+      host.innerHTML = '<div class="muted">候補を取得できませんでした（バックエンド未対応の可能性があります）</div>';
+    }
+  }
+
+  private renderFaqCandidates(items: FaqCandidate[]): void {
+    this.q<HTMLElement>('#faq-cand-count').textContent = `（${items.length}件）`;
+    const host = this.q<HTMLElement>('#faq-cand-list');
+    if (items.length === 0) {
+      host.innerHTML = '<div class="muted">処理待ちの候補はありません。</div>';
+      return;
+    }
+    host.innerHTML = items.map(c => `<div class="faq-cand" data-id="${c.id}">
+      <div class="faq-cand-meta muted">${c.rating === 1 ? '👍 役に立った回答' : '👎 改善してほしい'}・${esc(c.created_at)}${c.comment ? `・コメント: ${esc(truncate(c.comment, 80))}` : ''}</div>
+      <input type="text" class="k-input faq-cand-q" value="${esc(c.question)}" aria-label="質問" />
+      <textarea class="k-input faq-cand-a" rows="2" aria-label="回答">${esc(c.corrected_answer || c.answer)}</textarea>
+      <div class="faq-form-row">
+        <button type="button" class="primary small" data-adopt="${c.id}">FAQとして採用</button>
+        <button type="button" class="small" data-dismiss="${c.id}">候補を削除</button>
+      </div>
+    </div>`).join('');
+    host.querySelectorAll<HTMLButtonElement>('[data-adopt]').forEach(btn => {
+      btn.addEventListener('click', () => void this.adoptFaqCandidate(Number(btn.dataset.adopt)));
+    });
+    host.querySelectorAll<HTMLButtonElement>('[data-dismiss]').forEach(btn => {
+      btn.addEventListener('click', () => void this.deleteFaqCandidate(Number(btn.dataset.dismiss)));
+    });
+  }
+
+  private async adoptFaqCandidate(id: number): Promise<void> {
+    const block = this.q<HTMLElement>('#faq-cand-list').querySelector<HTMLElement>(`.faq-cand[data-id="${id}"]`);
+    const status = this.q<HTMLElement>('#faq-cand-status');
+    const question = block?.querySelector<HTMLInputElement>('.faq-cand-q')?.value.trim() ?? '';
+    const answer = block?.querySelector<HTMLTextAreaElement>('.faq-cand-a')?.value.trim() ?? '';
+    if (!question || !answer) { status.textContent = '質問と回答を入力してから採用してください'; return; }
+    btnToggle(block, true);
+    try {
+      const r = await api.adoptFaqCandidate(id, { question, answer });
+      if (!r.ok) { status.textContent = `採用できませんでした: ${r.error ?? '入力内容を確認してください'}`; return; }
+      status.textContent = 'FAQとして採用しました（この質問には次から即答します）';
+      await Promise.all([this.loadFaqCandidates(), this.loadFaq()]);
+    } catch (ex) {
+      status.textContent = `採用できませんでした: ${(ex as Error).message}`;
+    } finally {
+      btnToggle(block, false);
+    }
+  }
+
+  private async deleteFaqCandidate(id: number): Promise<void> {
+    const status = this.q<HTMLElement>('#faq-cand-status');
+    try {
+      await api.deleteFaqCandidate(id);
+      status.textContent = '候補を削除しました';
+      await this.loadFaqCandidates();
+    } catch (ex) {
+      status.textContent = `削除できませんでした: ${(ex as Error).message}`;
+    }
+  }
+
   // ---- 図面台帳（GET /api/drawings） ----
 
   private async loadDrawings(): Promise<void> {
@@ -294,10 +398,11 @@ export class KnowledgeExtras {
     const colsHost = this.q<HTMLElement>('#jis-columns');
     const seq = ++this.jisSeq;
     colsHost.textContent = '列を検出中…';
+    this.q<HTMLElement>('#jis-save-row').hidden = true;
     try {
-      const { items } = await api.jissekiColumns(fileId);
+      const result = await api.jissekiColumns(fileId);
       if (seq !== this.jisSeq) return;
-      this.renderJissekiColumns(items ?? []);
+      this.renderJissekiColumns(result);
     } catch (ex) {
       if (seq !== this.jisSeq) return;
       colsHost.textContent = `列を取得できませんでした: ${(ex as Error).message}`;
@@ -305,15 +410,47 @@ export class KnowledgeExtras {
     await this.runSummary();
   }
 
-  private renderJissekiColumns(items: JissekiColumn[]): void {
+  /** 列役割の編集UI。自動検出/手動上書きの別を表示し、ドロップダウンで役割を変えて保存できる */
+  private renderJissekiColumns(result: JissekiColumnsResult): void {
     const host = this.q<HTMLElement>('#jis-columns');
+    const items = result.items ?? [];
     if (items.length === 0) {
       host.textContent = '列を自動検出できませんでした（ヘッダー行のある実績表か確認してください）';
+      this.q<HTMLElement>('#jis-save-row').hidden = true;
       return;
     }
-    host.innerHTML = '<span class="jis-cols-label">検出した列:</span>' + items.map(c =>
-      `<span class="jis-col" title="列 ${c.column_index + 1}"><b>${esc(c.column_name)}</b><span>${esc(jissekiRoleLabel(c.role))}</span></span>`,
-    ).join('');
+    const badge = result.manual ? '<span class="jis-manual">手動設定済み</span>' : '<span class="muted">（自動検出）</span>';
+    host.innerHTML = `<div class="jis-cols-edit"><span class="jis-cols-label">列の役割 ${badge}:</span>`
+      + items.map(c => `<span class="jis-col" title="列 ${c.column_index + 1}"><b>${esc(c.column_name)}</b>`
+        + `<select class="jis-role" data-idx="${c.column_index}" aria-label="${esc(c.column_name)}の役割">`
+        + JISSEKI_ROLE_OPTIONS.map(o =>
+            `<option value="${o.value}"${o.value === (c.role || 'other') ? ' selected' : ''}>${o.label}</option>`).join('')
+        + `</select></span>`).join('')
+      + '</div>';
+    this.q<HTMLElement>('#jis-save-row').hidden = false;
+  }
+
+  /** 列役割の手動上書きを保存する。成功したら実績辞書が作り直されるため列表示と集計を再取得する */
+  private async saveJissekiColumns(): Promise<void> {
+    const fileId = this.selectedJissekiId;
+    if (fileId === null) return;
+    const status = this.q<HTMLElement>('#jis-save-status');
+    const roles = [...this.q<HTMLElement>('#jis-columns').querySelectorAll<HTMLSelectElement>('.jis-role')]
+      .map(sel => ({ column_index: Number(sel.dataset.idx), role: sel.value }));
+    const { map, error } = buildJissekiRoleMap(roles);
+    if (!map) { status.textContent = error ?? '入力内容を確認してください'; return; }
+    btnToggle(this.q<HTMLElement>('#jis-save-row'), true);
+    status.textContent = '再作成中…';
+    try {
+      const r = await api.jissekiSaveColumns(fileId, map);
+      if (!r.ok) { status.textContent = `保存できませんでした: ${r.error ?? '入力内容を確認してください'}`; return; }
+      status.textContent = `列設定を保存し、実績辞書を作り直しました（${r.rows ?? 0}件）`;
+      await this.refreshJisseki();
+    } catch (ex) {
+      status.textContent = `保存できませんでした: ${(ex as Error).message}`;
+    } finally {
+      btnToggle(this.q<HTMLElement>('#jis-save-row'), false);
+    }
   }
 
   private async runSummary(): Promise<void> {

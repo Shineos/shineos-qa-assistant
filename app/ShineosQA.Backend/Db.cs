@@ -8,9 +8,10 @@ namespace ShineosQA.Backend;
 public sealed class Db : IDisposable
 {
     /// <summary>適用済みスキーマ版。1=初期スキーマ〜図面/実績拡張、2=content_hash＋原子性（Phase 0.2）、
-    /// 3=FAQ（現場の正解）＋別名（Phase B）、4=回答フィードバック（Phase F）。マイグレーションを追加したら
+    /// 3=FAQ（現場の正解）＋別名（Phase B）、4=回答フィードバック（Phase F）、
+    /// 5=実績列マッピングの手動上書き＋FAQ候補（フィードバック→採用フロー）。マイグレーションを追加したら
     /// この値を上げ、下の適用ブロックも更新する</summary>
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 6;
 
     private readonly SqliteConnection _conn;
     private readonly object _lock = new();
@@ -126,6 +127,44 @@ public sealed class Db : IDisposable
               created_at TEXT NOT NULL DEFAULT (datetime('now')));
             CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
             """);
+        // 実績列マッピングの手動上書き（v2.7.0）: 自動検出に対する管理者の訂正を保持する。
+        // 値は列インデックス（-1=その役割の列なし）。PUT /api/jisseki/{id}/columns で更新し、
+        // 元ファイルの再パース→jisseki_metaの作り直しまでを1処理で行う
+        Exec("""
+            CREATE TABLE IF NOT EXISTS jisseki_colmap(
+              file_id INTEGER PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,
+              zuban INTEGER NOT NULL DEFAULT -1,
+              mitumori INTEGER NOT NULL DEFAULT -1,
+              genka INTEGER NOT NULL DEFAULT -1,
+              nouki INTEGER NOT NULL DEFAULT -1,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+            """);
+        // FAQ候補（v2.7.0）: 👎フィードバックから自動生成し、管理者が編集してFAQへ採用する。
+        // status: pending=未処理 / adopted=FAQ採用済み。採用は faq テーブルへのUpsertとセット。
+        // rating: 生成元の評価（1=👍役に立った / -1=👎改善してほしい）。v5 DBで列不足の環境には
+        // 下のALTER（try/catch）で追加する
+        Exec("""
+            CREATE TABLE IF NOT EXISTS faq_candidates(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              question TEXT NOT NULL,
+              answer TEXT NOT NULL,
+              comment TEXT,
+              corrected_answer TEXT,
+              source_message_id INTEGER,
+              chat_id INTEGER,
+              rating INTEGER NOT NULL DEFAULT 0,
+              status TEXT NOT NULL DEFAULT 'pending',
+              faq_id INTEGER,
+              created_at TEXT NOT NULL DEFAULT (datetime('now')));
+            CREATE INDEX IF NOT EXISTS idx_faq_candidates_status ON faq_candidates(status);
+            """);
+        try { Exec("ALTER TABLE faq_candidates ADD COLUMN rating INTEGER NOT NULL DEFAULT 0"); }
+        catch { /* v5で既に列がある環境 */ }
+        // Dify風ナレッジ一覧（v2.7.0）: 検索回数（質問で参照された回数・検索ヒット時に加算）と
+        // 有効/無効トグル（0=検索対象から一時除外）。Difyの「検索回数」列・トグルスイッチに対応。
+        // スキーマv6
+        try { Exec("ALTER TABLE files ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0"); } catch { }
+        try { Exec("ALTER TABLE files ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"); } catch { }
         // スキーマ版管理（Phase 0.2）: 1行のみ保持し、コード側の現行版との差で将来のマイグレーションを判定できる。
         // 適用は「記録が古い場合のみ更新」する upsert（現行版を記録するだけ。DOWNは扱わない）
         Exec("""
@@ -284,11 +323,12 @@ public sealed class Db : IDisposable
 
     public sealed record ChunkRow(long ChunkId, long FileId, string FileName, int Seq, string Text, byte[] Emb);
 
-    /// <summary>取り込み済みチャンクの一括取得（RAG索引ロード用）</summary>
+    /// <summary>取り込み済みチャンクの一括取得（RAG索引ロード用）。
+    /// enabled=0（トグルで一時無効化された文書）は検索対象から除外する（Difyのトグルと同義）</summary>
     public List<ChunkRow> LoadReadyChunks()
     {
         const string sql =
-            "SELECT c.chunk_id, c.file_id, f.name, c.seq, c.text, c.emb FROM chunks c JOIN files f ON f.file_id=c.file_id WHERE f.status=$s";
+            "SELECT c.chunk_id, c.file_id, f.name, c.seq, c.text, c.emb FROM chunks c JOIN files f ON f.file_id=c.file_id WHERE f.status=$s AND f.enabled=1";
         return Query(sql, ("$s", "ready"))
             .Select(r => new ChunkRow((long)r["chunk_id"]!, (long)r["file_id"]!, (string)r["name"]!, Convert.ToInt32(r["seq"]!), (string)r["text"]!, (byte[])r["emb"]!))
             .ToList();

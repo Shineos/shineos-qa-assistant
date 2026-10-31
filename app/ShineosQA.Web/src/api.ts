@@ -4,7 +4,7 @@ export interface SourceInfo { file: string; snippet: string; text?: string; kind
 export interface ChatSummary { uuid: string; id: number; title: string; updated_at: string; archived?: number; bookmarked?: number }
 export interface ChatMessage { id?: number; role: string; content: string; image?: string | null; sources_json?: string | null; kind?: string | null; created_at?: string }
 export interface ChatDetail { id: number; title: string; archived?: number; bookmarked?: number; messages: ChatMessage[] }
-export interface KnowledgeFile { file_id: number; name: string; status: string; error?: string | null; chunk_count: number; added_at: string; kind?: string; zuban_raw?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null }
+export interface KnowledgeFile { file_id: number; name: string; status: string; error?: string | null; chunk_count: number; added_at: string; kind?: string; zuban_raw?: string | null; hinmei?: string | null; zairyo?: string | null; revision?: string | null; hit_count?: number; enabled?: number; total_chars?: number }
 export interface StatusInfo {
   version: string; tier: string; chat_model: string; chunks: number; ram_gb: number;
   engines: { tier: string; chat_model: string; llm: string; embed: string; rank: string };
@@ -28,8 +28,18 @@ export interface DrawingRow {
 
 /// 実績表の列マッピング（GET /api/jisseki/columns）。role は zuban/mitumori/genka/nouki/other
 export interface JissekiColumn { column_name: string; role: string; column_index: number }
+export interface JissekiColumnsResult { file_id: number; file: string; manual?: boolean; items: JissekiColumn[] }
+/** 列マッピングの手動上書き（PUT /api/jisseki/{id}/columns）。-1=その役割の列なし。zuban必須 */
+export interface JissekiRoleMap { zuban: number; mitumori: number; genka: number; nouki: number }
 /// 実績の集計結果（GET /api/jisseki/summary）。count=集計対象件数、unit=金額単位（件数は空）
 export interface JissekiSummary { metric: string; aggregate: string; count: number; value: number; unit: string }
+
+/// FAQ候補（GET /api/faq/candidates）。👎フィードバックから自動生成され、採用するとFAQ（即答）になる
+export interface FaqCandidate {
+  id: number; question: string; answer: string;
+  comment?: string | null; corrected_answer?: string | null;
+  source_message_id?: number | null; rating?: number; status: string; created_at: string;
+}
 
 /// 動作診断（GET /api/diagnostics）。バックエンドの実装進行に合わせて
 /// 追加フィールドを許容する（未知キーは無視して表示側で正規化する）。
@@ -97,6 +107,8 @@ export const api = {
     fetch('/api/knowledge/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) })
       .then(r => json<{ imported: number }>(r)),
   deleteKnowledge: (id: number) => fetch(`/api/knowledge/${id}`, { method: 'DELETE' }),
+  toggleKnowledge: (id: number) =>
+    fetch(`/api/knowledge/${id}/toggle`, { method: 'POST' }).then(r => json<{ enabled: number }>(r)),
   retryKnowledge: (id: number) =>
     fetch(`/api/knowledge/${id}/retry`, { method: 'POST' })
       .then(r => r.json().then(j => ({ ok: (r.ok && j.ok !== false) as boolean, message: j.message as string | undefined })))
@@ -126,22 +138,49 @@ export const api = {
     return { ok: parsed.ok !== false, id: parsed.id, error: parsed.error };
   },
   deleteFaq: (id: number) => fetch(`/api/faq/${id}`, { method: 'DELETE' }),
+  /// ---- FAQ候補（👎フィードバックからの自動生成 → 編集採用） ----
+  faqCandidates: (status = 'pending') =>
+    fetch(`/api/faq/candidates?status=${encodeURIComponent(status)}`).then(r => json<{ items: FaqCandidate[] }>(r)),
+  /// POST /api/faq/candidates/{id}/adopt: 回答を編集してFAQ（即答）として採用する。
+  /// 入力エラー（400）は本文の error を返し、例外にしない（UIで表示するため）
+  adoptFaqCandidate: async (id: number, body: { question?: string; answer?: string }): Promise<{ ok: boolean; faq_id?: number; error?: string }> => {
+    const resp = await fetch(`/api/faq/candidates/${id}/adopt`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    let parsed: { ok?: boolean; faq_id?: number; error?: string } = {};
+    try { parsed = await resp.json() as typeof parsed; } catch { /* 本文なし */ }
+    if (!resp.ok) return { ok: false, error: parsed.error ?? `HTTP ${resp.status}` };
+    return { ok: parsed.ok !== false, faq_id: parsed.faq_id, error: parsed.error };
+  },
+  deleteFaqCandidate: (id: number) => fetch(`/api/faq/candidates/${id}`, { method: 'DELETE' }),
   /// ---- 図面台帳 ----
   drawings: (q?: string) =>
     fetch(`/api/drawings${q ? `?q=${encodeURIComponent(q)}` : ''}`).then(r => json<{ items: DrawingRow[] }>(r)),
-  /// ---- 実績表（列の自動検出・見積/原価の集計） ----
+  /// ---- 実績表（列の自動検出・手動上書き・見積/原価の集計） ----
   jissekiColumns: (fileId: number) =>
-    fetch(`/api/jisseki/columns?file_id=${fileId}`).then(r => json<{ items: JissekiColumn[] }>(r)),
+    fetch(`/api/jisseki/columns?file_id=${fileId}`).then(r => json<JissekiColumnsResult>(r)),
+  /// PUT /api/jisseki/{id}/columns: 列役割の手動上書き。元ファイルを再パースし実績辞書を作り直す。
+  /// 入力エラー（400）は本文の error を返し、例外にしない（UIで表示するため）
+  jissekiSaveColumns: async (fileId: number, roles: JissekiRoleMap): Promise<{ ok: boolean; rows?: number; error?: string }> => {
+    const resp = await fetch(`/api/jisseki/${fileId}/columns`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(roles),
+    });
+    let parsed: { ok?: boolean; rows?: number; error?: string } = {};
+    try { parsed = await resp.json() as typeof parsed; } catch { /* 本文なし */ }
+    if (!resp.ok) return { ok: false, error: parsed.error ?? `HTTP ${resp.status}` };
+    return { ok: parsed.ok !== false, rows: parsed.rows, error: parsed.error };
+  },
   jissekiSummary: (p: { file_id: number; metric: 'mitumori' | 'genka'; aggregate: 'sum' | 'avg' | 'count'; zuban?: string }) => {
     const ps = new URLSearchParams({ file_id: String(p.file_id), metric: p.metric, aggregate: p.aggregate });
     if (p.zuban) ps.set('zuban', p.zuban);
     return fetch(`/api/jisseki/summary?${ps.toString()}`).then(r => json<JissekiSummary>(r));
   },
-  /// POST /api/feedback: 回答への👍/👎・修正回答をローカル保存する（外部送信なし）
+  /// POST /api/feedback: 回答への👍/👎・修正回答をローカル保存する（外部送信なし）。
+  /// candidate_saved/candidate_reason はFAQ候補生成の結果（トースト文言の分岐に使用・v2.7.0）
   feedback: (body: { message_id?: number; chat_id?: number; rating: 1 | -1; comment?: string; corrected_answer?: string }) =>
     fetch('/api/feedback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }),
+    }).then(r => json<{ ok: boolean; id?: number; candidate_saved?: boolean; candidate_reason?: string }>(r)),
 };
 
 /// AIエンジンのウォームアップ（POST /api/warmup）。失敗しても例外にせず
@@ -176,6 +215,8 @@ export async function streamChat(
     web?: (d: { results: { title: string; url: string; snippet: string }[]; error?: string | null }) => void;
     /// partial=true は「検索直後・リランク前の先行refs」、false は確定refs（v2.7）
     refs?: (d: { files: string[]; web: string[]; partial?: boolean }) => void;
+    /// 処理段階の一行表示（v2.7.0・ZCode方式）: 質問解釈/検索/文書選択/根拠確定/生成/検証
+    stage?: (d: { text: string }) => void;
     patch?: (content: string) => void;
     delta?: (content: string) => void;
     phase?: (d: { text: string }) => void;
@@ -220,6 +261,7 @@ export async function streamChat(
           case 'model': handlers.model?.(parsed); break;
           case 'web': handlers.web?.(parsed); break;
           case 'refs': handlers.refs?.(parsed); break;
+          case 'stage': handlers.stage?.(parsed); break;
           case 'patch': handlers.patch?.(parsed.content ?? ''); break;
           case 'delta': handlers.delta?.(parsed.content ?? ''); break;
           case 'phase': handlers.phase?.(parsed); break;

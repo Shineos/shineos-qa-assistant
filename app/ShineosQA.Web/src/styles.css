@@ -446,3 +446,81 @@ textarea.k-input { resize: vertical; min-height: 52px; }
 .jis-result { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; font-size: 13px; }
 .jis-result b { font-size: 18px; font-weight: 700; }
 .jis-result-label { color: var(--muted); font-size: 12.5px; }
+
+/* 実績列役割の編集（v2.7.0）: チップ内の役割ドロップダウンと手動設定バッジ */
+.jis-cols-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.jis-role {
+  font-size: 11.5px; font-family: inherit; background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 1px 4px;
+}
+.jis-manual {
+  color: var(--accent); font-size: 11px; border: 1px solid var(--accent);
+  border-radius: 8px; padding: 0 6px;
+}
+.jis-save-row { display: flex; align-items: center; gap: 8px; }
+
+/* FAQ候補（👎フィードバックからの自動生成 → 編集採用） */
+.faq-cand-head { font-weight: 600; font-size: 12.5px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+.faq-cand { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+.faq-cand-meta { font-size: 11.5px; }
+.faq-cand .faq-cand-q { font-weight: 600; }
+
+/* 評価後の確認表示（👍/👎アイコンの右側・同サイズ行内） */
+
+
+
+/* トースト通知（フィードバック保存等・3秒で消える）。画面右上に表示（2026-11-01指摘: 下中央→右上） */
+#toast-host { position: fixed; right: 20px; top: 64px; z-index: 60; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.toast { background: #1f2937; color: #fff; font-size: 12.5px; padding: 8px 14px; border-radius: 10px; opacity: 0; transform: translateY(-6px); transition: opacity .25s, transform .25s; box-shadow: 0 4px 14px rgba(0,0,0,.18); max-width: 340px; }
+.toast.show { opacity: 1; transform: translateY(0); }
+/* 評価済みアイコンの色（👍=緑 / 👎=赤）と無効化状態 */
+.copy-btn.fb-up { color: var(--accent); }
+.copy-btn.fb-down { color: #dc2626; }
+.copy-btn:disabled { cursor: default; opacity: .55; }
+/* アシスタント行の時刻に付く時計アイコン */
+.msg-time svg { width: 11px; height: 11px; }
+
+/* ===== Dify風ナレッジ一覧（v2.7.0）: テーブル列・バッジ・ステータスドット・トグル・行メニュー ===== */
+.knowledge-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.knowledge-table th { text-align: left; padding: 8px 10px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.knowledge-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.knowledge-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.knowledge-table .col-check { width: 34px; }
+.knowledge-table .col-idx { width: 36px; color: var(--muted); }
+.knowledge-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.knowledge-table .col-name { max-width: 340px; }
+.knowledge-table .col-name .file-ico { display: inline-flex; vertical-align: -2px; color: var(--accent); margin-right: 4px; }
+.knowledge-table .col-actions { white-space: nowrap; }
+.knowledge-table th.sortable { cursor: pointer; user-select: none; }
+.knowledge-table th.sortable:hover { color: var(--accent); }
+
+/* 種別バッジ（チャンキングモード列相当） */
+.badge-kind { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); background: var(--bg-2, #f6f7f9); }
+.badge-kind.kind-drawing { color: #7c3aed; border-color: #ddd6fe; background: #f5f3ff; }
+.badge-kind.kind-jisseki { color: #b45309; border-color: #fde68a; background: #fffbeb; }
+.badge-kind.kind-doc { color: var(--muted); }
+
+/* ステータスドット（緑=利用可能・橙=処理中・赤=エラー） */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.dot-ready { background: #16a34a; }
+.dot-pending, .dot-parsing, .dot-embedding { background: #f59e0b; }
+.dot-error { background: #dc2626; }
+
+/* トグルスイッチ（Dify風） */
+.kswitch { display: inline-flex; align-items: center; cursor: pointer; margin-right: 8px; }
+.kswitch input { appearance: none; width: 34px; height: 20px; border-radius: 999px; background: #cbd5e1; position: relative; cursor: pointer; transition: background .15s; margin: 0; }
+.kswitch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgb(0 0 0 / .2); }
+.kswitch input:checked { background: var(--accent); }
+.kswitch input:checked::after { left: 16px; }
+.row-disabled td { opacity: .5; }
+
+/* 行の「…」メニュー（ドロップダウン） */
+.row-menu { position: absolute; right: 0; top: 100%; z-index: 40; min-width: 150px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / .12); padding: 4px; }
+.row-menu button { display: block; width: 100%; text-align: left; padding: 7px 10px; border: 0; background: none; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.row-menu button:hover { background: var(--bg-2, #f6f7f9); }
+.row-menu button.danger { color: #dc2626; }
+
+/* 一括削除バー */
+#bulk-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2, #f6f7f9); font-size: 13px; }
+#bulk-bar .danger-btn { padding: 6px 12px; border: 1px solid #fecaca; border-radius: 6px; background: #fef2f2; color: #dc2626; cursor: pointer; font-size: 13px; }
+#bulk-bar .danger-btn:hover { background: #fee2e2; }

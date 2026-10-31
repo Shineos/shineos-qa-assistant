@@ -47,7 +47,6 @@
           <div id="chat-status" class="chat-status" hidden></div>
           <form id="chat-form" class="composer">
             <textarea id="chat-input" rows="1" placeholder="質問や文書作成の依頼を入力してください（Enterで送信 / Shift+Enterで改行）"></textarea>
-            <div id="draft-host"></div>
             <div id="capture-host"></div>
             <input type="file" id="attach-input" multiple accept=".pdf,.docx,.md,.txt,.xlsx,.csv,.tsv" hidden />
             <div class="composer-bar">
@@ -99,10 +98,11 @@
           </div>
           <div id="ingest-status" class="muted"></div>
           <div class="kfilter"><input type="search" id="knowledge-filter" placeholder="図番・品名・ファイル名で絞り込み（図面拡張機能）" hidden /></div>
-          <table class="table" id="files-table">
-            <thead><tr id="files-head"><th>ファイル</th><th>状態</th><th>チャンク数</th><th>登録日時</th><th></th></tr></thead>
+          <table class="table knowledge-table" id="files-table">
+            <thead><tr id="files-head"><th>ファイル名</th><th>状態</th><th>チャンク数</th><th>登録日時</th><th></th></tr></thead>
             <tbody id="files-body"></tbody>
           </table>
+          <div id="bulk-bar" hidden></div>
           <!-- 追加セクション（FAQ管理・図面台帳・実績集計）。knowledge-extras.ts が描画する -->
           <div id="knowledge-extras"></div>
         </div>

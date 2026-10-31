@@ -334,9 +334,13 @@ public sealed class Supervisor
     /// （再起動は2〜5秒。次の質問までに間に合えば体感遅延はない）。閾値はRAMで変える。</summary>
     public void RecycleLlmIfMemoryHigh()
     {
-        long threshold = AppConfig.TotalRamGb() <= 9
-            ? 2200L * 1024 * 1024   // 8GB機: embed/rank/OSと合わせて余裕を残す
-            : 4500L * 1024 * 1024;  // 16GB機: 品質を優先しつつ上限を設ける
+        // 閾値: 設定上書き（recycle_threshold_mb・8GBポリシーの再現検証/搭載RAM乖離環境の調整用）が優先。
+        // 未設定（0）ならRAMから自動（8GB機2,200MB / 16GB機4,500MB）
+        long threshold = _cfg.RecycleThresholdMb > 0
+            ? (long)_cfg.RecycleThresholdMb * 1024 * 1024
+            : AppConfig.TotalRamGb() <= 9
+                ? 2200L * 1024 * 1024   // 8GB機: embed/rank/OSと合わせて余裕を残す
+                : 4500L * 1024 * 1024;  // 16GB機: 品質を優先しつつ上限を設ける
         bool recycled = false;
         long ws = 0;
         lock (_lock)

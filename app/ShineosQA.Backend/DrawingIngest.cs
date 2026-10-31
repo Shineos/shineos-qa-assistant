@@ -102,6 +102,19 @@ public static partial class DrawingIngest
         var scale = ValueAfterLabel(lines, "縮尺", "尺度", "SCALE");
         var revision = RevisionOf(lines, zuban);
         var approvedAt = ValueAfterLabel(lines, "承認", "日付", "DATE");
+        // DXF等で表題欄領域（X>55%・Y<40%）からラベルTEXTが漏れる実測（2026-11-01: 29.dxfの
+        // 「Material SS400」がY境界の外で材質が取れず、決定論回答が「材質は登録なし」になった）→
+        // 欠けた欄は図面全体のrunsから同じラベル照合で補完する。表題欄ラベルは図面の他の場所には
+        // 出ないため誤抽出リスクは低く、妥当性検証（材質トークン・尺度パターン等）は既存のまま適用
+        if (hinmei == null || zairyo == null || scale == null || revision == null || approvedAt == null)
+        {
+            var allLines = ToLines(runs.ToList(), yTol);
+            hinmei ??= ValueAfterLabel(allLines, "品名", "名称", "TITLE");
+            zairyo ??= ValueAfterLabel(allLines, "材質", "材料", "MATERIAL");
+            scale ??= ValueAfterLabel(allLines, "縮尺", "尺度", "SCALE");
+            revision ??= RevisionOf(allLines, zuban);
+            approvedAt ??= ValueAfterLabel(allLines, "承認", "日付", "DATE");
+        }
         return new DrawingMeta(
             ZubanRaw: zuban,
             Hinmei: IsPlausibleHinmei(hinmei) ? hinmei : null,

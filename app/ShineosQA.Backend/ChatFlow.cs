@@ -104,7 +104,7 @@ public sealed class ChatFlow
 
     /// <summary>類義語・表記ゆれで通常のtop2では根拠が漏れやすい質問。列挙質問ほど広げず3件に留める。</summary>
     private static readonly System.Text.RegularExpressions.Regex SynonymBroadRegex = new(
-        @"駐車場|パーキング|マイカー|自分の車|自家用車|ミーティングルーム|有給|テレワーク|在宅勤務",
+        @"駐車場|パーキング|マイカー|自分の車|自家用車|ミーティングルーム|有給|テレワーク|在宅勤務|ホテル|宿泊",
         System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
@@ -286,6 +286,9 @@ public sealed class ChatFlow
     /// 全文をプロンプトへ注入する（2026-10-23・Dify FAQボット式の全量コンテキスト設計）</summary>
     private const int FullContextMaxChars = 3000;
 
+    /// <summary>この文字数以下のチャンクはスニペットせず全文注入する（240字窓の末尾行切断対策）</summary>
+    private const int SnippetSmallChunkChars = 300;
+
     /// <summary>全量コンテキストのチャンク読み込み（Phase 1.2修正・テスト可能なよう切り出し）。
     /// 旧実装は c.seq を取らず Seq=0 固定で合成していたため、隣接chunk連結が全チャンクに
     /// 同じ seq1 を付加し、出典本文の重複を生んでいた。status='ready' のみを対象にする
@@ -294,8 +297,8 @@ public sealed class ChatFlow
     {
         var list = new List<ChunkIndex.HybridHit>();
         foreach (var row in db.Query(
-            "SELECT c.file_id AS fid, f.name AS name, c.seq AS seq, c.text AS text " +
-            "FROM chunks c JOIN files f ON f.file_id = c.file_id WHERE f.status='ready' ORDER BY c.file_id, c.seq"))
+            "SELECT c.file_id AS fid, f.name AS name, c.seq AS seq, c.text AS text, c.emb AS emb " +
+            "FROM chunks c JOIN files f ON f.file_id = c.file_id WHERE f.status='ready' AND f.enabled=1 ORDER BY c.file_id, c.seq"))
         {
             var fid = Convert.ToInt64(row["fid"] ?? 0L);
             var seq = Convert.ToInt32(row["seq"] ?? 0);
@@ -303,7 +306,7 @@ public sealed class ChatFlow
             list.Add(new ChunkIndex.HybridHit
             {
                 Rec = new ChunkIndex.Rec(fid, fid, Convert.ToString(row["name"]) ?? "?", seq, text,
-                    Array.Empty<float>(), new HashSet<string>()),
+                    ChunkIndex.BytesToFloats((byte[])row["emb"]), new HashSet<string>()),
             });
         }
         return list;
@@ -400,9 +403,12 @@ public sealed class ChatFlow
             var newUuid = _db.NewChatUuid();
             chatUuid = newUuid;
             chatId = _db.ChatIdFromUuid(newUuid);
-            _db.Exec("UPDATE chats SET title=$t WHERE id=$c", ("$t", message.Length > 24 ? message.Substring(0, 24) : message), ("$c", chatId));
+            _db.Exec("UPDATE chats SET title=$t WHERE id=$c", ("$t", ShortTitle(message)), ("$c", chatId));
         }
         await Sse(ctx, "meta", new { chat_id = chatId, chat_uuid = chatUuid });
+        // 処理段階の一行表示（v2.7.0・ZCode方式）: 思考中にAIが何をしているかを見せる。
+        // stageイベントを処理段階ごとに送り、UIは思考中行のphaseを一行で差し替える
+        await Sse(ctx, "stage", new { text = "質問を解釈中…" });
         using var _chatGate = await EnterChatGateAsync(ctx, ctx.RequestAborted);
 
         // 会話コンテキスト: 同一チャットの直近やり取り（2往復・各250字）を記憶する
@@ -642,18 +648,53 @@ public sealed class ChatFlow
                 && !message.Contains("入社試験") && !message.Contains("選考") && !message.Contains("面接");
             bool synonymBroad = !enumeration && SynonymBroadRegex.IsMatch(message);
             bool broad = enumeration || synonymBroad;
+            // 横断質問に引用された期間フレーズ（「7日」「2週間」等）。フレーズ含有チャンクを
+            // SearchPhraseで直接プールに足すため、ここで1回だけ抽出する
+            string? enumPhrase = enumeration ? Rag.EnumerationPhrase(message) : null;
             // 隣接チャンク連結の有無を1か所に集約（全量モードは全文注入のため連結しない・Phase 1.2修正）
             string SourceText(ChunkIndex.Rec r) => SourceTextFor(fullContext, r, fullContext ? null : _index.NextChunkText(r.FileId, r.Seq));
             string fullKb = ""; // 全量モードの社内文書全文（systemブロックへ入れる）
             List<ChunkIndex.HybridHit> hits = new(); // 全量モードでは未使用（図番あいまい性スキャンはchosenで代替）
+            await Sse(ctx, "stage", new { text = "ナレッジを検索中…" });
             if (fullContext)
             {
                 chosen = LoadFullContextChunks(_db);
+                tSearch = sw.ElapsedMilliseconds; // 全量モードの「検索」= DBからの全チャンク読み込み
+                // v2.7.0: 全文注入（8チャンク全量・プリフィル長大）から Dify式の
+                // 「埋め込み類似 top4・同一文書は最大2チャンク」の選択に変更（プリフォル短縮=TTFT改善）。
+                // 小規模KBでは全文書が文脈に入る品質を維持しつつ、プロンプトを約半分に圧縮する。
+                // 純埋め込みだけでは同音異義の近接文書（承認→出張規程）へドリフトする実測（t44・cmp8）のため、
+                // 質問の漢字キーワード（2文字以上の連続）が本文に含まれる数を僅かなボーナス（1件0.015）
+                // として加算し、キーワード信号のある正解チャンクを優先する
+                var qKeywords = System.Text.RegularExpressions.Regex.Matches(message, @"[一-龥ぁ-んア-ンa-zA-Z0-9]{2,}")
+                    .Select(m => m.Value).Where(k => k.Length >= 2).Distinct().Take(8).ToList();
+                var scored = chosen
+                    .Select(h => (h, score: Rag.Cosine(qEmb, h.Rec.Emb) + 0.015f * qKeywords.Count(k => h.Rec.Text.Contains(k))))
+                    .OrderByDescending(x => x.score)
+                    .ToList();
+                var perDoc = new Dictionary<long, int>();
+                var pickedList = new List<ChunkIndex.HybridHit>();
+                if (Environment.GetEnvironmentVariable("SHINEOS_FULL_INJECT") == "1")
+                {
+                    pickedList.AddRange(chosen); // A/B測定用: 全チャンク注入（v2.6.x相当）
+                }
+                else foreach (var x in scored)
+                {
+                    perDoc.TryGetValue(x.h.Rec.FileId, out var n);
+                    if (n >= 2) continue;
+                    perDoc[x.h.Rec.FileId] = n + 1;
+                    pickedList.Add(x.h);
+                    if (pickedList.Count >= 4) break;
+                }
+                chosen = pickedList;
+                // top4で絞った後も docs/fullKb を必ず再構築する（systemブロック【社内文書（全文）】の
+                // 唯一の参照元。代入漏れだと参照情報が空になり、モデルが全問を捏造で答える
+                // （2026-10-30 cmp7で2/24に暴跌した事故の修正）
                 docs.AddRange(chosen.Select(h => h.Rec.Text));
                 fullKb = string.Join("\n\n", docs);
-                tSearch = sw.ElapsedMilliseconds; // 全量モードの「検索」= DBからの全チャンク読み込み
-                _log.Info($"full-context mode: {chosen.Count} chunks / {totalChars} chars injected (search+rerank skipped)");
-                // 先行refs（Phase 1.2）: 全量モードは検索が無いので、全文のdistinctファイル名から最大3件を先に通知
+                _log.Info($"full-context mode → small-kb top{chosen.Count} selected by embedding (prompt短縮): {string.Join(",", chosen.Select(h => h.Rec.FileName).Distinct())}");
+                // 先行refs（Phase 1.2）: 選択した文書を通知
+                await Sse(ctx, "stage", new { text = "関連文書を選択中…" });
                 await Sse(ctx, "refs", new
                 {
                     files = chosen.Select(h => h.Rec.FileName).Distinct().Take(3).ToArray(),
@@ -694,6 +735,7 @@ public sealed class ChatFlow
             // 先行refs（Phase 1.2）: リランク前（ハイブリッド検索直後）に候補を先にUIへ通知し、
             // リランク待ち（実測~2秒）の間も「どの資料を見ているか」を表示できるようにする。
             // リランク後に partial=false の確定refsで上書きする。
+            await Sse(ctx, "stage", new { text = "関連文書を選択中…" });
             await Sse(ctx, "refs", new
             {
                 files = hits.Select(h => h.Rec.FileName).Distinct().Take(3).ToArray(),
@@ -715,11 +757,40 @@ public sealed class ChatFlow
                 // ベクトル上位（hits）に、キーワード一致上位を足して再現率を補強する。
                 // 「7日」「22時」等、ベクトルだけでは別文書に埋もれる語を拾う。
                 var keywordHits = _index.SearchKeyword(qTokens, 6);
-                chosen = hits.Concat(keywordHits)
+                // 列挙質問の期間フレーズ（「7日」「2週間」等）を含むチャンクを直接プールに足す。
+                // 文書横断の取りこぼしは、正解チャンクがベクトル・キーワードのどちらの上位にも
+                // 入らないことで起きる（実測: 「7日」横断で駐車場規程の「7日前」がプール外に落ち、
+                // 回答から欠落。フレーズ直参照で構造的に防ぐ）。
+                // 時刻（「22時」等）は索引側が「22:00」表記のため一致しないことがある →
+                // 数字接頭辞（「22」）でも併せて直参照する（t97: 深夜割増25%の取りこぼし）
+                var phraseHits = new List<ChunkIndex.HybridHit>();
+                bool PhrasePriority(ChunkIndex.HybridHit h)
+                {
+                    if (enumPhrase is not { } p) return false;
+                    if (h.Rec.Text.Contains(p, StringComparison.Ordinal)) return true;
+                    // 時刻（「22時」↔「22:00」等）の表記差のみ数字接頭辞を優先対象にする
+                    // （「2週間」の「2」等はほぼ全チャンクが一致し優先が退化するため対象外・t97実測）
+                    if (!p.EndsWith("時") || p.Length < 2) return false;
+                    var digits = p[..^1];
+                    return digits.All(char.IsDigit) && h.Rec.Text.Contains(digits, StringComparison.Ordinal);
+                }
+                if (enumPhrase is { } phrase)
+                {
+                    phraseHits.AddRange(_index.SearchPhrase(phrase, 4));
+                    var digits = phrase.TrimEnd('日', '週', '間', 'か', '月', 'ヶ', 'ケ', '箇', '年', '時');
+                    if (digits.Length >= 1 && digits.Length < phrase.Length && digits.All(char.IsDigit))
+                        phraseHits.AddRange(_index.SearchPhrase(digits, 2));
+                }
+                // 結合順がそのまま採択優先度（OrderByDescendingは安定ソート）:
+                // ベクトル上位2件 → キーワード上位 → 残りのベクトル候補。従来の純結合＋Hybrid再ソートは
+                // キーワードヒット（Hybrid=0）を常に下回らせ、実質ベクトルtop4だけが採択されていた
+                // （t82: 宿泊費チャンクがキーワード最上位でも枠に入らない実測）。フレーズ含有チャンクは最優先
+                chosen = hits.Take(2).Concat(keywordHits).Concat(hits.Skip(2)).Concat(phraseHits)
                     .GroupBy(h => (h.Rec.FileId, h.Rec.Seq))
                     .Select(g => g.First())
-                    .Take(enumeration ? 4 : 3).ToList();
-                _log.Info($"broad retrieval: {chosen.Count} chunks (multi-part, rerank skipped) files={string.Join(",", chosen.Select(h => h.Rec.FileName).Distinct())}");
+                    .OrderByDescending(PhrasePriority)
+                    .Take(enumeration ? 5 : 3).ToList();
+                _log.Info($"broad retrieval: {chosen.Count} chunks (multi-part, rerank skipped{(enumPhrase != null ? $", phrase=\"{enumPhrase}\"" : "")}) files={string.Join(",", chosen.Select(h => h.Rec.FileName).Distinct())}");
             }
             else if (docs.Count > 0)
             {
@@ -759,7 +830,35 @@ public sealed class ChatFlow
                         _log.Info($"rerank: top1={top1} cos={top.Cos:F2} kw={top.Kw:F2} file={top.Rec.FileName}");
                         if (ranked.Count == 0 || ranked[0].Score < Rag.GuardThreshold)
                         {
-                            if (string.IsNullOrEmpty(webContext) && !timeSensitive)
+                            // クロスリンガル救済: 外国語クエリ（かなを含まない）に限り、正規トークン一致
+                            // （多言語別名↔日本語KBの語彙一致）があればリランカーの低評価に屈せず辞書から
+                            // 候補を引き直して回答する。bge-rerankerはvi/id/tl×日本語ペアを正しく評価できない。
+                            // 日本語クエリ（拒否質問を含む）は対象外 — KBに無い話題への救済発火を防ぐ（t77〜t80実測）
+                            var crossLingual = Rag.IsForeignQuery(queryForRetrieval)
+                                ? hits.Where(h => h.Canonical >= 1).Take(2).ToList()
+                                : new List<ChunkIndex.HybridHit>();
+                            var queryCanonicals = MfgTerms.CanonicalTokens(queryForRetrieval).ToList();
+                            if (Rag.IsForeignQuery(queryForRetrieval) && queryCanonicals.Count > 0)
+                            {
+                                // プール内の正規一致に、辞書直参照（SearchCanonical）を足して3件まで広げる。
+                                // 同点の別文書（QA+規程）で片方だけだと事実が欠ける実測（vi/zh-pw-help: 内線1234）
+                                crossLingual = crossLingual
+                                    .Concat(_index.SearchCanonical(queryCanonicals, 3))
+                                    .GroupBy(h => (h.Rec.FileId, h.Rec.Seq))
+                                    .Select(g => g.First())
+                                    .Take(3).ToList();
+                            }
+                            if (!string.IsNullOrEmpty(webContext) || timeSensitive)
+                            {
+                                chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
+                            }
+                            else if (crossLingual.Count > 0)
+                            {
+                                chosen = crossLingual;
+                                rerankValidated = true; // 正規トークンで語彙確認済み → 弱一致バックストップ免除
+                                _log.Info($"rerank guard: cross-lingual rescue — kept {chosen.Count} canonical candidates ({string.Join(",", chosen.Select(h => h.Rec.FileName).Distinct())})");
+                            }
+                            else
                             {
                                 var refusal = "該当する記載がありません。" + webNote;
                                 _db.Exec("INSERT INTO messages(chat_id, role, content, kind) VALUES($c,'assistant',$m,'refusal')", ("$c", chatId), ("$m", refusal));
@@ -772,7 +871,6 @@ public sealed class ChatFlow
                                 });
                                 return;
                             }
-                            chosen = new(); // Webのみで回答（日付感応質問はシステム日時のみで回答）
                         }
                         else
                         {
@@ -852,7 +950,14 @@ public sealed class ChatFlow
             // クロスリンガル正規トークン（駐車場↔parking等）が2つ以上一致する根拠がある場合は、
             // 低信頼×低kwの拒否から除外する（英語資料の正解を「該当なし」に倒さない）。
             bool canonicalEvidence = chosen.Any(h => h.Canonical >= 1);
-            if (!fullContext && !canonicalEvidence && Rag.IsLowConfidenceWeak(rerankTop1, maxKw, rerankValidated)
+            // 語彙アンカー免除（t22実測）: 質問の英数トークン（usb等・2文字以上）を採択チャンクが含むなら
+            // 語彙的に無関係とは言えないため、低信頼×低kwの拒否を適用しない。混合トピックのチャンク
+            // （USB行＋パスワード行＋送信行の1チャンク等）はリランカーがグレー帯の中途半端なスコアを付け、
+            // kwも質問側の機能語ぶん分母が膨らんで閾値(0.15)を僅かに割る。富士山型の偽出典（語彙一致ゼロの
+            // 日本語質問）は英数アンカーを持たないため本免除の対象外
+            bool alnumAnchor = chosen.Any(h => qTokens.Any(t =>
+                t.Length >= 2 && t.All(char.IsAsciiLetterOrDigit) && h.Rec.Tokens.Contains(t)));
+            if (!fullContext && !canonicalEvidence && !alnumAnchor && Rag.IsLowConfidenceWeak(rerankTop1, maxKw, rerankValidated)
                 && string.IsNullOrEmpty(webContext) && !timeSensitive && !Rag.HasDrawingIntent(message))
             {
                 _log.Info($"low-conf guard: rerankTop1={rerankTop1:F2} kw={maxKw:F2} canon={(chosen.Count > 0 ? chosen.Max(h => h.Canonical) : 0)} — 該当なし拒否へ（偽出典防止）: {Truncate(message, 40)}");
@@ -948,20 +1053,35 @@ public sealed class ChatFlow
                     catch (Exception ex) { _log.Warn($"agent route failed (fixed pipeline continues): {ex}"); break; }
                 }
             }
+            // 検索回数の記録（v2.7.0・Dify風ナレッジ一覧）: 質問の根拠として採用された文書の
+            // hit_countを加算する（一覧の「検索回数」列・ヘッダークリックソートの対象）
+            if (chosen.Count > 0)
+            {
+                var ids = string.Join(",", chosen.Select(h => h.Rec.FileId).Distinct());
+                _db.Exec($"UPDATE files SET hit_count = hit_count + 1 WHERE file_id IN ({ids})");
+            }
             foreach (var h in chosen)
             {
                 // 全量モードでは隣接chunk連結を行わない（Phase 1.2修正: SourceTextForに集約）
                 var sourceText = SourceText(h.Rec);
+                // 全文注入モードでは出典スニペットのリランク救済をスキップ（レイテンシ改善2026-10-31）:
+                // スニペットはUIの表示窓に過ぎず、本文は丸ごと文脈に入っている。語彙照準が外れた
+                // チャンクごとにリランカー呼び出し（数百ms×4チャンク）が発生し、プリフィル開始前に
+                // 負荷非依存の約2秒の固定ロス（t_prompt）になっていた実測のため、全文注入では
+                // 純スニペットで即返す。通常RAGでは従来どおり照準精度を優先
                 sources.Add(EnrichDrawing(new SourceInfo
                 {
                     File = h.Rec.FileName,
-                    Snippet = await SnippetForSourceAsync(sourceText, qTokens, message, ctx.RequestAborted),
-                    Text = sourceText,
+                    // Markdown記法は出典パネルに生表示されるためプレーン化する（v2.7.0）。
+                    // SnippetとTextに同一変換を適用（モーダルの該当箇所ハイライトは部分一致のため）
+                    Snippet = Rag.PlainSnippet(fullContext ? Rag.Snippet(sourceText, qTokens, 120) : await SnippetForSourceAsync(sourceText, qTokens, message, ctx.RequestAborted), 120),
+                    Text = Rag.PlainSnippet(sourceText, 2000),
                 }, h.Rec.FileId));
             }
             // 参照確定をUIに通知（思考中の1行表示: どの資料を見ているか）。
             // 先行refs(partial=true)を確定値で上書きする。全量モードでは chosen が全チャンクのため
             // Distinct でファイル名を一意化する（通常RAGでは従来どおり全ファイル表示）
+            await Sse(ctx, "stage", new { text = "回答の根拠を確定しました" });
             await Sse(ctx, "refs", new
             {
                 files = chosen.Select(h => h.Rec.FileName).Distinct().ToArray(),
@@ -1061,13 +1181,36 @@ public sealed class ChatFlow
                 // 「チャンク内に記載があるのに模型に渡らない」実図面検証cr02（JIS B 0405-m）の原因だった
                 // 全量常駐モードも全文注入（スニペット化すると全量モードの趣旨＝取りこぼしゼロが損なわれる）
                 if (!fullContext && !drawingIds.Contains(h.Rec.FileId))
-                    merged = broad ? Rag.Snippet(merged, qTokens, 400) : Rag.Snippet(merged, qTokens);
+                {
+                    // 300字以下のチャンクは全文注入（240字窓だと末尾1行を切る実測: d05検査基準書の
+                    // 「浸透探傷試験を追加する」が落ち、5項目中4項目の回答になった）。圧縮の旨味が
+                    // 数トークンしかない小チャンクで切断リスクを負う必要はない
+                    merged = broad && enumPhrase is { } ep2
+                        // 列挙質問はフレーズ（「7日」等）を含む文を中心に窓を張る（トークン中心だと
+                        // 目的行が窓外に切れる・t92実測）。時刻フレーズは「22:00」表記の代替中心も試す。
+                        // フレーズを含まないチャンクは従来どおり
+                        ? Rag.SnippetAround(merged, ep2, qTokens, 400,
+                            ep2.Length >= 2 && ep2.EndsWith("時") && ep2[..^1].All(char.IsDigit) ? ep2[..^1] : null)
+                        : merged.Length <= SnippetSmallChunkChars
+                            ? merged
+                            : broad ? Rag.Snippet(merged, qTokens, 400) : Rag.Snippet(merged, qTokens);
+                }
+                // 列挙質問の転写ヒント: 引用語（と時刻の数字表記）を含む行をそのまま添えて転写させる。
+                // 「22時」（タクシー可）と「22:00」（深夜割増25%）のように表記の違う2事実をモデルが
+                // 統合できず片方を落とす実測（t97・quick/standardの両階級）
+                if (broad && enumPhrase is { } epHint)
+                {
+                    var altHint = epHint.Length >= 2 && epHint.EndsWith("時") && epHint[..^1].All(char.IsDigit) ? epHint[..^1] : null;
+                    var hintLines = Rag.ExtractPhraseLines(merged, epHint, altHint);
+                    if (hintLines.Count > 0)
+                        merged += "\n【「" + epHint + "」に関係する行】\n" + string.Join("\n", hintLines);
+                }
                 ctxDocs.Add((h.Rec.FileName, merged));
             }
             var context = Rag.BuildContext(ctxDocs, webContext);
-            // 全量常駐モード: 社内文書全文をsystemブロックへ（質問間で不変＝プリフィックスキャッシュ有効）
+            // 全量常駐モード: KBは参照情報（ctxPart）へtop4で入れる（v2.7.0）。systemブロックへの全文注入は廃止
             var sysText = Rag.SystemPrompt + Rag.CurrentDateLine()
-                + (fullContext ? "\n\n【社内文書（全文）】\n" + fullKb : "");
+                + (fullContext && fullKb.Length > 0 ? "\n\n【社内文書（全文）】\n" + fullKb : "");
             var messages = new List<(string, string)> { ("system", sysText) };
             // Web参照が大きい場合は履歴を直近1往復に削る（ctx=2048の予算内に本文を優先して入れるため。
             // フォローアップ文脈は検索クエリ書き換え時に既に織り込み済み）
@@ -1081,9 +1224,31 @@ public sealed class ChatFlow
             // 複数図面での検索競合により、1つの図面の値だけを断定する誤回答を防ぐ）
             if (chosen.Count(h => drawingIds.Contains(h.Rec.FileId)) >= 2)
                 ctxPart += "\n\n※複数の図面が出典です。図面ごと（図番・改訂つき）に値を分けて回答し、1つの図面の値だけを断定しないでください。";
-            // 複合・列挙質問: 広めに渡しているため、拾った文書ごとに整理させる
+            // 複合・列挙質問: 広めに渡しているため、拾った文書ごとに整理させる。
+            // 引用フレーズ（「7日」「22時」等）がある場合はその語を明示して抽出を促す
+            // （チャンク内の関係行を取りこぼす小型モデルの揺らぎ対策・t96/t97実測）
             if (enumeration)
-                ctxPart += "\n\n※複数文書を横断する質問です。参照情報の各文書から該当する記述をすべて拾い、文書名ごとに整理して答えてください。該当しない文書は無視してください。";
+                ctxPart += "\n\n※複数文書を横断する質問です。"
+                    + (enumPhrase is { } ep
+                        ? $"「{ep}」を含む記述（「{ep}前」「{ep}以内」など{ep}を含む語"
+                          + (ep.EndsWith("時") && ep.Length >= 2 ? $"、および「{ep[..^1]}:00」等の時刻表記" : "")
+                          + "もすべて該当）を"
+                        : "質問に直接関係する記述（日数・金額・システム名・場所などの具体的な語）を")
+                    + "各文書から抜けなくすべて列挙してください（関係しない項目は書かない）。文書名ごとに箇条書きで答え、該当しない文書は無視してください。";
+            // 連絡先質問（t25/t95実測）: 内線番号と窓口の場所が別QAに分かれていると、小型モデルは
+            // 片方（窓口の場所）だけを答えて番号を落とす（「内線 1234」が文脈にあっても欠落した実測）。
+            // 番号・場所の両方を列挙させる
+            if (message.Contains("連絡先") || message.Contains("内線") || message.Contains("問い合わせ"))
+                ctxPart += "\n\n※連絡先を尋ねる質問です。参照情報にある内線番号・電話番号・窓口の場所をすべて箇条書きで答えてください。";
+            // 承認者質問（s07/t03実測）: 「承認は所属長。1週間を超える出張は部長の承認が必要」の条項で
+            // 条件付き条項（部長）を無視し通常承認者（所属長）で答える揺らぎ。条件に合う承認者を明示させる。
+            // s07は「長期出張の場合は？」と承認を省略形で聞くため「長期出張」でも発火させる
+            if (message.Contains("承認") || message.Contains("長期出張"))
+                ctxPart += "\n\n※承認者を尋ねる質問です。参照情報に条件別の承認者（例: 通常は所属長、1週間超は部長）がある場合は、質問の条件に合う承認者を正確に答えてください。";
+            // 図面・仕様の内容質問（DrawingQa経路・d05実測）: 検査基準書の最終項目（改訂による追加試験）を
+            // 改訂記載と分類して落とすため、末尾項目まで挙げさせる
+            if (intent.Route == AnswerRoute.DrawingQa)
+                ctxPart += "\n\n※図面・仕様に関する質問です。参照情報の該当する箇条書きは、末尾の項目まで1つ残らず挙げてください。";
             // 意図不明な極端に短い質問（例: 「テスト」）: 「テスト用サンプル」など表層一致する無関係文書が
             // 検索にヒットしても回答を試みてしまい、無関係な事実の列挙になる実測がある。短クエリのときは
             // 参照情報を外し、確認促進の応答のみにする（SystemPromptへの常時追加はquick 1.7Bが正常質問まで
@@ -1122,11 +1287,13 @@ public sealed class ChatFlow
             tPrompt = sw.ElapsedMilliseconds; // プロンプト構築完了
             // 7) ストリーム生成。Web参照ありの回答は日付・項目の列挙が長くなるため上限を緩める
             //    （14日分の予報列挙で400トークンでは途切れる実測。prompt込みでもctx内に収まる）
+            //    列挙は4〜5文書×複数項目で450では途中切断する実測（t98: 4文書目の日数に届かず欠落）のため650
             //    並列起動したLLMロードはここで待つ（失敗は元例外を再throwし外側のcatchで分類）
             await EnsureLlmReadyAsync();
+            await Sse(ctx, "stage", new { text = "回答を生成中…" });
             var answer = new StringBuilder();
             var ttfb = -1L;
-            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, messages, 0.0, enumeration ? 450 : synonymBroad ? 350 : webContributed ? 500 : 300, async delta =>
+            await _gw.ChatStreamAsync(_cfg.EnginePortLlm, messages, 0.0, enumeration ? 650 : synonymBroad ? 350 : webContributed ? 500 : 300, async delta =>
             {
                 if (ttfb < 0) ttfb = sw.ElapsedMilliseconds;
                 answer.Append(delta);
@@ -1141,12 +1308,17 @@ public sealed class ChatFlow
             var validationCorpus = string.Concat(chosen.Select(h => SourceText(h.Rec))) + "\n" + message
                 + (string.IsNullOrEmpty(webContext) ? "" : "\n" + webContext)
                 + (jissekiText.Length > 0 ? "\n" + jissekiText : "");
+            // 注意: ここに当日付（CurrentDateLine）を足すと、回答中の日付が検証を通るようになり
+            // 「金額/日付/状況」テンプレ形式の揺らぎ回答の再生成が抑制される（2026-10-30実測・d06）。
+            // 再生成はテンプレ揺らぎを実質浄化しているため、日付は意図的に捏造扱いのままとする
+            var validationRegenerated = false;
             if (!timeSensitive && !clarifyConfirm && (sources.Count > 0 || !string.IsNullOrEmpty(webContext)))
             {
                 var badNums = Rag.FabricatedNumbers(answer.ToString(), validationCorpus);
                 if (badNums.Count > 0)
                 {
                     _log.Warn($"validation guard: numbers not in sources [{string.Join(", ", badNums)}] — regenerating once");
+                    await Sse(ctx, "stage", new { text = "回答を検証中…（根拠を確認して答え直します）" });
                     var retryMsgs = new List<(string, string)>(messages)
                     {
                         ("assistant", answer.ToString()),
@@ -1160,6 +1332,7 @@ public sealed class ChatFlow
                         if (fixedText.Trim().Length > 0 && Rag.FabricatedNumbers(fixedText, validationCorpus).Count == 0)
                         {
                             answer.Clear().Append(fixedText);
+                            validationRegenerated = true;
                             await Sse(ctx, "patch", new { content = answer.ToString() });
                             _log.Info("validation guard: answer regenerated and validated");
                         }
@@ -1171,6 +1344,74 @@ public sealed class ChatFlow
                     catch (Exception ex2)
                     {
                         _log.Warn("validation regeneration failed: " + ex2.Message);
+                    }
+                }
+            }
+
+            // 品質ガード（v2.7.0・残課題3項目）— 数値ガードを通った回答の「内容の質」を検査する。
+            // s14型: QA集形式KBで質問に対応する見出しが無いのに、モデルが近い話題のQAを元に
+            // それらしい回答を生成（副業→経費精算/在宅勤務のすり替え）。検出したら再生成せず
+            // 定型の拒否へ置き換える（QA集の回答前提=見出し一致。すでに拒否している回答は触らない）。
+            // 混合KBの過剰発火防止: QA形式でない文書（出張規程等）が質問の根拠を持ちうる場合
+            // （質問の内容語が非QAチャンクに含まれる）は照合しない — 日当・私物USB等、QA_list以外の
+            // 文書が答えを持つ質問の正解が「見出し不一致」で拒否に置換される事故の防止（2026-10-31実測）
+            if (!timeSensitive && !clarifyConfirm && sources.Count > 0
+                && !Rag.IsRefusal(answer.ToString())
+                && !Rag.NonQaChunkGrounded(message,
+                    chosen.Where(h => !Rag.IsQaFormatChunk(h.Rec.Text)).Select(h => h.Rec.Text))
+                && Rag.QaHeadingMismatch(message, validationCorpus))
+            {
+                _log.Warn("qa heading guard: question matches no QA heading — replacing with fixed refusal");
+                answer.Clear().Append("該当する記載がありません。");
+                // 置換は表示にも反映する（2026-10-31実測: patch無しだとクライアントは
+                // deltaで流れた元回答を表示し続け、DBだけ拒否が保存されて不一致になる）
+                await Sse(ctx, "patch", new { content = answer.ToString() });
+            }
+
+            // t44型/t47型: (a)疑問詞（誰/いつ/どこ/いくら）の要点に答えていない、
+            // (b)参照文脈に根拠の無い箇条書き項目を水増し列挙 —— のいずれかを検出したら
+            // 1回だけサイレント再生成する。再生成は要求全体で1回まで（数値ガードで再生成済み
+            // ならスキップ。レイテンシ保護）。差し替えは再生成結果が両検査と数値ガードを
+            // すべて通った場合のみ（言い換え回答を誤って落とさない保守運用）
+            if (!timeSensitive && !clarifyConfirm && sources.Count > 0 && !validationRegenerated && answer.Length > 0)
+            {
+                var focusBad = Rag.FocusMismatch(message, answer.ToString());
+                var ungrounded = focusBad ? new List<string>() : Rag.UngroundedListItems(answer.ToString(), validationCorpus);
+                if (focusBad || ungrounded.Count > 0)
+                {
+                    _log.Warn($"quality guard: {(focusBad ? "off-focus answer" : "ungrounded items x" + ungrounded.Count)} — regenerating once");
+                    await Sse(ctx, "stage", new { text = "回答を検証中…（要点と根拠を確認して答え直します）" });
+                    var why = focusBad
+                        ? "直前の回答は質問の要点（誰が・いつ・どこで・いくら等）に直接答えていません。"
+                        : "直前の回答には参照情報に根拠の無い項目が含まれています。";
+                    var retryMsgs = new List<(string, string)>(messages)
+                    {
+                        ("assistant", answer.ToString()),
+                        ("user", why + "【参照情報】の内容だけを使い、質問された点に直接答えてください。参照情報に該当が無い場合は「該当する記載がありません」と答えてください。")
+                    };
+                    var retry = new StringBuilder();
+                    try
+                    {
+                        await _gw.ChatStreamAsync(_cfg.EnginePortLlm, retryMsgs, 0.0, 300, _ => Task.CompletedTask, ctx.RequestAborted);
+                        var fixedText = retry.ToString();
+                        var ok = fixedText.Trim().Length > 0
+                            && Rag.FabricatedNumbers(fixedText, validationCorpus).Count == 0
+                            && !Rag.FocusMismatch(message, fixedText)
+                            && Rag.UngroundedListItems(fixedText, validationCorpus).Count == 0;
+                        if (ok)
+                        {
+                            answer.Clear().Append(fixedText);
+                            await Sse(ctx, "patch", new { content = answer.ToString() });
+                            _log.Info("quality guard: answer regenerated and validated");
+                        }
+                        else
+                        {
+                            _log.Warn("quality guard: regenerated answer still invalid — keeping original");
+                        }
+                    }
+                    catch (Exception ex2)
+                    {
+                        _log.Warn("quality regeneration failed: " + ex2.Message);
                     }
                 }
             }
@@ -1213,6 +1454,23 @@ public sealed class ChatFlow
                         _log.Warn("repeat regeneration failed: " + ex2.Message);
                     }
                 }
+            }
+
+            // 回答の見た目を整える（v2.7.0）: 参照チャンクの見出し（【経費精算】等）の写しと
+            // 同一内容の重複行を除去する。全文注入モードの小規模KBで発生しやすい「機械的な回答」対策
+            var sanitized = Rag.SanitizeAnswer(collapsedText);
+            if (sanitized != collapsedText)
+            {
+                _log.Info("answer sanitized: document labels/duplicate lines removed");
+                collapsedText = sanitized;
+            }
+
+            // 拒否文言の統一（自然文→定型・t73実測）: 出典行が無く1文目が拒否そのものの応答は
+            // 「該当する記載がありません。」へ置き換える。部分回答・但し書き付きは変更しない（Rag側で保護）
+            if (Rag.NormalizeRefusalWording(collapsedText) is { } unified)
+            {
+                collapsedText = unified;
+                _log.Info("refusal wording normalized to the fixed phrase");
             }
 
             // 出典行を出典パネルと完全一致する正規形へ（モデルが省略・1件のみ記載するのを防止）
@@ -1420,15 +1678,28 @@ public sealed class ChatFlow
             foreach (var h in cand)
             {
                 var rec = h.Rec;
-                var dup = refs.FirstOrDefault(r => r.id == rec.FileId);
-                if (dup != default) dup.text += "\n" + rec.Text;
+                // 同名ファイルは1件に統合する（出典の重複表示防止・2026-10-31実測）:
+                // KBに同名ファイルがfile_id違いで二重登録されている場合、file_id単位の判定だと
+                // 「慶弔休暇規程.md ×2」のように出典に同一文書が並ぶ。テキストは統合して1件に
+                var idx = refs.FindIndex(r => r.name == rec.FileName);
+                if (idx >= 0) refs[idx] = (refs[idx].id, refs[idx].name, refs[idx].text + "\n" + rec.Text);
                 else refs.Add((rec.FileId, rec.FileName, rec.Text));
             }
             // Dify既定のtop_k=4ファイルに絞る（スコア順。ファイルごとのテキストは全チャンク連結）
             refs = refs.Take(4).ToList();
         }
         var refText = Draft.BuildReferenceText(refs.Select(r => (r.name, r.text)).ToList(), seed);
-        var sources = refs.Select(r => new SourceInfo { File = r.name, Snippet = "下書き参照", Kind = "kb", FileId = r.id }).ToList();
+        // 出典の該当箇所に参照チャンクの実際の文（Markdown記法をプレーン化）を入れる。
+        // Snippet（120字）に加えてText（全文・2000字上限）も持たせることで、出典モーダルで
+        // 全文表示ができ「…で切れて全文が見えない」問題を解消する（2026-10-31実測）
+        var sources = refs.Select(r => new SourceInfo
+        {
+            File = r.name,
+            Snippet = Rag.PlainSnippet(r.text, 120),
+            Text = Rag.PlainSnippet(r.text, 2000),
+            Kind = "kb",
+            FileId = r.id,
+        }).ToList();
         if (sources.Count > 0)
             await Sse(ctx, "refs", new { files = sources.Select(s => s.File).ToArray(), web = Array.Empty<object>() });
         _log.Info($"draft: template={tpl.Id}{(auto ? "(auto)" : "")} refs={refs.Count} auto-search={refs.Count > 0 && !draft.TryGetProperty("refs", out var _)} seed={seed != null} refChars={refText.Length}");
@@ -1461,25 +1732,45 @@ public sealed class ChatFlow
             await Sse(ctx, "delta", new { content = delta });
         }, ctx.RequestAborted);
 
+        // 下書きの重複畳み込み（v2.7.0）: 単発生成パスは後処理が無く、1.7Bモデルの
+        // ブロック反復（FAQ項目を2巡書く）がそのまま出力されていた（2026-10-31実測）。
+        // ChatFlow回答と同じ連続系の畳み込み＋非連続の完全重複行除去（箇条書き項目限定）を適用
+        var draftBody = Rag.CollapseDuplicateSentences(answer.ToString()) ?? answer.ToString();
+        draftBody = Rag.CollapseDuplicateLines(draftBody) ?? draftBody;
+
         var finalText = Draft.AssembleMarkdown(tpl.Label, auto,
-            outlineTitleFrom(message, answer.ToString()), new List<(string, string)> { ("本文", answer.ToString()) },
+            outlineTitleFrom(message, draftBody), new List<(string, string)> { ("本文", draftBody) },
             refs.Select(r => r.name).ToList());
         var sourcesJson = JsonSerializer.Serialize(sources, JsonOpts);
         _db.Exec("INSERT INTO messages(chat_id, role, content, sources_json, kind) VALUES($c,'assistant',$m,$s,'draft')",
             ("$c", chatId), ("$m", finalText), ("$s", sourcesJson));
+        var draftMessageId = _db.LastInsertId();
         _db.Exec("UPDATE chats SET updated_at=datetime('now') WHERE id=$c", ("$c", chatId));
         await Sse(ctx, "patch", new { content = finalText });
-        await Sse(ctx, "done", new { cached = false, kind = "draft", route = "draft", template = tpl.Label, auto_inferred = auto, title = outlineTitleFrom(message, answer.ToString()), sources, ms = sw.ElapsedMilliseconds });
+        // message_idを添える: 下書き応答にも👍/👎のアクション行を出すため（v2.7.0）
+        await Sse(ctx, "done", new { cached = false, kind = "draft", route = "draft", template = tpl.Label, auto_inferred = auto, title = outlineTitleFrom(message, answer.ToString()), sources, ms = sw.ElapsedMilliseconds, message_id = draftMessageId });
     }
 
-    /// <summary>下書きのタイトル決定: 生成文の先頭が「# 」見出しならそれを使い、無ければ指示文から作る</summary>
-    private static string outlineTitleFrom(string instruction, string generated)
+    /// <summary>チャットタイトル等の短い表示名（24字以内）。超える場合は句読点等の自然な境界で
+    /// 切り、切れたことは「…」で明示する（24字固定だと「まと」で切れて誤字に見えた実測・2026-10-31）</summary>
+    internal static string ShortTitle(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= 24) return text ?? "";
+        var cut = text[..24];
+        var m = System.Text.RegularExpressions.Regex.Match(cut, @"^(.+[、。（）「」・])");
+        if (m.Success && m.Groups[1].Value.Length >= 8) return m.Groups[1].Value.TrimEnd('、', '。') + "…";
+        return cut + "…";
+    }
+
+    /// <summary>下書きのタイトル決定: 生成文の先頭が「# 」見出しならそれを使い、無ければ指示文から作る。
+    /// 切り詰めはShortTitle（自然な境界+「…」）に統一</summary>
+    internal static string outlineTitleFrom(string instruction, string generated)
     {
         foreach (var line in (generated ?? "").Split('\n'))
         {
             var t = line.Trim();
             if (t.StartsWith("# ")) return t[2..].Trim();
         }
-        return instruction.Length > 24 ? instruction[..24] : instruction;
+        return ShortTitle(instruction);
     }
 }

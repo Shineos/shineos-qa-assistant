@@ -269,3 +269,27 @@ public class DraftPostProcessTests
     public void LooksLikeCreationRequest_DetectsIntent(string message, bool expected)
         => Assert.Equal(expected, Draft.LooksLikeCreationRequest(message));
 }
+
+/// <summary>作成意図検出の拡張パターン（v2.7.0: 資料/文書/まとめて等・ユーザーの依頼で自動資料化）</summary>
+public class LooksLikeCreationRequestExtendedTests
+{
+    [Theory]
+    [InlineData("この内容で資料を作って")]
+    [InlineData("報告書を作成してください")]
+    [InlineData("会議の内容を議事録にまとめて")]
+    [InlineData("これを文書にしてください")]
+    [InlineData("紹介資料の作成お願いします")]
+    public void CreationPhrasings_Detected(string q)
+    {
+        Assert.True(Draft.LooksLikeCreationRequest(q));
+    }
+
+    [Theory]
+    [InlineData("経費精算の手順を教えてください")]
+    [InlineData("駐車場の料金はいくらですか")]
+    [InlineData("報告書とは何ですか")]
+    public void QaQuestions_NotDetected(string q)
+    {
+        Assert.False(Draft.LooksLikeCreationRequest(q));
+    }
+}

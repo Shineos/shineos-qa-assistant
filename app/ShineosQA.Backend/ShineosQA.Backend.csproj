@@ -22,6 +22,9 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <!-- NU1903対応: GHSA-2m69-gcr7-jv3q を修正したSQLiteネイティブ版を明示ピン -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
+    <!-- System.IO.Packaging: DocumentFormat.OpenXml経由の推移依存(8.0.0)に高重大度脆弱性(NU1903)があるため
+         修正済み版を明示固定（NU1903・GHSA-f32c-w444-8ppv/GHSA-qj66-m88j-hmgj対策） -->
+    <PackageReference Include="System.IO.Packaging" Version="10.0.14" />
     <!-- PDFテキスト抽出（ToUnicode CMap対応・日本語PDF可） -->
     <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>

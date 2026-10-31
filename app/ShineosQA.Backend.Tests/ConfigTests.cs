@@ -103,3 +103,37 @@ public class ConfigTests : IDisposable
         Assert.All(new[] { cfg.EnginePortLlm, cfg.EnginePortEmb, cfg.EnginePortRank }, p => Assert.NotEqual(cfg.Port, p));
     }
 }
+
+/// <summary>LLMメモリリサイクル閾値の設定上書き（8GBポリシーの再現検証用）</summary>
+public class RecycleThresholdConfigTests
+{
+    [Fact]
+    public void RecycleThresholdMb_IsLoadedFromConfig()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "shineqa-rtc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var p = Path.Combine(dir, "config.json");
+            File.WriteAllText(p, """{ "recycle_threshold_mb": 1700 }""");
+            var cfg = AppConfig.Load(new[] { "--config", p });
+            Assert.Equal(1700, cfg.RecycleThresholdMb);
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+
+    [Fact]
+    public void RecycleThresholdMb_DefaultsToZero_AutoMode()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "shineqa-rtc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var p = Path.Combine(dir, "config.json");
+            File.WriteAllText(p, "{}");
+            var cfg = AppConfig.Load(new[] { "--config", p });
+            Assert.Equal(0, cfg.RecycleThresholdMb); // 0=RAMから自動（8GB機2,200 / 16GB機4,500）
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
+}

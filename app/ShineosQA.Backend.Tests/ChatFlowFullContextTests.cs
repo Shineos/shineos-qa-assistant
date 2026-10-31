@@ -18,6 +18,60 @@ public class ChatFlowFullContextTests : IDisposable
         _db = new Db(_path);
     }
 
+    /// <summary>下書きタイトルの切り詰め（2026-10-31実測: 24字固定だと「まと」で切れて誤字に見えた）</summary>
+    public class OutlineTitleTests
+    {
+        [Fact]
+        public void ShortInstruction_Kept()
+        {
+            Assert.Equal("慶弔休暇の規定をまとめて", ChatFlow.outlineTitleFrom("慶弔休暇の規定をまとめて", ""));
+        }
+
+        [Fact]
+        public void PunctuationBoundary_Preferred()
+        {
+            // 句読点があればその後ろで切る（8字以上）
+            var t = ChatFlow.outlineTitleFrom("慶弔休暇の規定について、研修用のFAQ形式にまとめてください", "");
+            Assert.Equal("慶弔休暇の規定について…", t);
+        }
+
+        [Fact]
+        public void NoPunctuation_TruncatedWithEllipsis()
+        {
+            // 句読点が無い場合は24字+「…」（「まと」で切れても省略と分かる）
+            var t = ChatFlow.outlineTitleFrom("先ほどの慶弔休暇の規定を研修用のFAQ形式にまとめてください", "");
+            Assert.Equal("先ほどの慶弔休暇の規定を研修用のFAQ形式にまと…", t);
+        }
+
+        [Fact]
+        public void GeneratedHeading_Priority()
+        {
+            Assert.Equal("生成タイトル", ChatFlow.outlineTitleFrom("指示文", "# 生成タイトル\n本文"));
+        }
+    }
+
+    /// <summary>チャットタイトルの自然な切り詰め（24字固定だと「まと」で切れて誤字に見えた実測）</summary>
+    public class ShortTitleTests
+    {
+        [Fact]
+        public void ShortText_Kept()
+        {
+            Assert.Equal("慶弔休暇の規定をまとめて", ChatFlow.ShortTitle("慶弔休暇の規定をまとめて"));
+        }
+
+        [Fact]
+        public void PunctuationBoundary_Preferred()
+        {
+            Assert.Equal("慶弔休暇の規定について…", ChatFlow.ShortTitle("慶弔休暇の規定について、研修用のFAQ形式にまとめてください"));
+        }
+
+        [Fact]
+        public void NoPunctuation_TruncatedWithEllipsis()
+        {
+            Assert.Equal("先ほどの慶弔休暇の規定を研修用のFAQ形式にまと…", ChatFlow.ShortTitle("先ほどの慶弔休暇の規定を研修用のFAQ形式にまとめてください"));
+        }
+    }
+
     public void Dispose()
     {
         _db.Dispose();

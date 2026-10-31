@@ -6,6 +6,25 @@ import { onSuccessfulAnswer } from './review-prompt';
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+/** トースト通知: 画面右上に3秒表示して消える（フィードバック保存等の簡易通知） */
+function showToast(text: string): void {
+  let host = document.getElementById('toast-host');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'toast-host';
+    document.body.appendChild(host);
+  }
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = text;
+  host.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  window.setTimeout(() => {
+    t.classList.remove('show');
+    window.setTimeout(() => t.remove(), 300);
+  }, 3000);
+}
+
 // 絵文字は環境により表示が崩れるためインラインSVGで統一
 const svgWrap = (path: string) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
@@ -13,9 +32,8 @@ const SVG_CLIP = svgWrap('<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.
 const SVG_GLOBE = svgWrap('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>');
 const SVG_DOC = svgWrap('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/>');
 const SVG_ZAP = svgWrap('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>');
-// 作成モード（v2.5.0）: 下書きバッジ（file-text）・資料にする（file-plus）・md保存（download）
+// 作成モード（v2.5.0）: 下書きバッジ（file-text）・md保存（download）。
 const SVG_DRAFT = svgWrap('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8M16 17H8M10 9H8"/>');
-const SVG_FILE_PLUS = svgWrap('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 9v6M9 12h6"/>');
 const SVG_DOWNLOAD = svgWrap('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>');
 const SVG_PAPER = svgWrap('<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>');
 const SVG_CAMERA = svgWrap('<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>');
@@ -28,6 +46,9 @@ const SVG_FLAG = svgWrap('<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-
 // メッセージカード時刻横のコピーアイコン（コピー完了時はチェックに差し替え）
 const SVG_COPY = svgWrap('<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>');
 const SVG_CHECK = svgWrap('<polyline points="20 6 9 17 4 12"/>');
+// 回答フィードバック（👍/👎）。採用されるとFAQ（即答）になる候補として保存される旨をtitleに示す
+const SVG_THUMB_UP = svgWrap('<path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>');
+const SVG_THUMB_DOWN = svgWrap('<path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>');
 const SVG_ARCHIVE = svgWrap('<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>');
 const SVG_ARCHIVE_RESTORE = svgWrap('<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/><path d="m9 16 3-3 3 3"/>');
 // 星アイコン: ChatGPT風の細線5角星（lucide star）。塗り版は中身をcurrentColorで塗る
@@ -207,9 +228,10 @@ function sourceElement(s: SourceInfo): HTMLElement {
 }
 
 /** コピー用の出典ブロック（回答本文のあとに付ける）。
- *  画面の出典行（sourceElement）と同じ見出し・該当箇所をマークダウン式で再現する:
+ *  画面の出典行（sourceElement）と同じ見出し・該当箇所をテキストで再現する:
  *  図面は【図】図番（品名・改訂）/【図面】ファイル名、通常文書はファイル名、Webはタイトル＋URL。
- *  スニペットは画面同様に1行化（空白正規化）して切り詰める */
+ *  スニペットは画面同様に1行化（空白正規化）して切り詰める。
+ *  書式はプレーンテキスト（Markdown強調は使わない — メモ帳等で開くと**が生で見えるため・2026-10-31指摘） */
 export function buildSourcesText(sources: SourceInfo[]): string {
   const lines = sources.map((s, i) => {
     const drawing = s.is_drawing ?? s.isDrawing;
@@ -221,7 +243,7 @@ export function buildSourcesText(sources: SourceInfo[]): string {
     const snip = s.snippet.replace(/\s+/g, ' ').trim();
     const body = snip ? (snip.length > 110 ? snip.slice(0, 110) + '…' : snip) : '';
     const url = s.kind === 'web' && s.url ? `  ${s.url}` : '';
-    return `${i + 1}. **${head}**${url}${body ? `\n   ${body}` : ''}`;
+    return `${i + 1}. ${head}${url}${body ? `\n   ${body}` : ''}`;
   });
   return '──── 出典（該当箇所） ────\n' + lines.join('\n');
 }
@@ -231,12 +253,6 @@ export function buildSourcesText(sources: SourceInfo[]): string {
  * 旧バックエンド（suggest_web無し）では非表示になる後方互換 */
 export function shouldShowWebSuggestion(kind: string | null | undefined, suggestWeb: boolean | undefined, webOn: boolean): boolean {
   return kind === 'refusal' && suggestWeb === true && !webOn;
-}
-
-/** 先行refs（v2.7）: partial=true はリランク前の「参照候補」なのでphase文言を分ける。
- *  partial=false は確定refs＝従来どおり「回答を生成中…」。 */
-export function refsPhaseLabel(partial: boolean | undefined): string {
-  return partial ? '参照候補を確認中…' : '回答を生成中…';
 }
 
 /** done 受信時にアシスタント吹き出しを新規追加すべきか。
@@ -310,9 +326,6 @@ export class ChatView {
   private webSearch = false;
   private selTier = '';
   private answerLang: AnswerLang = 'ja'; // 回答言語（多言語対応・既定ja）
-  // 作成モード（v2.6.0）: ONで質問文=文書作成の指示。参照はナレッジ全体から自動検索するため
-  // 選択操作はない（テンプレートのみ）。種（直前のQ&A）は1回だけ消費
-  private draftSeed: { question: string; answer: string } | null = null;
   // 1回限りの送信オプション（v2.4.1）: ナレッジ一覧「要約」ボタンの対象ファイル /
   // 拒否回答の「Webで検索する」チップからの再送（トグル状態は変更しない）
   private pendingSummaryId: number | null = null;
@@ -406,7 +419,7 @@ export class ChatView {
     });
     // 作成モードのトグルは廃止（2026-10-23・Dify式UX）: 文書作成の意図はバックエンドの
     // 意図自動判定（Draft.LooksLikeCreationRequest）で振り分けるため、ユーザーはモードを
-    // 意識せず1つの入力箱だけで使える。「資料にする」ボタンは種付きの1回だけ再送として動く
+    // 意識せず1つの入力箱だけで使える（「資料にする」手動ボタンも2026-10-31に廃止）
     const chatForm = document.getElementById('chat-form')!;
     chatForm.addEventListener('dragleave', () => chatForm.classList.remove('over'));
     chatForm.addEventListener('drop', (e) => {
@@ -839,14 +852,16 @@ export class ChatView {
     const row = document.createElement('div');
     row.className = assistant ? 'msg-actions' : 'msg-time';
     if (assistant) row.appendChild(this.reportButton(rawText));
+    row.appendChild(this.copyButton(copyBody));
     if (time) {
       const tm = document.createElement('span');
       if (assistant) tm.className = 'msg-time';
-      tm.textContent = fmtTime(time);
+      // アシスタント行は時計アイコン＋時刻（例: ⏱ 16:19）。ユーザー行は従来どおり時刻のみ
+      if (assistant) tm.innerHTML = svgWrap('<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>') + ' ' + esc(fmtTime(time));
+      else tm.textContent = fmtTime(time);
       tm.title = fmtFull(time);
       row.appendChild(tm);
     }
-    row.appendChild(this.copyButton(copyBody));
     wrap.appendChild(row);
     return row;
   }
@@ -1041,28 +1056,6 @@ export class ChatView {
     el.hidden = !show || !text;
   }
 
-  /** 作成モードのインラインパネル（v2.6.0→v2.6.3で簡素化）: トグル廃止に伴いテンプレート選択は
-   * サーバの自動判定へ。残る表示は「資料にする」で設定された種のチップのみ */
-  private renderDraftPanel(): void {
-    const host = document.getElementById('draft-host')!;
-    if (!this.draftSeed) { host.innerHTML = ''; return; }
-    const box = document.createElement('div');
-    box.className = 'draft-panel';
-    const seed = document.createElement('div');
-    seed.className = 'draft-seed';
-    seed.textContent = '直前の回答とその出典を種にします（指示文で内容を調整できます）';
-    const off = document.createElement('button');
-    off.type = 'button';
-    off.className = 'icon-btn';
-    off.textContent = '×';
-    off.title = '種を解除';
-    off.addEventListener('click', () => { this.draftSeed = null; this.renderDraftPanel(); });
-    seed.appendChild(off);
-    box.appendChild(seed);
-    host.innerHTML = '';
-    host.appendChild(box);
-  }
-
   /** 添付ファイルの共通処理（クリック/D&D）: ナレッジへ登録する。
    * 作成モードでも特別扱いは不要（v2.6.0: 参照は自動検索のため） */
   private async addAttachedFiles(files: File[]): Promise<void> {
@@ -1076,17 +1069,6 @@ export class ChatView {
     } catch (ex) {
       this.setStatus(`${SVG_PAPER} 登録に失敗しました: ${(ex as Error).message}`);
     }
-  }
-
-  /** 「資料にする」（回答→下書き）: 種の事前入力（v2.5.0）。
-   * 参照は自動検索（v2.6.0）のため選択は不要。送信時にdraftペイロードとして消費される */
-  private startDraftFromAnswer(answer: string): void {
-    this.draftSeed = { question: this.lastUserText, answer };
-    this.renderDraftPanel();
-    const input = document.getElementById('chat-input') as HTMLTextAreaElement;
-    input.value = 'この回答をもとにFAQ集を作成して';
-    input.style.height = 'auto';
-    input.focus();
   }
 
   private async send() {
@@ -1124,7 +1106,6 @@ export class ChatView {
     let liveCard: HTMLElement | null = null;
     let liveBody: HTMLElement | null = null;
     let gotMeta = false;
-    const t0 = performance.now();
     // delta の描画間引き（初回即時・以後50ms）。スクロールも描画と同じタイミングで行う
     const painter = new StreamPainter(() => {
       if (!liveBody) return;
@@ -1141,14 +1122,9 @@ export class ChatView {
       // 欠落するのを防ぐ（2026-10-23）
       const summaryFileId = this.pendingSummaryId;
       const webOverride = this.webOverrideOnce;
-      const seedSnapshot = this.draftSeed;
-      // 種が設定されている場合（「資料にする」フロー）はdraftペイロードで送る。
-      // 通常の文書作成依頼（「〜を作成してください」）はバックエンドの意図自動判定で振り分けられる
-      const draftPayload = seedSnapshot
-        ? { template: 'auto', seed: seedSnapshot ?? undefined }
-        : undefined;
+      // 文書作成の依頼は質問文からの意図自動判定で振り分けられる（「資料にする」手動種は廃止）
       await streamChat(
-        { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, answer_lang: this.answerLang, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined, draft: draftPayload },
+        { chat_uuid: this.chatUuid || undefined, message, web_search: webOverride ?? this.webSearch, model: this.selTier || undefined, answer_lang: this.answerLang, capture_image: captureImage, summary_file_id: summaryFileId ?? undefined },
         {
           meta: (d) => {
             gotMeta = true;
@@ -1176,10 +1152,13 @@ export class ChatView {
             }
           },
           refs: (d) => {
-            // 先行refs（partial=true）はリランク前の候補。確定refsで「回答を生成中…」に切り替える
-            thinking.setPhase(refsPhaseLabel(d.partial));
+            // 参照文書の一行表示。phase文言はstageイベントが担当する（v2.7.0で一元化）
             const domains = [...new Set((d.web ?? []).map(u => domainOf(u)))].slice(0, 3);
             thinking.setRefs(d.files ?? [], domains);
+          },
+          // 処理段階の一行表示（v2.7.0・ZCode方式）: 解釈/検索/文書選択/根拠確定/生成/検証
+          stage: (d) => {
+            thinking.setPhase(d.text || '…');
           },
           // 作成モード（v2.5.0）: 進捗と章区切りを流す。最終mdはpatchで全文差し替え
           phase: (d) => {
@@ -1283,44 +1262,63 @@ export class ChatView {
                 // 履歴からでもダウンロードできるよう、actionsの代わりにカード内に置く
                 liveCard.appendChild(mdRow);
               }
-              // 回答→資料化（v2.5.0）: 通常回答の下に「資料にする」を置く（作成モードへ種を渡す）
-              if (d.kind === 'answer' && liveCard.parentElement) {
-                const draftRow = document.createElement('div');
-                draftRow.className = 'web-retry-row';
-                const mk = document.createElement('button');
-                mk.className = 'web-retry-btn';
-                mk.innerHTML = SVG_FILE_PLUS + '<span>資料にする</span>';
-                mk.title = 'この回答と出典を種に、作成モードで下書きを作ります';
-                mk.addEventListener("click", () => this.startDraftFromAnswer(acc));
-                draftRow.appendChild(mk);
-                actionsRow.after(draftRow);
-                // 回答フィードバック（ローカル保存のみ・外部送信なし）。FAQ候補の承認に使う。
-                if (typeof d.message_id === 'number') {
-                  const fbRow = document.createElement('div');
-                  fbRow.className = 'web-retry-row';
-                  const sendFeedback = async (rating: 1 | -1, label: string) => {
-                    try {
-                      await api.feedback({
-                        message_id: d.message_id,
-                        rating,
-                        corrected_answer: rating < 0 ? acc : undefined,
-                      });
-                      fbRow.textContent = label;
-                    } catch { fbRow.textContent = label; }
-                  };
-                  const good = document.createElement('button');
-                  good.className = 'web-retry-btn';
-                  good.textContent = '役に立った';
-                  good.addEventListener('click', () => { void sendFeedback(1, 'フィードバックを保存しました'); });
-                  const bad = document.createElement('button');
-                  bad.className = 'web-retry-btn';
-                  bad.textContent = '改善してほしい';
-                  bad.addEventListener('click', () => { void sendFeedback(-1, '改善候補として保存しました'); });
-                  fbRow.appendChild(good);
-                  fbRow.appendChild(bad);
-                  actionsRow.after(fbRow);
-                }
-              }
+              // 「資料にする」ボタンは廃止（2026-10-31）: 文書作成の依頼は質問文からの
+              // 意図自動判定で自動的に資料を作るため、手動の資料化導線は不要になった
+              // 回答フィードバック（ローカル保存のみ・外部送信なし）。通常回答と下書きの両方に出す。
+              // 👍/👎は時刻横のコピーアイコンの右横に置く（コピーアイコンと同一サイズ・スタイル）。
+              // クリックで評価アイコンに色が付き、トースト通知（3秒で消える）を出す。
+              // どちらの評価もFAQ候補として保存され、ナレッジのFAQ管理で採用すると即答に反映される
+              if ((d.kind === 'answer' || d.kind === 'draft') && typeof d.message_id === 'number') {
+                // FAQ候補が保存されなかった理由に応じてトースト文言を分ける
+                // （2026-10-31実測: 既存FAQありの質問に👍しても「候補として保存」と表示され実態と合わなかった）
+                const toastForReason = (reason: string | undefined): string | null => {
+                  switch (reason) {
+                    case 'existing_faq': return 'フィードバックを保存しました（この質問は既にFAQがあるため候補には追加されません）';
+                    case 'refusal': return 'フィードバックを保存しました（拒否回答のため候補には追加されません）';
+                    case 'duplicate': return 'フィードバックを保存しました（この質問の候補は既にあります）';
+                    default: return null;
+                  }
+                };
+                const sendFeedback = async (rating: 1 | -1, label: string) => {
+                  try {
+                    const r = await api.feedback({
+                      message_id: d.message_id,
+                      rating,
+                      corrected_answer: rating < 0 ? acc : undefined,
+                    });
+                    const saved = r?.candidate_saved === true;
+                    showToast(saved ? label : (toastForReason(r?.candidate_reason) ?? 'フィードバックを保存しました'));
+                  } catch { showToast(label); }
+                };
+                // クリックしたアイコンに色を付け、両ボタンを無効化（再評価防止）
+                const mark = (clicked: HTMLButtonElement, cls: string, doneTitle: string) => {
+                  clicked.classList.add(cls);
+                  clicked.title = doneTitle + '（保存済み）';
+                  good.disabled = true;
+                  bad.disabled = true;
+                };
+                const good = document.createElement('button');
+                    good.className = 'copy-btn';
+                    good.title = '役に立った（この質問と回答をFAQ候補として保存します）';
+                    good.setAttribute('aria-label', '役に立った');
+                    good.innerHTML = SVG_THUMB_UP;
+                    good.addEventListener('click', () => {
+                      mark(good, 'fb-up', '役に立った');
+                      void sendFeedback(1, 'フィードバックを保存しました（FAQ候補として保存）');
+                    });
+                    const bad = document.createElement('button');
+                    bad.className = 'copy-btn';
+                    bad.title = '改善してほしい（この質問と回答を改善候補として保存します）';
+                    bad.setAttribute('aria-label', '改善してほしい');
+                    bad.innerHTML = SVG_THUMB_DOWN;
+                    bad.addEventListener('click', () => {
+                      mark(bad, 'fb-down', '改善してほしい');
+                      void sendFeedback(-1, '改善候補として保存しました');
+                    });
+                    const anchorEl = actionsRow.querySelector(".msg-time");
+                    actionsRow.insertBefore(good, anchorEl);
+                    actionsRow.insertBefore(bad, anchorEl);
+                  }
             } else {
               thinking.remove();
               // clarify は clarify イベント側がカードを描画済み＝ここで足すと空バブルになる。
@@ -1329,18 +1327,7 @@ export class ChatView {
                 this.appendMessage('assistant', acc, d.sources ?? [], new Date());
               }
             }
-            const secs = ((performance.now() - t0) / 1000).toFixed(1);
-            // 即答ルート（FAQ・図面台帳・実績）はサーバ実測msを表示し、どの経路で答えたかを明示する。
-            // 通常RAGは従来どおりクライアント経過秒（体感）を表示する。
-            const routeLabel = d.route === 'faq' ? 'FAQ即答'
-              : d.route === 'drawing' ? '図面台帳'
-              : d.route === 'drawing-compare' ? '改訂比較'
-              : d.route === 'jisseki' ? '実績'
-              : d.route === 'rag-drawing' ? '図面検索'
-              : d.route === 'rag-multi' ? '複合質問'
-              : '';
-            const timeLabel = d.instant && typeof d.ms === 'number' ? `${d.ms}ms` : `${secs}s`;
-            this.setStatus(`⏱ ${timeLabel}${routeLabel ? '・' + routeLabel : ''}${!routeLabel && d.cached ? '（キャッシュから即答）' : ''}${d.guard ? '（該当なし）' : ''}`);
+            this.setStatus('', false);
             // Store評価導線: 通常回答（kind=answer）のみカウント。確認促進・拒否・clarifyは成功体験でない。
             // 旧バックエンド(kind無し)との互換: guard無し+出典ありをフォールバックで正常回答とみなす
             const isAnswer = d.kind ? d.kind === 'answer' : !d.guard && (d.sources ?? []).length > 0;
@@ -1388,7 +1375,6 @@ export class ChatView {
       // 送信成功後にフラグを消費する（失敗時の自動再送で種・要約対象が欠落しないように）
       this.pendingSummaryId = null;
       this.webOverrideOnce = null;
-      this.draftSeed = null; // 消費（失敗時の自動再送で種が欠落しないよう成功後に消す）
       leaving = true;
       break;
     } catch (ex) {

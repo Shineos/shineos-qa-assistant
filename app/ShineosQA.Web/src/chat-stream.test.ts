@@ -1,18 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { refsPhaseLabel, shouldAppendAssistantBubble } from './chat';
-
-// 先行refs（v2.7）: partial=true はリランク前の候補なので文言を分ける。
-// 旧バックエンド（partial 無し）は従来文言のままにする後方互換も固定する。
-describe('refsPhaseLabel', () => {
-  it('partial=true は「参照候補を確認中…」', () => {
-    expect(refsPhaseLabel(true)).toBe('参照候補を確認中…');
-  });
-
-  it('partial=false / 未指定（旧バックエンド）は「回答を生成中…」', () => {
-    expect(refsPhaseLabel(false)).toBe('回答を生成中…');
-    expect(refsPhaseLabel(undefined)).toBe('回答を生成中…');
-  });
-});
+import { shouldAppendAssistantBubble } from './chat';
 
 // clarify は clarify イベントが選択肢カードを描画済み。done で空のアシスタント吹き出しを
 // 追加していた不具合（v2.6.2 で実害）の再発防止。
