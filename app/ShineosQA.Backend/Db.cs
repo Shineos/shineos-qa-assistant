@@ -349,6 +349,16 @@ public sealed class Db : IDisposable
         return v is null ? null : Convert.ToInt64(v);
     }
 
+    /// <summary>同一ファイル名（Windows慣習どおり大文字小文字を区別しない）で status='ready' の
+    /// 既存行を返す。取り込み時の同名置き換え（訂正版の再登録）に使う（v2.7.0）</summary>
+    public long? FindReadyFileByName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var v = Scalar("SELECT file_id FROM files WHERE name=$n COLLATE NOCASE AND status='ready' ORDER BY file_id LIMIT 1",
+            ("$n", name));
+        return v is null ? null : Convert.ToInt64(v);
+    }
+
     public string GetSetting(string key, string def)
     {
         var v = Scalar("SELECT value FROM settings WHERE key=$k", ("$k", key));

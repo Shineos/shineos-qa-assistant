@@ -239,6 +239,18 @@ public sealed class Ingest
                 _log.Info($"ingest skipped (duplicate content): {fileName} sha256={contentHash[..12]}… → existing file_id={duplicateId}");
                 return duplicateId;
             }
+            // 同名置き換え（v2.7.0）: 同一ファイル名の ready 文書が既にある場合、旧行を削除してから
+            // 登録する。企業KBで同名ファイルが二重登録されると出典や検索が重複し、どちらが正か
+            // 分からなくなる実測（2026-10-31: 慶弔休暇規程.md ×2 で出典が重複）。同一内容の
+            // 再取り込みは content_hash 重複排除が先に効くため、ここに到達するのは「同名・異内容」
+            // ＝訂正版の再登録。旧行はchunks・drawing_meta等がcascade削除され、索引からも除外する
+            if (_db.FindReadyFileByName(fileName) is long oldId)
+            {
+                _log.Info($"ingest replaces same-name file: {fileName} old file_id={oldId} → re-register as new version");
+                _db.Exec("DELETE FROM files WHERE file_id=$i", ("$i", oldId));
+                _index.RemoveFile(oldId);
+                DeleteStoredFiles(oldId);
+            }
             bool packOn = Extensions.IsEnabled(_db, Extensions.DrawingId);
 
             _db.Exec("INSERT INTO files(name, status, content_hash) VALUES($n,'parsing',$h)",
