@@ -683,11 +683,7 @@ public sealed class ChatFlow
                     .ToList();
                 var perDoc = new Dictionary<long, int>();
                 var pickedList = new List<ChunkIndex.HybridHit>();
-                if (Environment.GetEnvironmentVariable("SHINEOS_FULL_INJECT") == "1")
-                {
-                    pickedList.AddRange(chosen); // A/B測定用: 全チャンク注入（v2.6.x相当）
-                }
-                else foreach (var x in scored)
+                foreach (var x in scored)
                 {
                     perDoc.TryGetValue(x.h.Rec.FileId, out var n);
                     if (n >= 2) continue;
