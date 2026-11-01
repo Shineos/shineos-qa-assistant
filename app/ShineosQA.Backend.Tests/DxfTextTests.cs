@@ -55,6 +55,28 @@ public class DxfTextTests
         Assert.Equal("SS400", meta.Zairyo);
     }
 
+    /// <summary>29.dxf実測（2026-11-01）: 表題欄領域（X&gt;55%・Y&lt;40%）からラベルTEXTが漏れる境界ケース。
+    /// ①領域外の「Material SS400」で材質が取れず「材質は登録なし」になった ②領域内のゆるい一致が
+    /// 規格参照「JIS B 0405」を図番と誤認 ③「REV B」の頭文字「V」を改訂と誤認 —— の3点の回帰防止</summary>
+    [Fact]
+    public void TitleBlock_OutOfRegionLabels_FilledAndZubanOverride()
+    {
+        // ページ: 幅150×高さ40。領域は X>82.5・Y<16 → 領域内は (150,10) と (150,0) のみ
+        var runs = new List<PdfTextRun>
+        {
+            new("Zuban ST-1042A", 1, 150f, 30f, 30f, 4f),          // 領域外（Y=30）
+            new("Material SS400", 1, 150f, 20f, 30f, 4f),          // 領域外（Y=20）
+            new("TITLE サポートブラケット", 1, 150f, 40f, 40f, 4f), // 領域外（Y=40）
+            new("REV B", 1, 150f, 10f, 12f, 4f),                   // 領域内
+            new("Note 公差は JIS B 0405 による", 1, 150f, 0f, 45f, 4f), // 領域内（ゆるい一致の誤認源）
+        };
+        var meta = DrawingIngest.ExtractTitleBlock(runs, 150f, 40f);
+        Assert.Equal("ST-1042A", meta.ZubanRaw);        // JISB0405（規格参照の誤認）ではなくラベル付きを採用
+        Assert.Equal("サポートブラケット", meta.Hinmei);  // 領域外のTITLEラベルから補完
+        Assert.Equal("SS400", meta.Zairyo);             // 領域外のMATERIALラベルから補完
+        Assert.Equal("B", meta.Revision);               // 「REV B」→「V」誤認の修正
+    }
+
     [Fact]
     public void Dwg_IsRejectedWithGuidance()
     {

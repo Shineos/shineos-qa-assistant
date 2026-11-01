@@ -105,16 +105,17 @@ public static partial class DrawingIngest
         // DXF等で表題欄領域（X>55%・Y<40%）からラベルTEXTが漏れる実測（2026-11-01: 29.dxfの
         // 「Material SS400」がY境界の外で材質が取れず、決定論回答が「材質は登録なし」になった）→
         // 欠けた欄は図面全体のrunsから同じラベル照合で補完する。表題欄ラベルは図面の他の場所には
-        // 出ないため誤抽出リスクは低く、妥当性検証（材質トークン・尺度パターン等）は既存のまま適用
-        if (hinmei == null || zairyo == null || scale == null || revision == null || approvedAt == null)
-        {
-            var allLines = ToLines(runs.ToList(), yTol);
-            hinmei ??= ValueAfterLabel(allLines, "品名", "名称", "TITLE");
-            zairyo ??= ValueAfterLabel(allLines, "材質", "材料", "MATERIAL");
-            scale ??= ValueAfterLabel(allLines, "縮尺", "尺度", "SCALE");
-            revision ??= RevisionOf(allLines, zuban);
-            approvedAt ??= ValueAfterLabel(allLines, "承認", "日付", "DATE");
-        }
+        // 出ないため誤抽出リスクは低く、妥当性検証（材質トークン・尺度パターン等）は既存のまま適用。
+        // 図番は領域内の「ゆるい一致」が規格参照（JIS B 0405 等）を図番と誤認した実測のため、
+        // 図面全体からの**ラベル照合**（図番/品番/Zuban/DWG）で上書きする（ラベル付きが最も信頼できる）
+        var allLines = ToLines(runs.ToList(), yTol);
+        var labeledZuban = FindZubanByLabel(allLines);
+        if (!string.IsNullOrEmpty(labeledZuban)) zuban = labeledZuban;
+        hinmei ??= ValueAfterLabel(allLines, "品名", "名称", "TITLE");
+        zairyo ??= ValueAfterLabel(allLines, "材質", "材料", "MATERIAL");
+        scale ??= ValueAfterLabel(allLines, "縮尺", "尺度", "SCALE");
+        revision ??= RevisionOf(allLines, zuban);
+        approvedAt ??= ValueAfterLabel(allLines, "承認", "日付", "DATE");
         return new DrawingMeta(
             ZubanRaw: zuban,
             Hinmei: IsPlausibleHinmei(hinmei) ? hinmei : null,
@@ -209,12 +210,29 @@ public static partial class DrawingIngest
 
     private static string? FindZuban(List<string> lines)
     {
-        // ラベル行（図番/No./DWG）の同じ行または直後2行の図番パターン → なければ領域全体の最初の一致。
+        // ラベル行（図番/品番/Zuban/No./DWG）の同じ行または直後2行の図番パターン → なければ領域全体の最初の一致。
         // OCRは「ST-7789B」を「ST -7789B」のように語間に空白を挟むことがあるため、
         // 空白を除いた行でも照合する（図番に空白は含まれないので除去照合は安全）
+        var labeled = FindZubanByLabel(lines);
+        if (labeled != null) return labeled;
+        foreach (var line in lines)
+        {
+            var m = ZubanRegex().Match(line);
+            if (m.Success) return m.Value;
+            m = ZubanRegex().Match(line.Replace(" ", "").Replace("\u3000", ""));
+            if (m.Success) return m.Value;
+        }
+        return null;
+    }
+
+    /// <summary>図番ラベル（図番/品番/Zuban/Drawing No/DWG/No.）の付いた行とその直後2行だけから
+    /// 図番を探す（領域外補完で使う。規格参照「JIS B 0405」等を図番と誤認するゆるい一致を避ける
+    /// 実測2026-11-01のため、ラベル無しの一致は返さない）</summary>
+    private static string? FindZubanByLabel(List<string> lines)
+    {
         for (int i = 0; i < lines.Count; i++)
         {
-            if (System.Text.RegularExpressions.Regex.IsMatch(lines[i], @"図番|Drawing\s*No|DWG|No\."))
+            if (System.Text.RegularExpressions.Regex.IsMatch(lines[i], @"図番|品番|Zuban|Drawing\s*No|DWG|No\.", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 for (int j = i; j < Math.Min(i + 3, lines.Count); j++)
                 {
                     var m = ZubanRegex().Match(lines[j]);
@@ -222,13 +240,6 @@ public static partial class DrawingIngest
                     m = ZubanRegex().Match(lines[j].Replace(" ", "").Replace("\u3000", ""));
                     if (m.Success) return m.Value;
                 }
-        }
-        foreach (var line in lines)
-        {
-            var m = ZubanRegex().Match(line);
-            if (m.Success) return m.Value;
-            m = ZubanRegex().Match(line.Replace(" ", "").Replace("\u3000", ""));
-            if (m.Success) return m.Value;
         }
         return null;
     }
@@ -261,13 +272,16 @@ public static partial class DrawingIngest
     {
         // 改訂ラベル行の末尾1文字（A-Z）。図番末尾のサフィックス(A)は改訂と紛らわしいので、
         // ラベルによる取り出しを優先し、なければ「改訂」表記の隣接1文字のみを採用。
-        // 空白除去の照合は ValueAfterLabel と同じ理由（OCRの字間空白対策）
+        // 空白除去の照合は ValueAfterLabel と同じ理由（OCRの字間空白対策）。
+        // 「REV」は3文字のため、スキップ長をラベル長に合わせる（idx+2固定だと「REV B」の
+        // 頭文字「V」を改訂と誤認する実測2026-11-01）
         foreach (var line in lines)
         {
             var idx = line.IndexOf("改訂", StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) idx = line.IndexOf("REV", StringComparison.OrdinalIgnoreCase);
+            var labelLen = 2;
+            if (idx < 0) { idx = line.IndexOf("REV", StringComparison.OrdinalIgnoreCase); labelLen = 3; }
             if (idx < 0) continue;
-            var value = line[(idx + 2)..].Trim(' ', ':', '：', '\u3000');
+            var value = line[(idx + labelLen)..].Trim(' ', ':', '：', '\u3000');
             var m = System.Text.RegularExpressions.Regex.Match(value, "^[A-Z]");
             if (m.Success) return m.Value;
         }
@@ -275,9 +289,10 @@ public static partial class DrawingIngest
         {
             var flat = line.Replace(" ", "").Replace("\u3000", "");
             var idx = flat.IndexOf("改訂", StringComparison.OrdinalIgnoreCase);
-            if (idx < 0) idx = flat.IndexOf("REV", StringComparison.OrdinalIgnoreCase);
+            var labelLen = 2;
+            if (idx < 0) { idx = flat.IndexOf("REV", StringComparison.OrdinalIgnoreCase); labelLen = 3; }
             if (idx < 0) continue;
-            var value = flat[(idx + 2)..].Trim(':', '：');
+            var value = flat[(idx + labelLen)..].Trim(':', '：');
             var m = System.Text.RegularExpressions.Regex.Match(value, "^[A-Z]");
             if (m.Success) return m.Value;
         }
