@@ -966,7 +966,12 @@ public sealed class ChatFlow
             // 日本語質問）は英数アンカーを持たないため本免除の対象外
             bool alnumAnchor = chosen.Any(h => qTokens.Any(t =>
                 t.Length >= 2 && t.All(char.IsAsciiLetterOrDigit) && h.Rec.Tokens.Contains(t)));
-            if (!fullContext && !canonicalEvidence && !alnumAnchor && Rag.IsLowConfidenceWeak(rerankTop1, maxKw, rerankValidated)
+            // QA見出し一致の救済（v2.7.1・t25型の根本対策）: 正解QAチャンクのリランカースコアが
+            // 閾値(-5.0)を跨ぐ揺らぎ（実測: 連絡先質問でQA_listチャンク kw=0.61・top1=-5.86→誤拒否）。
+            // 文書の見出しが質問に一致する（QaHeadingMismatch=false）ことは当該チャンクが根拠である
+            // ことの強いシグナルのため、低信頼ガードの前にQA形式チャンクの見出し照合で救済する
+            bool qaHeadingRescue = chosen.Any(h => Rag.IsQaFormatChunk(h.Rec.Text) && !Rag.QaHeadingMismatch(message, h.Rec.Text));
+            if (!fullContext && !canonicalEvidence && !alnumAnchor && !qaHeadingRescue && Rag.IsLowConfidenceWeak(rerankTop1, maxKw, rerankValidated)
                 && string.IsNullOrEmpty(webContext) && !timeSensitive && !Rag.HasDrawingIntent(message))
             {
                 _log.Info($"low-conf guard: rerankTop1={rerankTop1:F2} kw={maxKw:F2} canon={(chosen.Count > 0 ? chosen.Max(h => h.Canonical) : 0)} — 該当なし拒否へ（偽出典防止）: {Truncate(message, 40)}");
