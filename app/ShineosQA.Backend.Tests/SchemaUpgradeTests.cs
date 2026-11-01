@@ -139,8 +139,8 @@ public class SchemaUpgradeTests : IDisposable
     public void V4Database_MigratesToCurrent_AndPreservesAllData()
     {
         using var db = new Db(_dbPath);
-        // v4（2.6.2）から現行スキーマ（v6・files.hit_count/enabled追加）へ移行する
-        Assert.Equal(6, db.GetSchemaVersion());
+        // v4（2.6.2）から現行スキーマ（v7・answer_cache.raw_emb追加）へ移行する
+        Assert.Equal(7, db.GetSchemaVersion());
         // v5の新テーブルが作られている
         Assert.Equal(0L, Convert.ToInt64(db.Scalar("SELECT COUNT(*) FROM jisseki_colmap")));
         Assert.Equal(0L, Convert.ToInt64(db.Scalar("SELECT COUNT(*) FROM faq_candidates")));

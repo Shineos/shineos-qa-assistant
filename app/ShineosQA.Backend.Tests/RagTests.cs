@@ -1006,3 +1006,33 @@ public class RagPlainSnippetTests
         Assert.Equal(new string('あ', 10) + "…", r);
     }
 }
+
+/// <summary>回答キャッシュの質問一致判定（生質問埋め込み・2026-11-01実測の誤ヒット対策）</summary>
+public class RagCacheQuestionMatchTests
+{
+    [Fact]
+    public void HighCosine_Paraphrase_Hit()
+    {
+        // 言い換えペア（実測0.97〜0.99）は生質問の埋め込みでヒット（合成ベクトルcos≈0.999）
+        var a = new float[] { 0.995f, 0.1f };
+        var b = new float[] { 0.99f, 0.14f };
+        Assert.True(Rag.CacheQuestionMatch(b, "国内出張の日当はいくらですか", "国内出張の日当は1日あたりいくらですか", a));
+    }
+
+    [Fact]
+    public void LowerCosine_DangerousPair_Miss()
+    {
+        // 危険ペア（実測0.93・国内/海外で答えが違う）は閾値未満でヒットしない（合成ベクトルcos≈0.96）
+        var a = new float[] { 0.995f, 0.1f };
+        var b = new float[] { 0.93f, 0.37f };
+        Assert.False(Rag.CacheQuestionMatch(b, "国内出張の日当はいくらですか", "海外出張の日当はいくらですか", a));
+    }
+
+    [Fact]
+    public void LegacyRow_ExactNormalizedQuestion_Only()
+    {
+        // 旧行（raw_emb無し）は正規化質問の完全一致でのみ許可
+        Assert.True(Rag.CacheQuestionMatch(null, "国内出張の日当はいくらですか?", "国内出張の日当はいくらですか", null));
+        Assert.False(Rag.CacheQuestionMatch(null, "国内出張の日当はいくらですか", "海外出張の日当はいくらですか", null));
+    }
+}

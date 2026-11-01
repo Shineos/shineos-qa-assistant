@@ -26,7 +26,7 @@ public sealed class ChatFlow
     private readonly object _cacheLock = new();
     private List<CacheEntry> _cache = new();
 
-    private sealed record CacheEntry(string Question, string Answer, string SourcesJson, float[] Emb, string Model, long Id);
+    private sealed record CacheEntry(string Question, string Answer, string SourcesJson, float[] Emb, string Model, long Id, float[]? RawEmb);
 
     public ChatFlow(AppConfig cfg, Db db, Supervisor sup, LlmGateway gw, ChunkIndex index, WebSearch web, ILogger log, Diagnostics diag)
     {
@@ -44,9 +44,10 @@ public sealed class ChatFlow
     private void LoadCache()
     {
         lock (_cacheLock)
-            _cache = _db.Query("SELECT id, question, answer, sources_json, emb, model FROM answer_cache ORDER BY id DESC LIMIT 2000")
+            _cache = _db.Query("SELECT id, question, answer, sources_json, emb, model, raw_emb FROM answer_cache ORDER BY id DESC LIMIT 2000")
                 .Select(r => new CacheEntry((string)r["question"]!, (string)r["answer"]!, (string?)r["sources_json"] ?? "[]",
-                    ChunkIndex.BytesToFloats((byte[])r["emb"]!), (string?)r["model"] ?? "", (long)r["id"]!)).ToList();
+                    ChunkIndex.BytesToFloats((byte[])r["emb"]!), (string?)r["model"] ?? "", (long)r["id"]!,
+                    r["raw_emb"] is byte[] re ? ChunkIndex.BytesToFloats(re) : null)).ToList();
     }
 
     /// <summary>回答キャッシュ全消去（プロンプト変更後の再生成・開発用）</summary>
@@ -521,16 +522,24 @@ public sealed class ChatFlow
             // 日本語質問×英語図面/規格に備え、用語の英語別名をクエリへ足す（意味は変えない。
             // 例: 「駐車場の料金」→「… parking fee」）。キーワード・プロンプトは元質問のまま。
             var qEmb = (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { MfgTerms.ExpandQuery(queryForRetrieval) }, ctx.RequestAborted))[0];
+            // 回答キャッシュ用の生質問（展開前）の埋め込み: 展開済みの埋め込みは別名テールで
+            // 近似質問（国内/海外の日当等・答えが違う）まで0.97超えになり誤ヒットした実測のため
+            float[]? qEmbRaw = timeSensitive || nonJa ? null
+                : (await _gw.EmbedAsync(_cfg.EnginePortEmb, new[] { message }, ctx.RequestAborted))[0];
             tEmbed = sw.ElapsedMilliseconds;
 
-            // 2) 回答キャッシュ（cos>=0.97 → 即時）。LLM未ロードでも返せるのでEnsureLlmより前に置く
+            // 2) 回答キャッシュ（生質問の埋め込み cos>=0.97 → 即時。旧行は正規化質問の完全一致）。
+            // LLM未ロードでも返せるのでEnsureLlmより前に置く
             // 日付感応質問（「今日は何日」等）は正解が日付で変わるためキャッシュから読まない。
             // 多言語回答は言語別キャッシュを持たないためキャッシュ対象外（日本語回答の混在防止）
             if (!timeSensitive && !nonJa)
             lock (_cacheLock)
             {
-                // モデル別キャッシュ: 別階級で生成した回答を返さない（モデル識別列で判定）
-                var hit = _cache.FirstOrDefault(c => c.Model == _cfg.ChatModelFile && Rag.Cosine(qEmb, c.Emb) >= Rag.AnswerCacheCos);
+                // モデル別キャッシュ: 別階級で生成した回答を返さない（モデル識別列で判定）。
+                // 複数候補はcosine最大側を採用（旧FirstOrDefaultは新着優先で誤ヒットの恐れ）
+                var hit = _cache.Where(c => c.Model == _cfg.ChatModelFile && Rag.CacheQuestionMatch(c.RawEmb, c.Question, message, qEmbRaw))
+                    .OrderByDescending(c => c.RawEmb == null || qEmbRaw == null ? 1.0 : Rag.Cosine(qEmbRaw, c.RawEmb))
+                    .FirstOrDefault();
                 if (hit != null)
                 {
                     _db.Exec("UPDATE answer_cache SET hits=hits+1 WHERE id=$i", ("$i", hit.Id));
@@ -1505,12 +1514,12 @@ public sealed class ChatFlow
             {
                 // 保存本文は finalText（出典行削除後）に統一（Phase 1.2修正）: 旧実装は出典行を含む
                 // collapsedText を保存していたため、キャッシュヒット時だけ本文に出典行が復活していた。
-                _db.Exec("INSERT INTO answer_cache(question, answer, sources_json, emb, model) VALUES($q,$a,$s,$e,$m)",
-                    ("$q", message), ("$a", finalText), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile));
+                _db.Exec("INSERT INTO answer_cache(question, answer, sources_json, emb, model, raw_emb) VALUES($q,$a,$s,$e,$m,$re)",
+                    ("$q", message), ("$a", finalText), ("$s", sourcesJson), ("$e", ChunkIndex.FloatsToBytes(qEmb)), ("$m", _cfg.ChatModelFile), ("$re", qEmbRaw == null ? (object)DBNull.Value : ChunkIndex.FloatsToBytes(qEmbRaw)));
                 // メモリ側のIdをDBの実IDに合わせる（Phase 1.2修正）: 0固定ではヒット時の
                 // UPDATE answer_cache SET hits=hits+1 が不発になっていた
                 var cacheId = _db.LastInsertId();
-                lock (_cacheLock) _cache.Insert(0, new CacheEntry(message, finalText, sourcesJson, qEmb, _cfg.ChatModelFile, cacheId));
+                lock (_cacheLock) _cache.Insert(0, new CacheEntry(message, finalText, sourcesJson, qEmb, _cfg.ChatModelFile, cacheId, qEmbRaw));
             }
             var totalMs = sw.ElapsedMilliseconds;
             await Sse(ctx, "done", new

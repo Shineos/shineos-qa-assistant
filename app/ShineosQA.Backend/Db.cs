@@ -11,7 +11,7 @@ public sealed class Db : IDisposable
     /// 3=FAQ（現場の正解）＋別名（Phase B）、4=回答フィードバック（Phase F）、
     /// 5=実績列マッピングの手動上書き＋FAQ候補（フィードバック→採用フロー）。マイグレーションを追加したら
     /// この値を上げ、下の適用ブロックも更新する</summary>
-    public const int SchemaVersion = 6;
+    public const int SchemaVersion = 7;
 
     private readonly SqliteConnection _conn;
     private readonly object _lock = new();
@@ -165,6 +165,10 @@ public sealed class Db : IDisposable
         // スキーマv6
         try { Exec("ALTER TABLE files ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0"); } catch { }
         try { Exec("ALTER TABLE files ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"); } catch { }
+        // 回答キャッシュの質問一致を生質問の埋め込みに修正（v2.7.1）: 展開済みクエリの埋め込みでは
+        // 「国内/海外出張の日当」のような答えが違う近似質問まで誤ヒットする実測のため、
+        // 生質問の埋め込みを別列で保持する（旧行はNULL＝正規化質問の完全一致でのみ許可）
+        try { Exec("ALTER TABLE answer_cache ADD COLUMN raw_emb BLOB"); } catch { }
         // スキーマ版管理（Phase 0.2）: 1行のみ保持し、コード側の現行版との差で将来のマイグレーションを判定できる。
         // 適用は「記録が古い場合のみ更新」する upsert（現行版を記録するだけ。DOWNは扱わない）
         Exec("""

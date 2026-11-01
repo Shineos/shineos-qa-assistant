@@ -8,7 +8,7 @@ namespace ShineosQA.Backend;
 public static partial class Rag
 {
     public const double GuardThreshold = -5.0;      // NO-HIT判定（nohit実測≤-7.8、口語表現の関連質問が-2前後になり得るため-5.0に設定。hit誤ガード< nohit分離を両立）
-    public const double AnswerCacheCos = 0.97;      // 回答キャッシュ判定
+    public const double AnswerCacheCos = 0.97;      // 回答キャッシュ判定（生質問の埋め込みに対する閾値）
     public const int SnippetMaxChars = 240;         // 事実切断を防ぐ関連文中心スニペット
     public const int RerankPool = 8;                // top8未満だと関連chunkが候補外に漏れる（実測）
     public const double RerankSkipCos = 0.62;       // 高信頼ショートカット: ベクトル一致が強ければリランク(~2秒)を省略
@@ -259,6 +259,20 @@ public static partial class Rag
         var s = System.Text.RegularExpressions.Regex.Replace(string.Join(" ", parts), @"\s{2,}", " ").Trim();
         if (s.Length > maxLen) s = s[..maxLen] + "…";
         return s;
+    }
+
+    /// <summary>回答キャッシュの質問一致判定（v2.7.1）: 生質問（同義語展開**前**）の埋め込み類似で判定する。
+    /// 旧実装は検索用の展開済みクエリ（別名テール追加）の埋め込みを使っていたため、
+    /// 「国内出張の日当」と「海外出張の日当」のような**答えが違う近似質問**まで0.97超えで
+    /// 誤ヒットし、別質問の回答を返す事故になった（2026-11-01・インストール版テストで実測:
+    /// 海外の質問に国内の1,500円回答）。生質問同士なら危険ペア0.93 / 正当な言い換え0.97-0.99で
+    /// 清楚に分離する（実測）。旧キャッシュ行（raw_emb無し）は正規化質問の完全一致でのみ許可
+    /// （純関数・テスト直接検証）</summary>
+    public static bool CacheQuestionMatch(float[]? cachedRawEmb, string cachedQuestion, string rawQuestion, float[] rawEmb)
+    {
+        if (cachedRawEmb == null || rawEmb == null)
+            return QuestionNorm.Normalize(cachedQuestion) == QuestionNorm.Normalize(rawQuestion);
+        return Cosine(rawEmb, cachedRawEmb) >= AnswerCacheCos;
     }
 
     /// <summary>非連続の完全重複行を除去（v2.7.0・下書き単発生成のブロック反復対策）。
