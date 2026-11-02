@@ -81,6 +81,8 @@
 | [![図面QA](assets/screenshots/app-05-drawing.png)](assets/screenshots/app-05-drawing.png) | **図面QA**。図番で質問すると、表題欄の情報（材質・品名・改訂）を出典付きで回答します |
 | [![図面QA-品名](assets/screenshots/app-09-drawing-hinmei.png)](assets/screenshots/app-09-drawing-hinmei.png) | **図面QA（表記ゆれ・全角に対応）**。小文字「st1042a」・全角「ＳＴ－１０４２Ａ」のような表記の違いでも同じ図面に届きます |
 | [![図面QA-検査基準](assets/screenshots/app-10-drawing-kijun.png)](assets/screenshots/app-10-drawing-kijun.png) | **図面×検査基準書の横断QA**。「ST-1042Aの検査基準は？」に、検査基準書の項目を末尾まで漏らさず回答 |
+| [![キャプチャ検索](assets/screenshots/app-12-capture-search.png)](assets/screenshots/app-12-capture-search.png) | **画面キャプチャから検索**。図面の表題欄をスクリーンショット（Win+Shift+S）して貼り付けるだけで、AIが図番（ST-1042A）を読み取って質問を作ります。キャプチャ画像も発言に残ります |
+| [![キャプチャ検索-回答](assets/screenshots/app-13-capture-answer.png)](assets/screenshots/app-13-capture-answer.png) | **キャプチャ→回答**。読み取った図番で検索し、検査基準を末尾まで漏らさず回答（思考中は「関連文書を選択中…」と作業状況が一行で流れます） |
 | [![ナレッジ管理](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **ナレッジ管理**。社内文書（PDF・Word・Markdown・テキスト）をドラッグ＆ドロップで登録・確認。図面は表題欄の情報（図番・品名・材質・改訂）を自動抽出し、検索回数の確認や検索対象のON/OFFも行えます |
 | [![モデル選択](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **モデル選択**。⚡クイック（1.7B）／🎯標準（4B）／🏆高品質（30B）をその場で切替。未DLのモデルはここからDLできます |
 
