@@ -79,8 +79,28 @@
 | [![メイン画面](assets/screenshots/app-01-main.png)](assets/screenshots/app-01-main.png) | **メイン画面**。デスクトップのアイコンから起動すると約2秒で開きます（URL入力不要） |
 | [![出典付き回答](assets/screenshots/app-02-chat.png)](assets/screenshots/app-02-chat.png) | **出典付きの回答**。回答の根拠（文書名・該当箇所）が一緒に表示され、左の履歴から過去のQ&Aを再表示できます |
 | [![図面QA](assets/screenshots/app-05-drawing.png)](assets/screenshots/app-05-drawing.png) | **図面QA**。図番で質問すると、表題欄の情報（材質・品名・改訂）を出典付きで回答します |
-| [![ナレッジ管理](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **ナレッジ管理**。社内文書（PDF・Word・Markdown・テキスト）をドラッグ＆ドロップで登録・確認 |
+| [![図面QA-品名](assets/screenshots/app-09-drawing-hinmei.png)](assets/screenshots/app-09-drawing-hinmei.png) | **図面QA（表記ゆれ・全角に対応）**。小文字「st1042a」・全角「ＳＴ－１０４２Ａ」のような表記の違いでも同じ図面に届きます |
+| [![図面QA-検査基準](assets/screenshots/app-10-drawing-kijun.png)](assets/screenshots/app-10-drawing-kijun.png) | **図面×検査基準書の横断QA**。「ST-1042Aの検査基準は？」に、検査基準書の項目を末尾まで漏らさず回答 |
+| [![ナレッジ管理](assets/screenshots/app-03-knowledge.png)](assets/screenshots/app-03-knowledge.png) | **ナレッジ管理**。社内文書（PDF・Word・Markdown・テキスト）をドラッグ＆ドロップで登録・確認。図面は表題欄の情報（図番・品名・材質・改訂）を自動抽出し、検索回数の確認や検索対象のON/OFFも行えます |
 | [![モデル選択](assets/screenshots/app-04-models.png)](assets/screenshots/app-04-models.png) | **モデル選択**。⚡クイック（1.7B）／🎯標準（4B）／🏆高品質（30B）をその場で切替。未DLのモデルはここからDLできます |
+
+### 図面QAの品質検証結果（10問 / 10問正答）
+
+DXF・PDF図面の取り込み〜検索〜回答の品質を、10シナリオで自動検証しています（2026-11-02実測・クイック1.7B）:
+
+| シナリオ | 結果 | 検証内容 |
+|------|------|------|
+| 図番完全一致（材質） | ✅ 正答 | 「ST-1042Aの材質は？」→ **SS400**（決定論ルート・約3〜243msで即答） |
+| 表記ゆれ小文字（改訂） | ✅ 正答 | 「st1042aの改訂は？」→ **改訂 B** |
+| 全角図番（品名） | ✅ 正答 | 「ＳＴ－１０４２Ａの品名は？」→ **サポートブラケット** |
+| 品名から図番 | ✅ 正答 | 「サポートブラケットの図番は？」→ **ST-1042A** |
+| 図面×検査基準書の横断 | ✅ 正答 | 検査基準書の項目を**末尾（改訂Bの追試）まで漏らさず**回答 |
+| 図面の注記 | ✅ 正答 | 注記（JIS公差・バリ取り）を回答 |
+| 存在しない図番 | ✅ 正答 | 「ZZ-9999」→ 該当なし（捏造しない） |
+| 一般知識の質問 | ✅ 正答 | 「富士山の高さ」→ 該当なし（社内KB外と正しく判定） |
+| 通常文書の回帰（公差・ピッチ） | ✅ 正答 | 図面追加が通常QAへ影響していないことを確認 |
+
+自動検証スイート: `spikes/phase0/latency-cmp/scenarios-drawing.json`（`scenario-test.ps1`で実行）
 
 ## パフォーマンス実測値（参考）
 
